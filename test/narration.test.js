@@ -8,7 +8,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { applyPronunciations } = require('../src/narration');
+const { applyPronunciations, edgeTtsAvailable } = require('../src/narration');
 
 const DICT = {
   'Anthropic': 'an-THROP-ik',
@@ -57,4 +57,19 @@ test('passthrough when no dictionary or empty text', () => {
   assert.equal(applyPronunciations('plain text', null), 'plain text');
   assert.equal(applyPronunciations('plain text', {}), 'plain text');
   assert.equal(applyPronunciations('', DICT), '');
+});
+
+test('edgeTtsAvailable returns a boolean and never throws on a missing binary', () => {
+  // The preflight must be total: whether or not edge-tts is installed, it
+  // resolves to a plain boolean so the caller can degrade to a silent video
+  // instead of crashing. We can't assert the value (host-dependent), only the
+  // contract: no throw, boolean result.
+  const orig = process.env.PATH;
+  try {
+    process.env.PATH = '/nonexistent-path-for-slidey-test';
+    assert.strictEqual(edgeTtsAvailable(), false);
+  } finally {
+    process.env.PATH = orig;
+  }
+  assert.strictEqual(typeof edgeTtsAvailable(), 'boolean');
 });

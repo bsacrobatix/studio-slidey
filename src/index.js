@@ -24,7 +24,7 @@ const os   = require('os');
 
 const { generateFrames }    = require('./renderer');
 const { framesToVideo }     = require('./assembler');
-const { generateAll: generateNarration, applyPronunciations } = require('./narration');
+const { generateAll: generateNarration, applyPronunciations, edgeTtsAvailable } = require('./narration');
 const { estimateBoundaries } = require('./timing');
 const { validateSpec }       = require('./validate');
 
@@ -826,10 +826,22 @@ async function main() {
   }
 
   // ── Narration (optional, only if any scene has a `narration` field) ────
+  //
+  // Narration is additive: a video without it still plays. So a missing TTS
+  // tool, or a TTS failure, degrades to a silent video rather than discarding
+  // every frame we just rendered. The `edge-tts` preflight reports the missing
+  // dependency once, up front, with an install hint — instead of letting an
+  // ENOENT surface as a fatal stack trace after the render is already done.
   let audioSegments = null;
   const hasNarration = sceneBoundaries.some(sb => sb.narration);
   const audioDir = path.join(framesDir, 'audio');
-  if (hasNarration) {
+  if (hasNarration && !edgeTtsAvailable()) {
+    console.warn(
+      '[slidey] ⚠ narration skipped — `edge-tts` not found on PATH. ' +
+      'Rendering a SILENT video.\n' +
+      '          Install it to enable narration:  pip install edge-tts'
+    );
+  } else if (hasNarration) {
     console.log('[slidey] Generating narration audio…');
     try {
       audioSegments = generateNarration(
@@ -838,9 +850,12 @@ async function main() {
         audioDir,
       );
     } catch (err) {
-      console.error(`[slidey] ERROR during narration: ${err.message}`);
-      if (!keepFrames && ownFramesDir) fs.rmSync(framesDir, { recursive: true, force: true });
-      process.exit(1);
+      // Don't throw away a good render over narration: warn and assemble silent.
+      console.warn(
+        `[slidey] ⚠ narration failed (${err.message}) — ` +
+        'assembling a SILENT video from the rendered frames.'
+      );
+      audioSegments = null;
     }
   }
 

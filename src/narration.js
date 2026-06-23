@@ -23,11 +23,33 @@
 
 'use strict';
 
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const path = require('path');
 const fs   = require('fs');
 
 const DEFAULT_VOICE = 'en-AU-NatashaNeural';
+
+/**
+ * Is the `edge-tts` CLI available on PATH?
+ *
+ * Narration is additive: a render that can't reach the TTS tool should still
+ * produce a (silent) video rather than discarding every rendered frame. Callers
+ * use this for a preflight so the failure is reported once, up front, with an
+ * actionable install hint — not as an ENOENT stack trace after the frames are
+ * already rendered.
+ *
+ * @returns {boolean}
+ */
+function edgeTtsAvailable() {
+  try {
+    const r = spawnSync('edge-tts', ['--version'], { stdio: 'ignore' });
+    // status may be non-zero for an unrecognised flag on some builds; what we
+    // care about is that the binary resolved and ran (no spawn error).
+    return !r.error;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Apply phonetic respellings to spoken narration text.
@@ -162,4 +184,4 @@ function generateAll(sceneBoundaries, fps, totalFrames, narrationMeta, audioDir)
   return segments;
 }
 
-module.exports = { generateAll, generateOne, getAudioDuration, applyPronunciations, DEFAULT_VOICE };
+module.exports = { generateAll, generateOne, getAudioDuration, applyPronunciations, edgeTtsAvailable, DEFAULT_VOICE };
