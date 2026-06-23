@@ -64,6 +64,19 @@ for (const sc of spec.scenes) {
     if (field === 'src' && sc.type !== 'image') continue;
     sc[field] = embedAsset(sc[field]);
   }
+  // Embed the rrweb DOM-session log of a live `video` scene as a data URI so the
+  // single-file deck plays the tour natively offline (no fetch of a sibling
+  // *.rrweb.json). The viewer's loader (useDeck ensureRrweb) fetches sc.rrweb as
+  // a URL; a data: URL is absolute and fetch().json() parses it unchanged.
+  if (sc.type === 'video' && sc.rrweb && !/^data:/.test(sc.rrweb) && !/^https?:\/\//i.test(sc.rrweb)) {
+    const rrwebPath = resolve(specDir, sc.rrweb);
+    if (existsSync(rrwebPath)) {
+      sc.rrweb = `data:application/json;base64,${readFileSync(rrwebPath).toString('base64')}`;
+      embeddedAssets++;
+    } else {
+      console.warn(`[build-single] WARNING: rrweb log not found, leaving reference as-is: ${sc.rrweb}`);
+    }
+  }
   if (sc.type === 'image-compare') {
     if (sc.left && sc.left.src) sc.left.src = embedAsset(sc.left.src, sc.left.src);
     if (sc.right && sc.right.src) sc.right.src = embedAsset(sc.right.src, sc.right.src);
