@@ -17,6 +17,11 @@ import RrwebPlayer from '../rrweb/RrwebPlayer.vue';
 const scene = computed(() => store.scene || {});
 const embedded = computed(() => scene.value.mode === 'embedded');
 const hasRrweb = computed(() => (store.rrwebEvents || []).length >= 2);
+// Embedded tour scenes should play the moment the scene becomes active (the
+// component remounts per scene, so mount == activation) — otherwise the tour
+// sits frozen on its first frame until the viewer hits play. Default on; a
+// scene can opt out with `autoplay: false`.
+const autoplay = computed(() => scene.value.autoplay !== false);
 </script>
 
 <template>
@@ -25,7 +30,7 @@ const hasRrweb = computed(() => (store.rrwebEvents || []).length >= 2);
       <div v-if="embedded" class="video-eyebrow" v-show="scene.eyebrow">{{ scene.eyebrow }}</div>
       <div v-if="embedded" class="video-title" v-show="scene.title">{{ scene.title }}</div>
       <div class="video-frame" :class="{ embedded }">
-        <RrwebPlayer :events="store.rrwebEvents" :chapters="store.rrwebChapters" />
+        <RrwebPlayer :events="store.rrwebEvents" :chapters="store.rrwebChapters" :autoplay="autoplay" />
       </div>
       <div v-if="embedded" class="video-caption" v-show="scene.caption">{{ scene.caption }}</div>
     </template>
