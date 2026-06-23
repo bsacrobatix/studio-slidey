@@ -91,6 +91,22 @@ test('cards grid variant reveals one item per card', () => {
     + TIMING.cards_hold + TIMING.inter_scene);
 });
 
+// Regression: the estimator's per-item reveal cost MUST match what the renderer
+// actually holds (renderer.js setState: `TIMING[stepName] ?? 20`). A grid cards
+// scene with more items than the table has `cards_item_N` keys (0..5) used to
+// drift — the renderer held the generic fallback (20 frames) for cards_item_6+,
+// while the estimator counted 30. estimateScene must stay in lock-step with the
+// real reveal sequence, so narration timing for >6-item grids stays exact.
+test('cards grid item reveals match the renderer per-item hold beyond the table', () => {
+  const eight = [{}, {}, {}, {}, {}, {}, {}, {}];
+  const f = estimateScene({ type: 'cards', cards: eight });
+  // Mirror the renderer: one cards_item_<i> setState per card, each holding
+  // TIMING['cards_item_'+i] ?? 20 frames (the renderer's generic fallback).
+  let reveal = 0;
+  for (let i = 0; i < eight.length; i++) reveal += TIMING[`cards_item_${i}`] ?? 20;
+  assert.equal(f, reveal + TIMING.cards_hold + TIMING.inter_scene);
+});
+
 test('table clamps revealed rows to MAX_ROWS (8)', () => {
   const rows = Array.from({ length: 20 }, (_, i) => i);
   const f = estimateScene({ type: 'table', rows });

@@ -327,7 +327,11 @@ function estimateScene(scene, opts = {}) {
       const n = (v === 'qa' || twoCol) ? 2 : (scene.cards || []).length;
       let f = 0;
       if (scene.title) f += T.cards_title;
-      for (let i = 0; i < n; i++) f += T[`cards_item_${i}`] ?? 30;
+      // Items beyond cards_item_5 have no table key; the renderer's setState
+      // holds the generic fallback (20 frames, see renderer.js), so the estimate
+      // must use the same 20 to stay in lock-step with the real reveal sequence
+      // for >6-item grids (otherwise narration desyncs by 10f per extra card).
+      for (let i = 0; i < n; i++) f += T[`cards_item_${i}`] ?? 20;
       if (scene.caption) f += T.cards_caption;
       f += scene.hold ?? T.cards_hold ?? T.thread_hold;
       f += T.inter_scene;
