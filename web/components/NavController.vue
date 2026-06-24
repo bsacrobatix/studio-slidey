@@ -83,6 +83,14 @@ onUnmounted(() => {
   background: linear-gradient(180deg, transparent, rgba(13,17,23,0.85));
   pointer-events: none;
 }
+/* While a video scene is expanded to fullscreen (VideoScene sets this body flag),
+   relocate the HUD to the TOP so its bar can't collide with the player's transport
+   at the bottom of the video. The gradient flips to fade downward from the top. */
+body.slidey-video-full .slidey-hud {
+  top: 0;
+  bottom: auto;
+  background: linear-gradient(0deg, transparent, rgba(13,17,23,0.92));
+}
 .slidey-progress { display: flex; gap: 8px; }
 .slidey-scene { color: #58a6ff; }
 .slidey-sep { color: #484f58; }
