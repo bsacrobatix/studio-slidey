@@ -33,6 +33,17 @@ test('schema accepts a cast scene referencing meta.personas by id', () => {
   assert.equal(r.valid, true);
 });
 
+test('schema accepts an image avatar (logo data-URI) on a persona', () => {
+  const r = validateSpec(deck({
+    type: 'personas', variant: 'cast', personas: ['pm', 'dev'],
+  }, { personas: [
+    { id: 'pm', name: 'Priya', glyph: '🧭' },
+    { id: 'dev', name: 'Devin', color: '#3fb950', avatar: 'data:image/svg+xml,%3Csvg%2F%3E' },
+  ] }));
+  assert.deepEqual(r.errors, []);
+  assert.equal(r.valid, true);
+});
+
 test('schema accepts inline persona objects in a cast scene', () => {
   const r = validateSpec(deck({
     type: 'personas', variant: 'cast',
