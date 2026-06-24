@@ -2,12 +2,21 @@
 // Manual click-through controller: keyboard + click navigation, plus a progress
 // readout. Wraps a deck created by useDeck(). No audio, no autoplay (v1 scope).
 import { onMounted, onUnmounted } from 'vue';
+import { store } from '../store.js';
 
 const props = defineProps({ deck: { type: Object, required: true } });
 const s = props.deck.state;
 
 function onKey(e) {
   if (e.target.closest && e.target.closest('.slidey-editor')) return;
+  // On a video scene, Left/Right always move the SLIDE — even while the player's
+  // scrub control or the <video> element has focus (which would otherwise seek
+  // the media). preventDefault suppresses that default so only the deck advances.
+  if (store.sceneType === 'video' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    e.preventDefault();
+    if (e.key === 'ArrowRight') props.deck.next(); else props.deck.prev();
+    return;
+  }
   if (e.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
   switch (e.key) {
     case 'ArrowRight': case ' ': case 'PageDown': case 'Enter':
@@ -24,6 +33,9 @@ function onClick(e) {
   if (e.target.closest('.slidey-hud')) return;
   if (e.target.closest('.slidey-sidebar')) return;
   if (e.target.closest('.slidey-editor')) return;
+  // Clicks on the video player / its transport (play, scrub, grab) must not also
+  // advance the slide, so the controls are actually usable.
+  if (e.target.closest('.video-cine-holder')) return;
   if (e.clientX < window.innerWidth / 3) props.deck.prev();
   else props.deck.next();
 }
