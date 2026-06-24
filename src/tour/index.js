@@ -22,13 +22,16 @@ const { captureTourRrweb } = require('./rrweb-capture');
 const { writeChapters } = require('./chapters');
 const { buildEnvelope, writeEnvelope } = require('../rrweb-format');
 const { framesToVideo } = require('../assembler');
+const { registerAdapter, resolveAdapter } = require('./adapters');
 
 /**
  * Capture a tour spec to an MP4 + chapter sidecar.
  *
  * @param {object} tour       Parsed tour spec (see capture.js).
  * @param {string} outMp4     Destination .mp4 path.
- * @param {object} opts       { fps=30, pace, framesDir?, keepFrames?, onProgress? }
+ * @param {object} opts       { fps=30, pace, framesDir?, keepFrames?, onProgress?, adapter? }
+ *                            `adapter` is an adapter OBJECT (or registered name);
+ *                            absent → the tour's `adapter` field → `dom` default.
  * @returns {Promise<{ mp4, sidecar, frameCount, chapters }>}
  */
 async function captureToVideo(tour, outMp4, opts = {}) {
@@ -40,7 +43,7 @@ async function captureToVideo(tour, outMp4, opts = {}) {
 
   try {
     const { frameCount, chapters } = await captureTour(tour, framesDir, {
-      fps, pace: opts.pace, onProgress: opts.onProgress,
+      fps, pace: opts.pace, onProgress: opts.onProgress, adapter: opts.adapter,
     });
     if (frameCount === 0) throw new Error('tour produced no frames (no steps?)');
 
@@ -60,12 +63,13 @@ async function captureToVideo(tour, outMp4, opts = {}) {
  *
  * @param {object} tour    Parsed tour spec (see capture.js).
  * @param {string} outPath Destination `.rrweb.json` path.
- * @param {object} opts    { pace, mask?, onProgress? }
+ * @param {object} opts    { pace, mask?, onProgress?, adapter? }
+ *                         `adapter` is an adapter OBJECT (or registered name).
  * @returns {Promise<{ rrweb, sidecar, eventCount, chapters, durationMs }>}
  */
 async function captureToRrweb(tour, outPath, opts = {}) {
   const { events, chapters, viewport } = await captureTourRrweb(tour, {
-    pace: opts.pace, mask: opts.mask, onProgress: opts.onProgress,
+    pace: opts.pace, mask: opts.mask, onProgress: opts.onProgress, adapter: opts.adapter,
   });
   if (!events || events.length < 2) throw new Error('tour produced no rrweb events (no steps?)');
 
@@ -79,4 +83,7 @@ async function captureToRrweb(tour, outPath, opts = {}) {
   return { rrweb: out, sidecar, eventCount: events.length, chapters, durationMs: envelope.durationMs };
 }
 
-module.exports = { captureToVideo, captureToRrweb, captureTour, captureTourRrweb };
+module.exports = {
+  captureToVideo, captureToRrweb, captureTour, captureTourRrweb,
+  registerAdapter, resolveAdapter,
+};

@@ -269,7 +269,7 @@ if (args[0] === 'drawio') {
 const VALUE_FLAGS = new Set([
   '--fps', '--frames-dir', '--capture-log', '--scenes', '--context',
   '--pdf-raster-quality', '--pdf-raster-scale', '--port', '--pace', '--format',
-  '--out-dir', '--extract-dir', '--theme', '--label',
+  '--out-dir', '--extract-dir', '--theme', '--label', '--adapter',
 ]);
 function positionalArgs(argv) {
   const out = [];
@@ -418,6 +418,8 @@ const paceIdx       = args.indexOf('--pace');
 const paceOpt       = paceIdx !== -1 ? parseFloat(args[paceIdx + 1]) : null;
 const formatIdx     = args.indexOf('--format');
 const formatOpt     = formatIdx !== -1 ? args[formatIdx + 1] : null;
+const adapterIdx    = args.indexOf('--adapter');
+const adapterOpt    = adapterIdx !== -1 ? args[adapterIdx + 1] : null;
 const scenesIdx     = args.indexOf('--scenes');
 const scenesOpt     = scenesIdx !== -1 ? args[scenesIdx + 1] : null;
 const noCompress    = args.includes('--no-compress');
@@ -547,7 +549,7 @@ async function runCapture() {
   const tourPath = args[1];
   const outPath  = args[2];
   if (!tourPath || !outPath) {
-    console.error('[slidey] usage: slidey capture <tour.json> <out.mp4|out.rrweb.json> [--format rrweb] [--fps n] [--pace n] [--keep-frames]');
+    console.error('[slidey] usage: slidey capture <tour.json> <out.mp4|out.rrweb.json> [--format rrweb] [--fps n] [--pace n] [--keep-frames] [--adapter <name|module.cjs>]');
     process.exit(1);
   }
   const absTour = path.resolve(tourPath);
@@ -564,6 +566,14 @@ async function runCapture() {
   }
   // Record the spec path into chapter source_refs (relative to cwd if possible).
   if (!tour.specPath) tour.specPath = path.relative(process.cwd(), absTour);
+
+  // --adapter overrides tour.adapter. A registered name passes through; a path is
+  // resolved against CWD here (CLI ergonomics) so the spec-relative resolver in
+  // resolveAdapter receives an absolute, already-correct path.
+  if (adapterOpt) {
+    const pathish = adapterOpt.includes('/') || adapterOpt.endsWith('.js') || adapterOpt.endsWith('.cjs');
+    tour.adapter = pathish ? path.resolve(adapterOpt) : adapterOpt;
+  }
 
   // Format: explicit --format wins, else inferred from the output extension.
   const isRrweb = formatOpt === 'rrweb' || /\.rrweb\.json$/i.test(outPath);
