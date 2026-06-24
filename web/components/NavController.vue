@@ -45,8 +45,24 @@ onUnmounted(() => {
       <span class="slidey-sep">·</span>
       <span class="slidey-step">step {{ s.stepIndex + 1 }}/{{ s.stepsInScene }}</span>
     </div>
+    <button
+      type="button"
+      class="slidey-jump"
+      title="Jump to beginning (Home)"
+      aria-label="Jump to beginning"
+      :disabled="s.pos <= 0"
+      @click="deck.first()"
+    >⏮</button>
     <div class="slidey-bar"><div class="slidey-bar-fill" :style="{ width: (s.total > 1 ? (s.pos / (s.total - 1) * 100) : 100) + '%' }"></div></div>
-    <div class="slidey-hint">← → / click to navigate</div>
+    <button
+      type="button"
+      class="slidey-jump"
+      title="Jump to end (End)"
+      aria-label="Jump to end"
+      :disabled="s.pos >= s.total - 1"
+      @click="deck.last()"
+    >⏭</button>
+    <div class="slidey-hint">⏮ ⏭ / ← → / click to navigate</div>
   </div>
 </template>
 
@@ -83,4 +99,24 @@ onUnmounted(() => {
   transition: width 200ms ease-out;
 }
 .slidey-hint { color: #484f58; letter-spacing: 0.05em; }
+
+/* Jump-to-beginning / jump-to-end buttons. The HUD is pointer-events:none so
+   stray clicks pass through to navigate; these re-enable pointer events so they
+   are clickable (the global click handler ignores anything inside .slidey-hud). */
+.slidey-jump {
+  pointer-events: auto;
+  flex: none;
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  color: #8b949e;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 120ms ease, background 120ms ease;
+}
+.slidey-jump:hover:not(:disabled) { color: #58a6ff; background: rgba(88,166,255,0.12); }
+.slidey-jump:disabled { opacity: 0.3; cursor: default; }
 </style>
