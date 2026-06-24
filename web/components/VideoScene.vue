@@ -38,6 +38,12 @@ const phase = ref('intro');
 // Only a cinematic scene in its 'full' phase expands to the viewport; otherwise
 // the holder tracks the inline slide thumbnail and plays in place.
 const expanded = computed(() => cinematic.value && phase.value === 'full');
+// Reserve the top strip for the slidey HUD (which relocates to the top while a
+// video is expanded, so its bar can't collide with the player's transport).
+const HUD_INSET = 52;
+// Show the transport: always when playing inline (non-cinematic), and during the
+// fullscreen cinematic playback (the intro/outro thumbnail stays chrome-free).
+const showControls = computed(() => !cinematic.value || expanded.value);
 
 const frameRef = ref(null);
 const playerRef = ref(null);
@@ -58,7 +64,9 @@ function measure() {
 // Teleported holder's screen rect: the slide thumbnail's box, or the full
 // viewport when expanded. CSS transitions tween between the two.
 const holderStyle = computed(() => {
-  if (expanded.value) return { top: '0px', left: '0px', width: '100vw', height: '100vh' };
+  if (expanded.value) {
+    return { top: `${HUD_INSET}px`, left: '0px', width: '100vw', height: `calc(100vh - ${HUD_INSET}px)` };
+  }
   const r = frameRect.value;
   if (!r) return { opacity: 0, top: '0px', left: '0px', width: '0px', height: '0px' };
   return { top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px` };
@@ -94,9 +102,21 @@ function begin() {
 
 function onResize() { if (!expanded.value) measure(); }
 
+// While a video is expanded, flag the document so the slidey HUD relocates to the
+// top (NavController reacts to body.slidey-video-full) — keeping its bar clear of
+// the player's transport at the bottom of the fullscreen video.
+function setFullFlag(on) {
+  if (typeof document !== 'undefined') document.body.classList.toggle('slidey-video-full', !!on);
+}
+watch(expanded, setFullFlag);
+
 watch(() => store.scene, () => nextTick(begin));
 onMounted(() => { window.addEventListener('resize', onResize); nextTick(begin); });
-onBeforeUnmount(() => { clearTimeout(introTimer); window.removeEventListener('resize', onResize); });
+onBeforeUnmount(() => {
+  clearTimeout(introTimer);
+  window.removeEventListener('resize', onResize);
+  setFullFlag(false);
+});
 </script>
 
 <template>
@@ -131,7 +151,7 @@ onBeforeUnmount(() => { clearTimeout(introTimer); window.removeEventListener('re
             :events="store.rrwebEvents"
             :chapters="store.rrwebChapters"
             :autoplay="false"
-            :controls="!cinematic"
+            :controls="showControls"
             @ended="onEnded"
           />
           <video
@@ -140,7 +160,7 @@ onBeforeUnmount(() => { clearTimeout(introTimer); window.removeEventListener('re
             class="video-mp4"
             :src="scene.src"
             playsinline
-            :controls="!cinematic"
+            :controls="showControls"
             preload="auto"
             @ended="onEnded"
           ></video>
@@ -197,8 +217,19 @@ onBeforeUnmount(() => { clearTimeout(introTimer); window.removeEventListener('re
               width 0.55s cubic-bezier(0.4, 0, 0.2, 1),
               height 0.55s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.video-cine-holder.expanded { padding: 2.5vh 2.5vw; }
+.video-cine-holder.expanded { padding: 1.4vh 2vw; }
 .video-cine-holder > * { width: 100%; }
+/* When expanded, the player fills the available box and its replay letterboxes
+   inside (RrwebPlayer.scaleToFit caps at native scale, so nothing is cut off and
+   nothing upscales/blurs). The host flexes to take the height left over after the
+   transport bar; the transport stays visible at the bottom. */
+.video-cine-holder.expanded .rrp { height: 100%; }
+.video-cine-holder.expanded .rrp-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  aspect-ratio: auto;
+}
 .video-mp4 {
   width: 100%;
   height: 100%;
