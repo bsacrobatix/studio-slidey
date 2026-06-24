@@ -171,6 +171,39 @@ if (args[0] === 'convert') {
   }
 }
 
+// ── `slidey validate <spec.json>` — schema + semantic check, no render ────
+// Exits non-zero on any problem so it can gate CI / pre-bundle. Catches specs
+// that PARSE as JSON but won't RENDER (e.g. a table scene with raw-array rows
+// instead of {cells:[...]} objects, or a missing `variant`).
+if (args[0] === 'validate') {
+  const inPath = args[1];
+  if (!inPath) {
+    console.error('[slidey] usage: slidey validate <spec.json>');
+    process.exit(1);
+  }
+  const absIn = path.resolve(inPath);
+  if (!fs.existsSync(absIn)) {
+    console.error(`[slidey] ERROR: input file not found: ${absIn}`);
+    process.exit(1);
+  }
+  let spec;
+  try {
+    spec = JSON.parse(fs.readFileSync(absIn, 'utf8'));
+  } catch (err) {
+    console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
+    process.exit(1);
+  }
+  const { valid, errors, warnings, count } = validateSpec(spec, { specPath: absIn });
+  for (const line of warnings || []) console.warn(`[slidey] warning:${line}`);
+  if (!valid) {
+    console.error(`[slidey] INVALID: ${count} problem(s) in ${absIn}`);
+    for (const line of errors) console.error(line);
+    process.exit(1);
+  }
+  console.log(`[slidey] OK: ${absIn} (${(spec.scenes || []).length} scene(s))`);
+  process.exit(0);
+}
+
 // ── `slidey bundle <in.json> <out.html>` — single-file interactive deck ────
 if (args[0] === 'bundle') {
   const inPath = args[1];
@@ -178,6 +211,31 @@ if (args[0] === 'bundle') {
   if (!inPath || !outPath) {
     console.error('[slidey] usage: slidey bundle <input.json> <output.html>');
     process.exit(1);
+  }
+  const absIn = path.resolve(inPath);
+  if (!fs.existsSync(absIn)) {
+    console.error(`[slidey] ERROR: input file not found: ${absIn}`);
+    process.exit(1);
+  }
+  // Validate BEFORE bundling: a spec can parse as JSON yet contain scenes that
+  // silently fail to render (the classic case: a table with raw-array rows and
+  // no `variant`, which the viewer skips). Catch it here instead of shipping an
+  // HTML deck with blank slides. Pass --skip-validate to bypass intentionally.
+  if (!args.includes('--skip-validate')) {
+    let spec;
+    try {
+      spec = JSON.parse(fs.readFileSync(absIn, 'utf8'));
+    } catch (err) {
+      console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
+      process.exit(1);
+    }
+    const { valid, errors, warnings, count } = validateSpec(spec, { specPath: absIn });
+    for (const line of warnings || []) console.warn(`[slidey] warning:${line}`);
+    if (!valid) {
+      console.error(`[slidey] ERROR: ${absIn} is invalid (${count} problem(s)) — refusing to bundle a deck that won't render correctly. Fix these or pass --skip-validate:`);
+      for (const line of errors) console.error(line);
+      process.exit(1);
+    }
   }
   const script = path.join(__dirname, '..', 'web', 'build-single.mjs');
   try {
