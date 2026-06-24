@@ -17,9 +17,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const fs = require('fs');
-const puppeteer = require('puppeteer');
 const audit = require('../src/audit');
-const { launchOptions } = require('../src/browser');
+const { closeBrowser, doctor, launchBrowser } = require('../src/browser');
 
 const ROOT = path.join(__dirname, '..');
 const BUNDLE = path.join(ROOT, 'dist-render', 'render.html');
@@ -32,8 +31,14 @@ const CFG = {
   contrastSmallFontPx: audit.CONTRAST_SMALL_FONT_PX,
 };
 
-test('every injected defect is caught, and controls stay clean', { skip: !haveBundle && 'run npm run build:render first' }, async () => {
-  const browser = await puppeteer.launch(launchOptions({ width: 1920, height: 1080 }));
+test('every injected defect is caught, and controls stay clean', { skip: !haveBundle && 'run npm run build:render first' }, async (t) => {
+  const ready = await doctor({ width: 320, height: 180 });
+  if (!ready.ok) {
+    t.skip(`browser unavailable: ${ready.error}`);
+    return;
+  }
+
+  const browser = await launchBrowser({ width: 1920, height: 1080 });
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
@@ -93,6 +98,6 @@ test('every injected defect is caught, and controls stay clean', { skip: !haveBu
     assert.ok(!findings.some(f => f.check === 'low-contrast' && (f.text || '').includes('ReadableControl')),
       'high-contrast control must not be flagged');
   } finally {
-    await browser.close();
+    await closeBrowser(browser);
   }
 });

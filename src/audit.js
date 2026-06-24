@@ -32,7 +32,7 @@
 'use strict';
 
 const puppeteer = require('puppeteer');
-const { launchOptions } = require('./browser');
+const { closeBrowser, launchBrowser } = require('./browser');
 const { sceneShowOpts } = require('./assets');
 const path      = require('path');
 
@@ -388,7 +388,7 @@ async function auditSpec(spec, opts = {}) {
   const { width = 1920, height = 1080 } = (spec.meta && spec.meta.resolution) || {};
   const mode = (spec.meta && spec.meta.mode) || 'api';
 
-  const browser = await puppeteer.launch(launchOptions({ width, height }));
+  const browser = await launchBrowser({ puppeteer, width, height });
 
   const frames = [];
   try {
@@ -441,7 +441,7 @@ async function auditSpec(spec, opts = {}) {
       await page.evaluate(() => { window.slidey.setState('blank'); window.slidey.hideTitleCard(); });
     }
   } finally {
-    await browser.close();
+    await closeBrowser(browser);
   }
 
   // summary

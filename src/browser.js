@@ -116,7 +116,7 @@ function chromeArgs(width, height, extra = []) {
 }
 
 function launchOptions(opts = {}) {
-  const { width, height, args = [], pipe = true, timeout = DEFAULT_LAUNCH_TIMEOUT_MS } = opts;
+  const { width, height, args = [], pipe = process.env.SLIDEY_PUPPETEER_PIPE === '1', timeout = DEFAULT_LAUNCH_TIMEOUT_MS } = opts;
   const executablePath = defaultChromePath();
   const options = {
     headless: 'new',
@@ -126,6 +126,27 @@ function launchOptions(opts = {}) {
   };
   if (executablePath) options.executablePath = executablePath;
   return options;
+}
+
+async function launchBrowser(opts = {}) {
+  const puppeteer = opts.puppeteer || require('puppeteer');
+  const executablePath = defaultChromePath();
+  const executableError = browserExecutableError(executablePath);
+  if (executableError) {
+    throw new Error(executableError);
+  }
+
+  const timeout = opts.timeout || DEFAULT_LAUNCH_TIMEOUT_MS;
+  const label = executablePath || '(puppeteer bundled browser)';
+  try {
+    return await Promise.race([
+      puppeteer.launch(launchOptions({ ...opts, timeout })),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`browser launch timed out after ${timeout}ms`)), timeout + 1000)),
+    ]);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    throw new Error(`browser launch failed for ${label}: ${msg}`);
+  }
 }
 
 async function closeBrowser(browser, timeoutMs = DEFAULT_CLOSE_TIMEOUT_MS) {
@@ -142,7 +163,6 @@ async function closeBrowser(browser, timeoutMs = DEFAULT_CLOSE_TIMEOUT_MS) {
 }
 
 async function doctor(opts = {}) {
-  const puppeteer = require('puppeteer');
   const { width = 320, height = 180 } = opts;
   const executablePath = defaultChromePath();
   let browser;
@@ -155,7 +175,7 @@ async function doctor(opts = {}) {
     };
   }
   try {
-    browser = await puppeteer.launch(launchOptions({ width, height }));
+    browser = await launchBrowser({ width, height });
     const page = await browser.newPage();
     await page.setViewport({ width, height, deviceScaleFactor: 1 });
     await page.setContent('<!doctype html><title>slidey doctor</title><body style="margin:0;background:#111;color:#fff">ok</body>');
@@ -175,4 +195,4 @@ async function doctor(opts = {}) {
   }
 }
 
-module.exports = { browserExecutableError, chromeArgs, closeBrowser, defaultChromePath, doctor, launchOptions, managedHeadlessShellPath };
+module.exports = { browserExecutableError, chromeArgs, closeBrowser, defaultChromePath, doctor, launchBrowser, launchOptions, managedHeadlessShellPath };

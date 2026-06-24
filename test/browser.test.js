@@ -17,7 +17,7 @@ test('SLIDEY_CHROME_PATH overrides Puppeteer browser selection', () => {
 
   assert.equal(defaultChromePath(), '/tmp/slidey-chrome');
   assert.equal(launchOptions({ width: 10, height: 20 }).executablePath, '/tmp/slidey-chrome');
-  assert.equal(launchOptions({ width: 10, height: 20 }).pipe, true);
+  assert.equal(launchOptions({ width: 10, height: 20 }).pipe, false);
 
   if (oldSlidey === undefined) delete process.env.SLIDEY_CHROME_PATH;
   else process.env.SLIDEY_CHROME_PATH = oldSlidey;

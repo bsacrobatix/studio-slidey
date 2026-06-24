@@ -16,6 +16,7 @@ const assert = require('node:assert');
 const path = require('path');
 const fs = require('fs');
 const { auditSpec } = require('../src/audit');
+const { doctor } = require('../src/browser');
 
 const ROOT = path.join(__dirname, '..');
 const BUNDLE = path.join(ROOT, 'dist-render', 'render.html');
@@ -24,7 +25,19 @@ const haveBundle = fs.existsSync(BUNDLE);
 const load = p => JSON.parse(fs.readFileSync(path.join(ROOT, p), 'utf-8'));
 const checksIn = frames => new Set(frames.flatMap(f => f.findings.map(x => x.check)));
 
-test('audit flags the known defects in the broken fixture', { skip: !haveBundle && 'run npm run build:render first' }, async () => {
+let browserReady;
+async function requireBrowser(t) {
+  if (!browserReady) browserReady = doctor({ width: 320, height: 180 });
+  const ready = await browserReady;
+  if (!ready.ok) {
+    t.skip(`browser unavailable: ${ready.error}`);
+    return false;
+  }
+  return true;
+}
+
+test('audit flags the known defects in the broken fixture', { skip: !haveBundle && 'run npm run build:render first' }, async (t) => {
+  if (!await requireBrowser(t)) return;
   const spec = load('examples/fixtures/broken-deck.json');
   const { frames, summary } = await auditSpec(spec, {
     specPath: path.join(ROOT, 'examples/fixtures/broken-deck.json'),
@@ -44,7 +57,8 @@ test('audit flags the known defects in the broken fixture', { skip: !haveBundle 
   }
 });
 
-test('audit stays clean on a polished deck (no false positives)', { skip: !haveBundle && 'run npm run build:render first' }, async () => {
+test('audit stays clean on a polished deck (no false positives)', { skip: !haveBundle && 'run npm run build:render first' }, async (t) => {
+  if (!await requireBrowser(t)) return;
   const spec = load('examples/hello.slidey.json');
   const { summary } = await auditSpec(spec, { specPath: path.join(ROOT, 'examples/hello.slidey.json') });
   assert.equal(summary.errors, 0, 'hello.slidey.json must not trip any error-severity finding');
