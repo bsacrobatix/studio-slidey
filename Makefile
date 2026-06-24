@@ -43,7 +43,7 @@ vscode-stage: build-web
 
 # Output: tools/vscode-slidey/slidey-vscode-<version>.vsix.
 vscode-package: vscode-stage
-	cd $(VSCODE_DIR) && npm_config_cache="$${npm_config_cache:-$${TMPDIR:-/tmp}/slidey-npm-cache}" npx --yes @vscode/vsce@^3 package --no-dependencies
+	cd $(VSCODE_DIR) && npm_config_cache="$${npm_config_cache:-$${TMPDIR:-/tmp}/slidey-npm-cache}" npm_config_registry="https://registry.npmjs.org/" npx --yes @vscode/vsce@^3 package --no-dependencies
 	@echo "[vscode-package] $$(ls -t $(VSCODE_DIR)/*.vsix | head -1)"
 
 # Override CODE_CLI when testing another compatible editor CLI.

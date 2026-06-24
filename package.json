@@ -45,10 +45,14 @@
     "ajv": "^8.20.0",
     "dagre": "^0.8.5",
     "jsonpath-plus": "^10.4.0",
-    "mermaid": "^11.15.0",
+    "mermaid": "^11.7.0",
     "pdf-lib": "^1.17.1",
     "puppeteer": "^21.11.0",
     "rrweb": "^2.0.1"
+  },
+  "overrides": {
+    "ts-dedent": "2.2.0",
+    "stylis": "4.3.6"
   },
   "engines": {
     "node": ">=18.0.0"
