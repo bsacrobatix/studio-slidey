@@ -13,6 +13,8 @@
     "./rrweb-player": "./web/rrweb/RrwebPlayer.vue",
     "./rrweb-chapters": "./web/rrweb/chapters.js",
     "./rrweb-format": "./src/rrweb-format.js",
+    "./tour": "./src/tour/index.js",
+    "./tour-adapter": "./src/tour/tour-adapter.js",
     "./drawio": "./src/drawio.js",
     "./package.json": "./package.json"
   },

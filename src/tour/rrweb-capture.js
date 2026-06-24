@@ -34,7 +34,8 @@ const fs = require('fs');
 const path = require('path');
 
 const { resolveTarget } = require('./launch');
-const { runAction, waitSel, clickSel, absUrl, ACTION_TIMEOUT } = require('./capture');
+const { runAction, runAdvance, runDrive, makeCtx, waitSel, clickSel, absUrl, ACTION_TIMEOUT } = require('./capture');
+const { resolveAdapter } = require('./adapters');
 const { CHAPTER_TAG, chaptersFromEvents } = require('../rrweb-format');
 const { launchOptions } = require('../browser');
 
@@ -71,6 +72,8 @@ async function captureTourRrweb(tour, opts = {}) {
 
   const bundle = fs.readFileSync(rrwebBundlePath(), 'utf8');
   const { base, stop, log } = await resolveTarget(tour.target);
+  const ctx = makeCtx({ tour, base, pace, mode: 'rrweb' });
+  ctx.adapter = resolveAdapter(tour, opts.adapter, ctx.resolve);
 
   const dwell = (ms) => new Promise((r) => setTimeout(r, Math.max(0, Math.round(ms * pace))));
 
@@ -90,7 +93,10 @@ async function captureTourRrweb(tour, opts = {}) {
     // the log opens clean on the first real step.
     await page.goto(absUrl(base, tour.startPath || '/'), { waitUntil: 'load', timeout: ACTION_TIMEOUT });
     if (tour.readySelector) await waitSel(page, tour.readySelector);
-    for (const act of tour.before || []) await runAction(page, base, act);
+    for (const act of tour.before || []) await runAction(page, base, act, ctx);
+
+    // Adapter lifecycle: run once after the ready gate, before recording opens.
+    await ctx.adapter.init(page, tour, ctx);
 
     await page.addScriptTag({ content: bundle });
     await page.evaluate((maskOn) => {
@@ -110,7 +116,7 @@ async function captureTourRrweb(tour, opts = {}) {
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
 
-      for (const act of step.before || []) await runAction(page, base, act);
+      for (const act of step.before || []) await runAction(page, base, act, ctx);
       if (step.waitFor) await waitSel(page, step.waitFor);
 
       // Bring the target into view (recorded as a real scroll) and mark the
@@ -132,17 +138,29 @@ async function captureTourRrweb(tour, opts = {}) {
       });
       if (onProgress) onProgress(i, step.id || `step-${i}`);
 
-      // Real-time dwell. For action / route-match steps, perform the click
-      // partway through so the resulting motion is captured on-camera.
+      // Per-step adapter hook (e.g. drive the app's own overlay). No-op default.
+      await ctx.adapter.decorate(page, step, ctx);
+
+      // Real-time dwell. For action / route-match steps, OR any step carrying a
+      // `drive:[]`, perform the motion partway through so it is captured
+      // on-camera; non-built-in advances (predicate / adapter advancer) resolve
+      // at the mid-dwell point too.
       const advance = step.advance || (step.kind === 'action' ? 'click-target' : 'next');
       const dwellMs = step.dwellMs || 3000;
-      if ((advance === 'click-target' || advance === 'route-match') && step.target) {
+      const builtinClick = (advance === 'click-target' || advance === 'route-match') && step.target;
+      const hasDrive = Array.isArray(step.drive) && step.drive.length > 0;
+
+      if (builtinClick || hasDrive || advance === 'predicate' || (ctx.adapter.advancers && ctx.adapter.advancers[advance])) {
         await dwell(dwellMs * 0.5);
-        await clickSel(page, step.target, step.targetText);
-        if (advance === 'route-match' && step.advanceUrl) {
-          await page.waitForFunction(
-            (u) => location.href.includes(u), { timeout: ACTION_TIMEOUT }, step.advanceUrl,
-          ).catch(() => {});
+        if (hasDrive) await runDrive(page, base, step.drive, ctx);
+        const handled = await runAdvance(page, step, advance, ctx);
+        if (!handled && builtinClick) {
+          await clickSel(page, step.target, step.targetText);
+          if (advance === 'route-match' && step.advanceUrl) {
+            await page.waitForFunction(
+              (u) => location.href.includes(u), { timeout: ACTION_TIMEOUT }, step.advanceUrl,
+            ).catch(() => {});
+          }
         }
         await dwell(dwellMs * 0.5);
       } else {

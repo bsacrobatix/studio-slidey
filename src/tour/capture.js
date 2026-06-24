@@ -52,11 +52,25 @@ const { resolveTarget } = require('./launch');
 const { ChapterRecorder } = require('./chapters');
 const overlays = require('./overlays');
 const { launchOptions } = require('../browser');
+const { resolveAdapter } = require('./adapters');
 
 const ACTION_TIMEOUT = 15000;   // never let a missing/covered element hang forever
 
-/** Run a single `before` action step against the page. */
-async function runAction(page, base, act) {
+/**
+ * Run a single action step against the page.
+ *
+ * Dispatch order: the built-in single-key verbs first (byte-for-byte today's
+ * behavior), then — for ANY unknown single-key action object — fall through to
+ * the active adapter's `actions[verb]`. So `{ submitIntent: { … } }` resolves to
+ * `ctx.adapter.actions.submitIntent(page, { … }, ctx)`. Built-in specs that use
+ * only the closed verb set are unaffected.
+ *
+ * @param {object} page
+ * @param {string} base  resolved target base URL (for goto).
+ * @param {object} act   a single-key action object.
+ * @param {object} [ctx] adapter ctx; carries ctx.adapter for the fall-through.
+ */
+async function runAction(page, base, act, ctx) {
   if (act.goto != null)      return page.goto(absUrl(base, act.goto), { waitUntil: 'load', timeout: ACTION_TIMEOUT });
   if (act.click != null)     return clickSel(page, act.click, act.text);
   if (act.type != null)      { const [sel, txt] = act.type; const el = await waitSel(page, sel); await el.type(String(txt), { delay: 0 }); return; }
@@ -64,7 +78,88 @@ async function runAction(page, base, act) {
   if (act.waitFor != null)   { await waitSel(page, act.waitFor); return; }
   if (act.wait != null)      return new Promise((r) => setTimeout(r, act.wait));
   if (act.eval != null)      return page.evaluate(act.eval);
+  // Built-in predicate wait: block until a page-context expression is truthy.
+  if (act.waitForFn != null) {
+    await page.waitForFunction(act.waitForFn, { timeout: (ctx && ctx.timeout) || ACTION_TIMEOUT });
+    return;
+  }
+
+  // Fall through to the adapter: an unknown single-key object is an adapter verb.
+  const adapter = ctx && ctx.adapter;
+  if (adapter && adapter.actions) {
+    const verb = Object.keys(act)[0];
+    if (verb && typeof adapter.actions[verb] === 'function') {
+      return adapter.actions[verb](page, act[verb], ctx);
+    }
+  }
   throw new Error(`unknown tour action: ${JSON.stringify(act)}`);
+}
+
+/**
+ * Resolve a step's advance into a strategy and run it. Built-in strategies stay
+ * inline at the call sites (click-target / route-match motion differs per driver);
+ * this handles the NON-built-in cases shared by both drivers:
+ *
+ *   - `predicate`     — wait on a page expression in `step.advanceFn`.
+ *   - <adapter name>  — resolved from `ctx.adapter.advancers[name](page, step, ctx)`.
+ *
+ * Returns true if it handled the advance, false if `advance` is a built-in the
+ * caller must drive itself (next/click-target/route-match).
+ *
+ * @param {object} page
+ * @param {object} step
+ * @param {string} advance  the resolved advance name.
+ * @param {object} ctx
+ * @returns {Promise<boolean>}
+ */
+async function runAdvance(page, step, advance, ctx) {
+  if (advance === 'predicate') {
+    if (step.advanceFn) {
+      await page.waitForFunction(step.advanceFn, { timeout: (ctx && ctx.timeout) || ACTION_TIMEOUT });
+    }
+    return true;
+  }
+  const advancers = (ctx && ctx.adapter && ctx.adapter.advancers) || {};
+  if (typeof advancers[advance] === 'function') {
+    await advancers[advance](page, step, ctx);
+    return true;
+  }
+  return false;  // a built-in (next/click-target/route-match) — caller drives it.
+}
+
+/**
+ * Run a step's on-camera `drive:[]` verbs in order. Generalizes the mid-dwell
+ * click both drivers already do (so typed prose / intent submits are captured as
+ * real motion): each entry is an action object run through `runAction`, so it can
+ * be a built-in verb OR an adapter verb.
+ *
+ * @param {object} page
+ * @param {string} base
+ * @param {Array<object>} drive
+ * @param {object} ctx
+ */
+async function runDrive(page, base, drive, ctx) {
+  for (const act of drive || []) await runAction(page, base, act, ctx);
+}
+
+/**
+ * Build the adapter ctx shared by both drivers. `resolve` resolves a path
+ * RELATIVE TO THE TOUR SPEC FILE (`tour.specPath`, falling back to cwd) so an
+ * adapter's `init` can `addScriptTag` a helper sitting beside the spec.
+ *
+ * @param {object} a  { tour, base, pace, mode: 'freeze'|'rrweb' }
+ * @returns {{ base, pace, mode, timeout, resolve, adapter:null }}
+ */
+function makeCtx({ tour, base, pace, mode }) {
+  const specDir = tour.specPath ? path.dirname(path.resolve(tour.specPath)) : process.cwd();
+  return {
+    base,
+    pace,
+    mode,
+    timeout: ACTION_TIMEOUT,
+    resolve: (p) => (path.isAbsolute(p) ? p : path.resolve(specDir, p)),
+    adapter: null,
+  };
 }
 
 function absUrl(base, p) {
@@ -98,7 +193,7 @@ async function clickSel(page, sel, text) {
  *
  * @param {object} tour
  * @param {string} framesDir
- * @param {object} opts  { fps=30, startFrame=0, pace, onProgress, headless=true }
+ * @param {object} opts  { fps=30, startFrame=0, pace, onProgress, headless=true, adapter? }
  * @returns {Promise<{ frameCount, chapters, viewport, startFrame }>}
  */
 async function captureTour(tour, framesDir, opts = {}) {
@@ -113,6 +208,10 @@ async function captureTour(tour, framesDir, opts = {}) {
   fs.mkdirSync(framesDir, { recursive: true });
 
   const { base, stop, log } = await resolveTarget(tour.target);
+  // The adapter ctx threaded to every hook/verb/advancer. `resolve` is relative
+  // to the spec dir so an adapter can addScriptTag a sibling helper.
+  const ctx = makeCtx({ tour, base, pace, mode: 'freeze' });
+  ctx.adapter = resolveAdapter(tour, opts.adapter, ctx.resolve);
 
   let frameIndex = startFrame;
   const chapters = new ChapterRecorder(fps);
@@ -148,14 +247,18 @@ async function captureTour(tour, framesDir, opts = {}) {
 
     await overlays.installCurtain(page, tour.curtain || tour.title || 'Loading…');
     await page.goto(absUrl(base, tour.startPath || '/'), { waitUntil: 'load', timeout: ACTION_TIMEOUT });
+    if (tour.readySelector) await waitSel(page, tour.readySelector);
     await overlays.installOverlays(page);
+
+    // Adapter lifecycle: run once after the ready gate, before step 0.
+    await ctx.adapter.init(page, tour, ctx);
 
     const steps = tour.steps || [];
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
 
       // Off-camera setup for this step.
-      for (const act of step.before || []) await runAction(page, base, act);
+      for (const act of step.before || []) await runAction(page, base, act, ctx);
       if (step.waitFor) await waitSel(page, step.waitFor);
 
       // Frame the step: spotlight + caption.
@@ -167,6 +270,13 @@ async function captureTour(tour, framesDir, opts = {}) {
       // Lift the curtain on the first step, once it's staged.
       if (i === 0) await overlays.liftCurtain(page);
 
+      // Per-step adapter hook (e.g. drive the app's own overlay). No-op default.
+      await ctx.adapter.decorate(page, step, ctx);
+
+      // On-camera drive verbs run before the freeze, so their resulting DOM is
+      // what the held frame captures (in freeze mode there is no mid-dwell).
+      if (step.drive) await runDrive(page, base, step.drive, ctx);
+
       // Settle, then freeze-frame the dwell.
       await new Promise((r) => setTimeout(r, 350));
       const dwellFrames = Math.round(((step.dwellMs || 3000) / 1000) * fps * pace);
@@ -175,7 +285,9 @@ async function captureTour(tour, framesDir, opts = {}) {
 
       // Advance (off-camera; not captured).
       const advance = step.advance || (step.kind === 'action' ? 'click-target' : 'next');
-      if (advance === 'click-target' || advance === 'route-match') {
+      // Non-built-in advance (predicate / adapter advancer) is resolved first.
+      const handled = await runAdvance(page, step, advance, ctx);
+      if (!handled && (advance === 'click-target' || advance === 'route-match')) {
         if (step.target) await clickSel(page, step.target, step.targetText);
         if (advance === 'route-match' && step.advanceUrl) {
           await page.waitForFunction(
@@ -200,4 +312,7 @@ async function captureTour(tour, framesDir, opts = {}) {
 
 // Shared step-driver helpers, reused by the rrweb capture path (rrweb-capture.js)
 // so both capture modes drive a tour with identical action/selector semantics.
-module.exports = { captureTour, runAction, waitSel, clickSel, absUrl, ACTION_TIMEOUT };
+module.exports = {
+  captureTour, runAction, runAdvance, runDrive, makeCtx,
+  waitSel, clickSel, absUrl, ACTION_TIMEOUT,
+};

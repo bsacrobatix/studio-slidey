@@ -1,0 +1,27 @@
+<!doctype html>
+<!--
+  Static fixture page for the tour-adapter unit tests (test/tour-adapter.test.js).
+  No network, no framework: just enough DOM + a couple of window hooks to prove
+  adapter verbs, the predicate wait, and a custom advancer drive a real page.
+-->
+<html>
+  <head><meta charset="utf-8" /><title>tour-adapter fixture</title></head>
+  <body>
+    <div data-testid="home-view">
+      <h1 id="title">Adapter fixture</h1>
+      <button data-testid="go-btn" onclick="window.__advanceState('ready')">Go</button>
+      <span data-testid="state-badge" data-state="idle">idle</span>
+      <pre data-testid="marker"></pre>
+    </div>
+    <script>
+      // Drive the named machine state onto the badge (what a custom advancer waits on).
+      window.__advanceState = function (s) {
+        document.querySelector('[data-testid=state-badge]').dataset.state = s;
+      };
+      // A bare-verb seam an adapter action can call (records into a visible marker).
+      window.__setMarker = function (text) {
+        document.querySelector('[data-testid=marker]').textContent = String(text);
+      };
+    </script>
+  </body>
+</html>
