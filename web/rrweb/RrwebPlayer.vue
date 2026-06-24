@@ -36,8 +36,11 @@ const props = defineProps({
   autoplay: { type: Boolean, default: false },
   startAtEnd: { type: Boolean, default: false },
   loop: { type: Boolean, default: false },
+  // Show the transport (play/pause, scrub bar, chapter markers, grab toggle).
+  // Off for lean-back cinematic playback where the deck drives everything.
+  controls: { type: Boolean, default: true },
 });
-const emit = defineEmits(['ready', 'timeupdate', 'chapter']);
+const emit = defineEmits(['ready', 'timeupdate', 'chapter', 'ended']);
 
 const host = ref(null);
 let player = null;
@@ -164,7 +167,7 @@ function togglePlay() {
     emit('timeupdate', currentMs.value);
     if (currentMs.value >= totalMs.value) {
       if (props.loop) { player.play(0); }
-      else { playing.value = false; stopTick(); }
+      else { playing.value = false; stopTick(); emit('ended'); }
     }
   }, 100);
 }
@@ -200,7 +203,7 @@ defineExpose({ play: togglePlay, seek, destroy });
       <p v-else-if="!ready" class="rrp-msg">Loading replay…</p>
     </div>
 
-    <div v-if="ready" class="rrp-ctl">
+    <div v-if="ready && controls" class="rrp-ctl">
       <button type="button" class="rrp-btn" @click="togglePlay">
         {{ playing ? '❚❚' : (currentMs >= totalMs ? '↻' : '▶') }}
       </button>
@@ -237,7 +240,7 @@ defineExpose({ play: togglePlay, seek, destroy });
       >{{ interactive ? '✋' : '⇅' }}</button>
     </div>
 
-    <div v-if="ready && activeChapterId" class="rrp-chapter">
+    <div v-if="ready && controls && activeChapterId" class="rrp-chapter">
       {{ (chapters.find(c => c.id === activeChapterId) || {}).label }}
     </div>
   </div>
