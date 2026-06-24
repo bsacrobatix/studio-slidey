@@ -46,6 +46,13 @@ A full MP4 render takes **7–12 minutes**. Never trigger one to spot-check a si
 
 Don't run two Puppeteer renders at once — concurrent headless Chrome instances can crash each other's screenshot capture.
 
+**VS Code preview is available.** For local authoring in VS Code, install the
+extension with `make vscode-install-local`. It previews `.slidey.json`, `.json`,
+and `.jsonl` files in a read-only webview using the same viewer as `slidey
+<file>`. The extension auto-discovers `.slidey.json` specs and `.jsonl` traces;
+plain `.json` files can be opened explicitly. If you change the JSON, edit the
+source file and let the preview reload from disk.
+
 ```sh
 npm run build:render                                 # (re)build the Vue bundle after editing web/
 
@@ -89,18 +96,23 @@ All are declared in JSON; render handlers live in `src/scenes/`:
 | `narrative` | Eyebrow + body + lede text beats | `eyebrow`, `body`, `lede`, `hold` | 7–9s |
 | `diagram` | ASCII/code panel comparison (e.g. "before vs after") | `panels: [{label, ascii}]` | 10–14s |
 | `diagram-svg` | Proper SVG diagrams (the architecturally important visuals) | `panels: [{viewBox, nodes, edges}]` | 10–15s |
+| `mermaid` | Mermaid flowchart / sequence / state diagram rendered as themed SVG | `source`, `scale`, `caption` | 8–12s |
 | `trace` | Multi-layer lookup cascade with HIT/MISS badges | `turns: [{user, layers, intent, no_llm}]` | 12s |
 | `thread` | Mocked issue-tracker / review comment threads | `panels: [{system, ref, stage, messages}]` | 14–17s |
 | `stat` | Big gradient number + caption | `value`, `label`, `detail` | 7s |
 | `cta` | Wordmark + tagline + URL end card | `wordmark`, `tagline`, `url` | 8s |
 | `terminal-gif` | Embed a recorded gif in a fake-terminal chrome | `gif`, `title`, `caption` | 8–12s |
-| `video` | Embed a demo MP4 — fullscreen or inset in a slide, with chapter captions, annotations, and synced narration | `src` \| `capture`, `mode`, `annotations[]`, `narration[]` | = video length |
+| `video` | Embed a demo MP4, rrweb log, or captured tour — fullscreen or inset in a slide, with chapter captions, annotations, and synced narration | `src` \| `rrweb` \| `capture`, `mode`, `annotations[]`, `narration[]` | = source length |
 | `request` | API request/response card (live/mock/playback) | see `src/scenes/request.js` | varies |
 | `transcript` | Full agent/chat session as per-turn cards | `turns: [...]` | varies |
 | `cards` | Peer items OR side-by-side contrast | `variant`, `cards[]` \| `left`/`right` \| `question`/`answer` | 8–14s |
+| `personas` | Reusable cast intro or persona-attributed use-case rows | `meta.personas`, `variant`, `personas[]`, `cases[]` | 8–12s |
 | `code` | Real text artifacts (source, diff, function I/O, tree, config, log) | `variant`, `lang`, `code`, `highlight[]`, `annotations[]` | 8–12s |
 | `table` | Data / comparison / scorecard tables | `variant`, `columns[]`, `rows: [{cells[], highlight}]`, `winner` | 8–12s |
 | `chart` | Hand-built SVG charts (bar/line/area/pie/scatter/quadrant) | `variant`, `series: [{name, color, points[]}]`, `axes`, `unit` | 8–12s |
+| `image` | Static screenshot / imported SVG / generated visual | `src`, `fit`, `caption` | 6–10s |
+| `image-compare` | Before/after screenshot comparison | `left`, `right`, `fit`, `variant` | 8–12s |
+| `book` | Book-cover bibliography / recommended reading | `books[]` with `title`, `authors`, `cover`, `takeaway` | 8–12s |
 
 ### Choosing a layout — semantic taxonomy
 
@@ -115,8 +127,16 @@ The full catalogue (45 layouts across 9 communicative families) and the design r
 | compare named options across criteria / show exact values | `table` | `comparison` · `scorecard` · `data` |
 | show what the numbers say | `chart` | `bar` (compare) · `line`/`area` (trend) · `pie` (composition) · `scatter`/`quadrant` (relate) |
 | show A→B→C flow, hierarchy, or how things connect | `diagram-svg` | (vary `rankdir` + edge style — see below) |
+| render existing Mermaid source | `mermaid` | `flowchart` · `sequenceDiagram` · `stateDiagram-v2` |
+| show a real UI state or asset | `image` / `image-compare` | screenshot, SVG, before/after |
+| embed a product walkthrough | `video` | `src` MP4 · `rrweb` log · `capture` tour |
+| keep role identity consistent across a story | `personas` | `cast` · `use-cases` |
 
 Disambiguation: **list vs flow** — if removing the arrows loses nothing, it's `cards`, not `diagram-svg`. **compare vs quantify** — comparing options on *qualities* → `cards`/`table`; comparing *measured values* → `chart`. **diagram vs code** — a *conceptual* relationship is `diagram-svg`; the *literal text* of a file is `code`.
+**Mermaid vs diagram-svg** — use `mermaid` when the Mermaid text is already the
+maintained artifact or when a standard sequence/state/flow diagram is enough; use
+`diagram-svg` when Slidey needs exact layout control, custom node styling, or
+`--check` geometry validation.
 
 #### `cards` — peer items & contrast
 
@@ -124,6 +144,47 @@ Disambiguation: **list vs flow** — if removing the arrows loses nothing, it's 
 - **Two-column variants** (`before-after`/`versus`/`point-counterpoint`/`pros-cons`): `left: {label, lines:[]}` and `right: {label, lines:[]}` — contrasting accents, centre divider. `pros-cons` auto-glyphs ✓/✗.
 - **`qa`**: `question: "…"`, `answer: ["…","…"]` (string or array of lines).
 - Common: `title`, `caption`. Supersedes the legacy ASCII `diagram` comparison.
+
+#### `personas` — reusable cast and who-does-what rows
+
+Use `personas` when a deck has recurring people, roles, stakeholders, or user
+types and the viewer needs to remember who performs each action. Define the cast
+once in `meta.personas`; scenes can reference ids or provide inline persona
+objects.
+
+```json
+{
+  "meta": {
+    "personas": [
+      { "id": "pm", "name": "Priya", "role": "Product manager",
+        "intro": "Turns a rough idea into a validated plan.",
+        "color": "#58a6ff", "glyph": "PM" },
+      { "id": "dev", "name": "Devon", "role": "Engineer",
+        "intro": "Turns the plan into reviewable changes.",
+        "color": "#7ee787", "glyph": "DE" }
+    ]
+  },
+  "scenes": [
+    { "type": "personas", "variant": "cast",
+      "title": "The cast", "personas": ["pm", "dev"] },
+    { "type": "personas", "variant": "use-cases",
+      "title": "Plan to patch",
+      "cases": [
+        { "who": "pm", "action": "Frames the customer problem",
+          "detail": "keeps the deck anchored in a real user" },
+        { "who": "dev", "action": "Splits the patch into reviewable pieces",
+          "detail": "small enough for agent and human review" }
+      ] }
+  ]
+}
+```
+
+- `meta.personas[]`: reusable registry. Each entry needs `id`; add `name`,
+  `role`, `intro`, `color`, and `glyph` for richer cards.
+- `variant:"cast"`: `personas` is a list of ids or inline objects. Renders cards
+  with avatar, name, role, and intro. `columns` can override the grid.
+- `variant:"use-cases"`: `cases[]` rows use `who` to resolve an avatar, then show
+  `action` and optional `detail`.
 
 #### `code` — text artifacts
 
@@ -187,7 +248,79 @@ Slidey's CSS treats `diagram-svg` panels differently based on count:
 
 If you need both panels visually consistent, use TWO single-panel scenes back-to-back with a `title` scene transition between them.
 
-## Demo videos — the `video` scene + tour capture
+### `mermaid` — themed Mermaid diagrams
+
+Use `mermaid` when you already have Mermaid source, or when the fastest path is a
+standard Mermaid diagram rather than hand-authored node geometry. Slidey renders
+the Mermaid output in the Vue bundle with the active deck theme, so PDF output
+stays vector and the web viewer uses the same component as MP4/PNG rendering.
+
+```json
+{ "type": "mermaid",
+  "title": "Request lifecycle",
+  "source": "flowchart LR\n  browser[Browser] --> api[API]\n  api --> db[(Database)]",
+  "scale": 1,
+  "caption": "Mermaid source remains the editable artifact." }
+```
+
+Fields:
+
+- `source`: Mermaid text. Common choices are `flowchart`, `sequenceDiagram`, and
+  `stateDiagram-v2`.
+- `sourceFile`: optional provenance path for import/bundling workflows; the
+  renderer uses `source`.
+- `scale`: shrink or enlarge dense diagrams without editing the Mermaid text.
+- `title`, `caption`, `narration`, `hold`: same role as other slide scenes.
+
+Limitations: `--check` only validates `diagram-svg`, not Mermaid. If a Mermaid
+diagram is cramped, split it into multiple scenes or reduce `scale`; if you need
+precise edge labels, node sizing, or deterministic geometry checks, convert the
+concept to `diagram-svg`.
+
+## Media embedding — images, GIFs, MP4, rrweb, and tour capture
+
+Use media scenes when the artifact itself carries the point: screenshots,
+screen-recorded demos, rrweb bug reports, terminal recordings, or visual diffs.
+
+### Static images and screenshot comparisons
+
+```json
+{ "type": "image",
+  "title": "Architecture",
+  "src": "assets/architecture.svg",
+  "fit": "contain",
+  "caption": "Local assets resolve relative to the spec." }
+```
+
+`image` accepts local paths, absolute paths, URLs, and data URIs. Use
+`fit:"contain"` for diagrams/screenshots that must stay uncropped; use
+`fit:"cover"` for full-bleed visuals where cropping is acceptable.
+
+```json
+{ "type": "image-compare",
+  "title": "Migration fidelity",
+  "left":  { "label": "Before", "src": "compare/marp.png" },
+  "right": { "label": "After",  "src": "compare/slidey.png" },
+  "variant": "qa",
+  "caption": "Use for visual reviews and before/after UI checks." }
+```
+
+`image-compare` is for old/new screenshots. `variant:"qa"` reduces chrome and
+enlarges the previews for review decks.
+
+### Terminal GIFs
+
+```json
+{ "type": "terminal-gif",
+  "gif": "assets/run.gif",
+  "title": "demo",
+  "caption": "A recorded terminal session, framed and captioned." }
+```
+
+Use this for VHS-style terminal recordings. Prefer `video` for browser/product
+demos, especially when chapters, annotations, trimming, or narration cues matter.
+
+### Demo videos — the `video` scene + tour capture
 
 Slidey can splice a recorded product demo into a deck. Two halves:
 
@@ -252,6 +385,9 @@ exports below).
   deck resolution, or inset for `embedded`). One ffmpeg pass composites the
   overlays. The scene's duration **equals the video length** — `--estimate`
   probes it (or use a `duration` hint).
+- Prefer `src` for fast repeatable deck renders. It can be a Slidey-produced
+  capture, a Kitsoki demo MP4, or any MP4 with an optional sibling
+  `<src>.chapters.json`.
 - `chapters`: `"auto"` (default for `src`) derives a deck-styled lower-third per
   chapter from the sidecar; default is OFF for `capture` (its captions are
   already baked in). Set `false` to disable, or a path to an explicit sidecar.
@@ -266,6 +402,10 @@ exports below).
   frame stays default); the web viewer mounts a live, scrubbable, chapter-aware
   player you can grab to interact with. Chapters come from in-log custom events
   (or a sibling sidecar). See `examples/rrweb-demo.slidey.json`.
+- **capture source** (`"capture": "…tour.json"`): runs the tour during render.
+  Use this for one-command final production; during iteration, run `slidey
+  capture` first and embed the resulting MP4 or rrweb log so layout checks do not
+  repeatedly drive the app.
 
 > Kitsoki demos already emit this exact chapter-sidecar shape, so an existing
 > `…-demo.mp4` + `.chapters.json` drops straight into a `video` scene with
@@ -282,6 +422,26 @@ report and a demo are the same artifact type):
   scrubbable player with chapter markers + interactive toggle. Source SFC.
 - `slidey/rrweb-format` (node) / `slidey/rrweb-chapters` (browser) — the
   `*.rrweb.json` envelope + chapter extraction.
+
+### Book-cover bibliography
+
+```json
+{ "type": "book",
+  "title": "Further reading",
+  "books": [
+    { "title": "Thinking in Systems",
+      "authors": "Donella H. Meadows",
+      "year": "2008",
+      "cover": "assets/books/thinking-in-systems.jpg",
+      "takeaway": "A practical vocabulary for feedback loops." }
+  ],
+  "caption": "One to three books per scene." }
+```
+
+Use `book` for recommended reading or bibliography slides. Keep it to one to
+three books. Each book needs `title`, `authors`, `cover`, and `takeaway`;
+`subtitle`, `publisher`, `year`, `isbn`, and `alt` are optional. Covers are
+resolved relative to the spec and validated for useful resolution.
 
 ## Narration
 
@@ -402,6 +562,7 @@ slidey/
 │       ├── narrative.js
 │       ├── diagram.js          # ASCII (legacy comparison)
 │       ├── diagram-svg.js      # Proper SVG (the workhorse)
+│       ├── mermaid.js          # Mermaid source rendered as themed SVG
 │       ├── terminal-gif.js
 │       ├── trace.js
 │       ├── thread.js
@@ -410,9 +571,13 @@ slidey/
 │       ├── request.js          # API request/response card
 │       ├── transcript.js
 │       ├── cards.js            # peer items / contrast (see web/components/CardsScene.vue)
+│       ├── personas.js         # reusable cast / persona-attributed use cases
 │       ├── code.js             # text artifacts (see web/components/CodeScene.vue)
 │       ├── table.js            # tabular data (see web/components/TableScene.vue)
 │       ├── chart.js            # SVG charts (see web/components/ChartScene.vue)
+│       ├── image.js            # static screenshot / imported image
+│       ├── image-compare.js    # side-by-side screenshot comparison
+│       ├── book.js             # book-cover bibliography
 │       └── video.js            # `video` scene (MP4 / rrweb source; overlays; cues)
 ├── web/rrweb/                # rrweb library — exported as slidey/rrweb-* subpaths
 │   ├── buffer.js             #   rolling-buffer recorder (→ slidey/rrweb-buffer)

@@ -50,7 +50,7 @@ const autoplay = computed(() => scene.value.autoplay !== false);
   height: 100%;
 }
 .video-frame { width: 100%; }
-.video-frame.embedded { width: 66%; }
+.video-frame.embedded { width: 76%; }
 .video-eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.16em;

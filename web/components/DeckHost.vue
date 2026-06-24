@@ -25,6 +25,7 @@ import ImageScene from './ImageScene.vue';
 import ImageCompareScene from './ImageCompareScene.vue';
 import BookScene from './BookScene.vue';
 import VideoScene from './VideoScene.vue';
+import PersonasScene from './PersonasScene.vue';
 
 const PITCH_COMPONENTS = {
   narrative: NarrativeScene,
@@ -45,6 +46,7 @@ const PITCH_COMPONENTS = {
   'image-compare': ImageCompareScene,
   book: BookScene,
   video: VideoScene,
+  personas: PersonasScene,
 };
 
 // Toggle body classes for mode, mirroring slidey.setMode. body.instant is owned
