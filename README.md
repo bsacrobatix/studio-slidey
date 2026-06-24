@@ -98,6 +98,30 @@ server and open the interactive viewer in your browser: pick any `.json` /
 `.jsonl` spec from the sidebar, arrow keys / click to step through it.
 `slidey in.json out.mp4` (two paths) still renders, unchanged.
 
+### Preview in VS Code
+
+Slidey also ships a local VS Code extension under `tools/vscode-slidey`. It opens
+`.slidey.json`, `.json`, and `.jsonl` specs in a webview preview tab using the
+same built web viewer as `slidey <file>`.
+
+```sh
+make vscode-install-local
+```
+
+That target rebuilds the web viewer, stages the viewer/runtime assets into the
+extension package, creates a VSIX, and installs it into the local editor. Override
+`CODE_CLI` for a compatible editor CLI:
+
+```sh
+make vscode-install-local CODE_CLI=/path/to/code-compatible-cli
+```
+
+Inside VS Code, run **Slidey: Preview Presentation** from the command palette, or
+use the editor-title / Explorer context menu on a `.slidey.json` or `.jsonl`
+file. The preview is read-only: edit the JSON in VS Code, and the webview reloads
+from disk. The extension auto-discovers `.slidey.json` decks and `.jsonl` traces;
+plain `.json` files can still be previewed explicitly.
+
 The video and PDF pipelines load the built `dist-render/render.html`; rebuild it
 with `npm run build:render` whenever you change anything under `web/`. `npm run
 build` builds both the render bundle and the web app.
@@ -176,7 +200,7 @@ storyboard. Two capture formats:
   web-viewer player, and is the same artifact a [kitsoki bug report](#rrweb-as-a-library-for-kitsoki)
   captures.
 
-Embed either with a [`video`](#video--embed-a-demo-mp4-or-rrweb-log) scene (or
+Embed either with a [`video`](#video--embed-mp4-rrweb-or-a-captured-tour) scene (or
 capture on the fly via that scene's `capture` field). See `examples/demos/`.
 
 | Flag | Effect |
@@ -305,9 +329,10 @@ capture. Run-to-run frame variance is limited to sub-pixel CSS-transition
 sampling (≈8/658 on the sample deck — on par with the legacy renderer).
 
 Internally, scene types fall into two families the template toggles between: a
-*slides* family (`title`, `narrative`, `diagram`, `diagram-svg`, `trace`,
-`transcript`, `thread`, `stat`, `cta`, `terminal-gif`, `cards`, `code`, `table`,
-`chart`) and an *api* family (`request`). The
+*slides* family (`title`, `narrative`, `diagram`, `diagram-svg`, `mermaid`,
+`trace`, `transcript`, `thread`, `stat`, `cta`, `terminal-gif`, `cards`, `code`,
+`table`, `chart`, `image`, `image-compare`, `book`, `video`, `personas`) and an
+*api* family (`request`). The
 spec's optional `meta.mode` selects the default; you rarely set it by hand. (In
 the code this distinction still carries its original `pitch`/`api` names — e.g.
 `mode-pitch`, `_PITCH_REVEALS` — they're internal labels, not project identity.)
@@ -342,6 +367,7 @@ A spec is a JSON object with two top-level keys: `meta` (optional) and
 | `meta.narration.rate` | edge-tts speech rate, e.g. `"+0%"`, `"-10%"` |
 | `meta.narration.pronunciations` | `{ "term": "respelling" }` map fixing TTS mispronunciations. Applied whole-word and case-insensitively to the **spoken** audio only (spec/`--list` text is unchanged). e.g. `{ "Anthropic": "an-THROP-ik", "SDLC": "S D L C" }` |
 | `meta.context` | Key/value template variables interpolated into scene fields. Overridden by `--context` CLI flags |
+| `meta.personas` | Deck-wide cast registry for `personas` scenes. Each entry has `id`, plus optional `name`, `role`, `intro`, `color`, and `glyph` |
 
 A scene also takes a top-level `narration: "..."` string (any scene type). If
 **any** scene has `narration`, edge-tts is invoked and the resulting audio is
@@ -355,6 +381,24 @@ frames = 1s` at default fps. The default hold per scene type lives in
 
 Each scene is an object with a `type` discriminator. Render handlers live in
 `scenes/<type>.js`; the per-type fields below are passed through verbatim.
+
+| Need | Use |
+|---|---|
+| Opening / section break | `title` |
+| Prose beat | `narrative` |
+| Hand-authored flow / architecture diagram | `diagram-svg` |
+| Mermaid flowchart / sequence / state diagram | `mermaid` |
+| Imported screenshot, SVG, or generated image | `image` |
+| Before/after screenshot comparison | `image-compare` |
+| Recorded terminal animation | `terminal-gif` |
+| Product demo, MP4, rrweb recording, or captured tour | `video` |
+| Cast of roles, stakeholders, or user journeys | `personas` |
+| Book recommendations / bibliography | `book` |
+| Lists, comparisons, and Q&A | `cards` |
+| Source, diff, logs, config, function I/O | `code` |
+| Tables and scorecards | `table` |
+| Quantitative charts | `chart` |
+| API request/response demo | `request` |
 
 #### `title` — cold open or chapter break
 
@@ -395,12 +439,11 @@ Up to three panels (`diagram_panel_0..2` reveal slots).
   "panels": [
     {
       "label":   "Render path",
-      "viewBox": "0 0 400 360",
+      "auto_layout": true,
+      "rankdir": "TB",
       "nodes": [
-        { "id":"spec","label":"spec.json","sub":"scenes",
-          "x":100,"y":40,"w":200,"h":80,"style":"primary" },
-        { "id":"mp4", "label":"out.mp4","sub":"frames + audio",
-          "x":100,"y":240,"w":200,"h":80 }
+        { "id":"spec","label":"spec.json","sub":"scenes","style":"primary" },
+        { "id":"mp4", "label":"out.mp4","sub":"frames + audio" }
       ],
       "edges": [
         { "from":"spec","to":"mp4","label":"render" }
@@ -412,6 +455,12 @@ Up to three panels (`diagram_panel_0..2` reveal slots).
   "hold":    210 }
 ```
 
+- **Auto-layout is the normal path.** Set `auto_layout: true` or omit coordinates
+  on every node; dagre places the graph, computes the `viewBox`, and the Vue
+  component remeasures text so boxes grow to fit labels.
+- **Hand placement is the exception.** Use explicit `x`/`y`/`w`/`h` only for
+  diagrams dagre cannot express. Run `--check` and a PNG spot-check afterward,
+  because auto-sizing can grow a hand-placed box but cannot move its neighbours.
 - **Nodes** support `label` (big), `sub` (medium), and `lines: ["...", ...]`
   (smaller multi-line content). `style: "primary"` (blue) or `"secondary"`
   (purple) highlights the focal box.
@@ -419,12 +468,32 @@ Up to three panels (`diagram_panel_0..2` reveal slots).
   (horizontal vs vertical chosen by which delta dominates). `side: "left" |
   "right"` offsets the line perpendicular to its direction — used for parallel
   bidirectional arrows.
+- **Layout controls**: `rankdir: "TB"` gives top-to-bottom flow; `"LR"` works well
+  for hub-and-spoke diagrams. `elbow: true` draws orthogonal routes, with shared
+  bus routing when several elbow edges leave the same node.
 - **Gates**: an edge with `gate: "check fails"` renders as a dashed orange
   checkpoint bar instead of an arrow, with the label uppercased.
 
 Single-panel vs two-panel layouts differ in scale (single = larger fonts,
 fixed 680px SVG height, no panel chrome; two = side-by-side, smaller fonts,
 1/0.7 aspect ratio). See the authoring skill for sizing rules.
+
+#### `mermaid` — Mermaid diagrams rendered as themed SVG
+
+```json
+{ "type": "mermaid",
+  "title": "Request lifecycle",
+  "source": "flowchart LR\n  browser[Browser] --> api[API]\n  api --> db[(Database)]",
+  "scale": 1,
+  "caption": "Use Mermaid when the diagram source is already the artifact." }
+```
+
+Mermaid source is rendered in the Vue bundle with the active Slidey theme, so PDF
+output stays vector and the web viewer stays interactive. Use it for common
+Mermaid-native diagrams such as `flowchart`, `sequenceDiagram`, and
+`stateDiagram-v2`. Use `diagram-svg` instead when you need exact box sizing,
+Slidey's node/edge styling, `--check` geometry validation, or highly controlled
+placement. `scale` can shrink dense imported diagrams without editing the source.
 
 #### `trace` — multi-step cascade with HIT/MISS badges
 
@@ -557,7 +626,7 @@ Up to three panels (`thread_panel_0..2`). `system` selects the visual chrome
 
 The default `termgif_hold` is 12s — one loop of a typical [VHS](https://github.com/charmbracelet/vhs) recording.
 
-#### `video` — embed a demo MP4 or rrweb log
+#### `video` — embed MP4, rrweb, or a captured tour
 
 ```json
 { "type": "video",
@@ -569,15 +638,19 @@ The default `termgif_hold` is 12s — one loop of a typical [VHS](https://github
                    { "chapter": "open", "text": "Now we open a project." } ] }
 ```
 
-Splices a recorded product demo into the deck. Pick **one** source:
+Splices a product demo or recorded UI session into the deck. Pick **one** source:
 
 - `src` — a pre-rendered MP4 (a sibling `<src>.mp4.chapters.json` drives auto
-  captions);
+  captions). This is the best choice when you already have a rendered demo, or
+  when you want fast baked MP4/PDF/PNG output.
 - `rrweb` — an rrweb DOM-session log (`*.rrweb.json`). Baked output (mp4/pdf/png)
   seek-rasterizes the log via rrweb's `Replayer`; the **web viewer mounts a live,
   scrubbable, chapter-aware player** you can grab to interact with. Chapters come
-  from in-log `slidey.chapter` custom events. See `examples/rrweb-demo.slidey.json`;
-- `capture` — record a tour on the fly via the tour engine.
+  from in-log `slidey.chapter` custom events. See `examples/rrweb-demo.slidey.json`.
+- `capture` — a tour spec (`*.json`) recorded on the fly via the tour engine, then
+  embedded. This is convenient for one-command final renders; for iteration,
+  prefer `slidey capture ... out.mp4` or `out.rrweb.json` first and embed the
+  produced artifact.
 
 `mode: "embedded"` insets the video in a slide with `eyebrow`/`title`/`caption`
 chrome instead of filling the frame (`fit: "contain"|"cover"`);
@@ -594,6 +667,18 @@ length; PNG/PDF export shows a poster frame. Produce a source with
 > freeze-frame MP4 path — freeze-frame stays the default; rrweb is opt-in per
 > scene. For interactive review, the web viewer plays the log with no render at
 > all.
+
+Use `slidey capture` to create demo sources:
+
+```sh
+slidey capture examples/demos/kitsoki-onboarding-tour.json examples/demos/tour.mp4
+slidey capture examples/demos/kitsoki-onboarding-tour.json examples/demos/tour.rrweb.json --format rrweb
+```
+
+Both commands write a matching `.chapters.json` sidecar. The MP4 path bakes a
+deterministic freeze-frame walkthrough with deck-styled overlays; the rrweb path
+records real DOM motion as compact JSON and keeps the capture clean for reuse in
+the web player, bug reports, and later narrated decks.
 
 #### rrweb as a library (for kitsoki)
 
@@ -631,6 +716,36 @@ One scene type, many shapes selected by `variant`:
   use `left` and `right` card objects instead of the `cards` array.
 - **Q&A** — `qa`: a `question` string and an `answer` (string or array of
   bullet lines).
+
+#### `personas` — reusable cast and use-case rows
+
+```json
+{
+  "meta": {
+    "personas": [
+      { "id": "pm", "name": "Priya", "role": "Product manager",
+        "intro": "Turns a rough idea into a validated plan.",
+        "color": "#58a6ff", "glyph": "PM" }
+    ]
+  },
+  "scenes": [
+    { "type": "personas", "variant": "cast",
+      "title": "The cast", "personas": ["pm"] },
+    { "type": "personas", "variant": "use-cases",
+      "title": "How the work moves",
+      "cases": [
+        { "who": "pm", "action": "Frames the customer problem",
+          "detail": "keeps the deck anchored in a real user" }
+      ] }
+  ]
+}
+```
+
+Use `personas` when the audience needs to remember who is doing what across a
+story. Define reusable identities in `meta.personas`, then reference them by id.
+`variant: "cast"` renders avatar cards with name, role, and intro;
+`variant: "use-cases"` renders action rows attributed to a persona via `who`.
+Scenes may also carry inline persona objects for self-contained examples.
 
 #### `code` — source, diff, function I/O, tree, config, or log
 
@@ -690,6 +805,39 @@ or number; `y` is numeric.
 Local `src` paths are resolved relative to the spec and inlined for headless
 MP4/PDF/PNG rendering. `fit` defaults to `contain`; use `cover` for full-bleed
 screenshots when cropping is acceptable.
+
+#### `image-compare` — side-by-side screenshot comparison
+
+```json
+{ "type": "image-compare",
+  "title": "Before / after",
+  "left":  { "label": "Before", "src": "compare/old.png" },
+  "right": { "label": "After",  "src": "compare/new.png" },
+  "fit": "contain",
+  "caption": "Useful for migration fidelity and UI reviews." }
+```
+
+Use this for visual diffs where the screenshots are the point. `variant: "qa"`
+switches to a compact review layout with larger previews and less chrome.
+
+#### `book` — book-cover bibliography
+
+```json
+{ "type": "book",
+  "title": "Further reading",
+  "books": [
+    { "title": "Thinking in Systems",
+      "authors": "Donella H. Meadows",
+      "year": "2008",
+      "cover": "assets/books/thinking-in-systems.jpg",
+      "takeaway": "A practical vocabulary for feedback loops." }
+  ],
+  "caption": "One to three books per scene." }
+```
+
+Each book needs `title`, `authors`, `cover`, and `takeaway`; `subtitle`,
+`publisher`, `year`, `isbn`, and `alt` are optional. Covers are resolved like
+other local assets and validated for minimum useful resolution.
 
 #### `request` — API request/response card
 

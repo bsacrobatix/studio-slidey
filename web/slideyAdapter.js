@@ -67,6 +67,9 @@ export function installAdapter() {
     showCards(scene) { store.showScene('cards', scene); },
     hideCards() { store.hidePitch(); },
 
+    showPersonas(scene) { store.showScene('personas', scene); },
+    hidePersonas() { store.hidePitch(); },
+
     showCode(scene) { store.showScene('code', scene); },
     hideCode() { store.hidePitch(); },
 
