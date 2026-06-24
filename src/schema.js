@@ -93,6 +93,23 @@ const SCHEMA = {
           description: 'Template variable values; referenced in scenes as {{varName}} (Postman-compatible)',
           additionalProperties: { type: 'string' },
         },
+        personas: {
+          type: 'array',
+          description: 'Deck-wide cast registry for "personas" scenes; each persona is resolved by id so the same stylized avatar recurs across cast and use-case scenes',
+          items: {
+            type: 'object',
+            required: ['id'],
+            additionalProperties: false,
+            properties: {
+              id: { type: 'string', description: 'Stable id referenced by personas-scene `personas`/`cases[].who`' },
+              name: { type: 'string', description: 'Display name' },
+              role: { type: 'string', description: 'Role label (small caps under the name)' },
+              intro: { type: 'string', description: 'One-line introduction shown on the cast card' },
+              color: { type: 'string', description: 'Accent hex tinting the avatar ring and name, e.g. "#58a6ff"' },
+              glyph: { type: 'string', description: 'Emoji or 1–2 initials shown in the avatar chip (defaults to name initials)' },
+            },
+          },
+        },
         mode: {
           type: 'string',
           enum: ['api', 'pitch'],
@@ -394,6 +411,59 @@ const SCHEMA = {
               caption: { type: 'string' },
               outro: { type: 'string', description: 'Optional prose below peer items, used by imported Markdown decks' },
               outroHtml: { type: 'string', description: 'Sanitized inline HTML for imported Markdown outro emphasis' },
+              ...COMMON,
+            },
+          },
+          // ── personas / use-cases ────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type'],
+            description: 'Persona cast intro, or use-case actions attributed to personas by avatar.',
+            properties: {
+              type: { const: 'personas' },
+              variant: {
+                type: 'string',
+                enum: ['cast', 'use-cases'],
+                description: '"cast" renders persona cards (avatar+name+role+intro); "use-cases" renders action rows attributed to a persona',
+              },
+              title: { type: 'string', description: 'Optional eyebrow header' },
+              personas: {
+                type: 'array',
+                description: 'cast variant: persona ids (into meta.personas) or inline persona objects to display',
+                items: {
+                  oneOf: [
+                    { type: 'string' },
+                    {
+                      type: 'object',
+                      required: ['id'],
+                      properties: {
+                        id: { type: 'string' },
+                        name: { type: 'string' },
+                        role: { type: 'string' },
+                        intro: { type: 'string' },
+                        color: { type: 'string' },
+                        glyph: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+              columns: { type: 'integer', minimum: 1, description: 'Column count override for the cast grid' },
+              cases: {
+                type: 'array',
+                description: 'use-cases variant: action rows, each attributed to a persona',
+                items: {
+                  type: 'object',
+                  required: ['who', 'action'],
+                  additionalProperties: false,
+                  properties: {
+                    who: { type: 'string', description: 'Persona id whose avatar identifies the actor' },
+                    action: { type: 'string', description: 'What this persona does' },
+                    detail: { type: 'string', description: 'Optional secondary line under the action' },
+                  },
+                },
+              },
+              caption: { type: 'string' },
               ...COMMON,
             },
           },

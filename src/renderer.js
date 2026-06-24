@@ -43,6 +43,7 @@ const SCENE_MODULES = {
   stat:           require('./scenes/stat'),
   cta:            require('./scenes/cta'),
   cards:          require('./scenes/cards'),
+  personas:       require('./scenes/personas'),
   code:           require('./scenes/code'),
   table:          require('./scenes/table'),
   chart:          require('./scenes/chart'),

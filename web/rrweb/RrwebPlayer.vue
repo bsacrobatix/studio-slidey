@@ -42,6 +42,7 @@ const emit = defineEmits(['ready', 'timeupdate', 'chapter']);
 const host = ref(null);
 let player = null;
 let tick = null;
+let resizeObs = null;
 
 const ready = ref(false);
 const playing = ref(false);
@@ -103,6 +104,18 @@ async function mount() {
       player.pause(0);
     }
     scaleToFit();
+    // The iframe's intrinsic size (offsetWidth/Height) is often still 0 on the
+    // synchronous mount tick, so the first scaleToFit() bails and the replay
+    // renders at its full captured viewport — overflowing the host and reading
+    // as a "heavily cut off" video. Re-fit across the next two frames once layout
+    // settles, and keep fitting on any host/iframe resize (the deck stage itself
+    // scales to the viewport, which would otherwise leave the scale stale).
+    requestAnimationFrame(() => { scaleToFit(); requestAnimationFrame(scaleToFit); });
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObs = new ResizeObserver(() => scaleToFit());
+      if (host.value) resizeObs.observe(host.value);
+      if (player.iframe) resizeObs.observe(player.iframe);
+    }
     ready.value = true;
     emit('ready', meta);
     if (props.autoplay) togglePlay();
@@ -127,6 +140,7 @@ function scaleToFit() {
 
 function destroy() {
   stopTick();
+  if (resizeObs) { try { resizeObs.disconnect(); } catch { /* ignore */ } resizeObs = null; }
   try { if (player) player.destroy(); } catch { /* ignore */ }
   player = null;
   playing.value = false;
