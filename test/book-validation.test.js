@@ -71,3 +71,18 @@ test('meta.required_scenes catches missing promised scene counts', () => {
   assert.equal(result.valid, false);
   assert.match(result.errors.join('\n'), /requires at least 3 scene\(s\) of type "book"/);
 });
+
+test('scene schemas reject fields unsupported by that scene type', () => {
+  const result = validateSpec({
+    meta: { mode: 'pitch' },
+    scenes: [{
+      type: 'narrative',
+      eyebrow: 'Cat Wrangling',
+      body: 'This text renders.',
+      image: 'assets/cat-wrangling.png',
+    }],
+  });
+
+  assert.equal(result.valid, false);
+  assert.match(result.errors.join('\n'), /unknown field "image"/);
+});

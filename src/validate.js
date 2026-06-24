@@ -210,7 +210,7 @@ function formatOne(err, sceneIdx, scene) {
 
   if (err.keyword === 'additionalProperties') {
     const extra = err.params && err.params.additionalProperty;
-    return `unknown field "${extra || field}" in ${sub ? sub.split('/').slice(0, -1).join('/') || 'scene' : 'meta'}`;
+    return `unknown field "${extra || field}" in ${sub ? sub.split('/').slice(0, -1).join('/') || 'scene' : 'scene'}`;
   }
 
   if (err.keyword === 'discriminator') {

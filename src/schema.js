@@ -4,9 +4,12 @@
 // Exported for --schema (LLM/tooling) and used by --validate and startup validation.
 
 const COMMON = {
+  _comment: { type: 'string', description: 'Optional human comment; ignored by the renderer' },
   narration: { type: 'string', description: 'Text synthesized to speech audio via edge-tts' },
   hold: { type: 'integer', minimum: 0, description: 'Extra frames to hold after the last reveal step' },
   instant: { type: 'boolean', description: 'Reveal the whole scene at once (no progressive build / no title-only first page) — one PDF page / nav advance for the scene' },
+  seamless: { type: 'boolean', description: 'Keep diagram continuity across adjacent scenes when supported by the renderer' },
+  skipTitle: { type: 'boolean', description: 'Suppress repeated scene title chrome when supported by the renderer' },
 };
 
 const CARDS_ITEM = {
@@ -48,6 +51,12 @@ const EDGE = {
     label: { type: 'string' },
     gate: { type: 'string', description: 'Dashed-line checkpoint condition label' },
     side: { type: 'string', enum: ['left', 'right'], description: 'Parallel arrow side' },
+    style: { type: 'string', description: 'Renderer-specific edge routing/style hint such as "back" or "recycle"' },
+    bus: { type: 'number', description: 'SVG coordinate for routed/back-edge bus lines' },
+    lift: { type: 'number', description: 'SVG routing offset for edge departure' },
+    land: { type: 'number', description: 'SVG routing offset for edge arrival' },
+    highlighted: { type: 'boolean', description: 'Accent this edge in the rendered diagram' },
+    agent: { type: 'boolean', description: 'Mark this gate/edge as agent-mediated rather than deterministic' },
   },
 };
 
@@ -206,6 +215,7 @@ const SCHEMA = {
                   required: ['nodes'],
                   properties: {
                     label: { type: 'string', description: 'Panel heading' },
+                    caption: { type: 'string', description: 'Panel-local caption' },
                     viewBox: { type: 'string', description: 'SVG viewBox, e.g. "0 0 800 600"' },
                     nodes: {
                       type: 'array',
@@ -321,6 +331,7 @@ const SCHEMA = {
                         type: 'object',
                         properties: {
                           author: { type: 'string' },
+                          role: { type: 'string' },
                           body: { type: 'string' },
                           type: { type: 'string' },
                           ts: { type: 'string' },
@@ -783,5 +794,33 @@ const SCHEMA = {
     },
   },
 };
+
+function closeTypedObjects(schema) {
+  if (!schema || typeof schema !== 'object') return schema;
+
+  if (schema.type === 'object' && schema.properties && schema.additionalProperties === undefined) {
+    schema.additionalProperties = false;
+  }
+
+  for (const key of ['properties', 'items']) {
+    const child = schema[key];
+    if (!child) continue;
+    if (Array.isArray(child)) {
+      child.forEach(closeTypedObjects);
+    } else if (key === 'properties') {
+      Object.values(child).forEach(closeTypedObjects);
+    } else {
+      closeTypedObjects(child);
+    }
+  }
+  for (const key of ['oneOf', 'anyOf', 'allOf']) {
+    const children = schema[key];
+    if (Array.isArray(children)) children.forEach(closeTypedObjects);
+  }
+
+  return schema;
+}
+
+SCHEMA.properties.scenes.items.oneOf.forEach(closeTypedObjects);
 
 module.exports = { SCHEMA };
