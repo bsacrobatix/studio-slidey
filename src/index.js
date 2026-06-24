@@ -188,6 +188,34 @@ if (args[0] === 'bundle') {
   }
 }
 
+// ── `slidey rrweb-repace <in.rrweb.json> <out.rrweb.json>` — readable pacing ──
+// Stretch a captured rrweb tour so each distinct content reveal gets a minimum
+// readable dwell (fixes the "last messages flash by" defect). Only adds time.
+if (args[0] === 'rrweb-repace') {
+  const inPath = args[1];
+  const outPath = args[2];
+  if (!inPath || !outPath) {
+    console.error('[slidey] usage: slidey rrweb-repace <in.rrweb.json> <out.rrweb.json> [--min-dwell ms] [--coalesce ms] [--hold ms]');
+    process.exit(1);
+  }
+  const numOpt = (flag) => { const i = args.indexOf(flag); return i >= 0 ? Number(args[i + 1]) : undefined; };
+  const { repace } = require('./rrweb-repace');
+  const fs = require('fs');
+  const raw = JSON.parse(fs.readFileSync(inPath, 'utf8'));
+  const events = Array.isArray(raw) ? raw : (raw.events || []);
+  const out = repace(events, {
+    minDwellMs: numOpt('--min-dwell'),
+    coalesceMs: numOpt('--coalesce'),
+    holdMs: numOpt('--hold'),
+  });
+  const result = Array.isArray(raw) ? out : { ...raw, events: out };
+  fs.writeFileSync(outPath, JSON.stringify(result));
+  const t0 = events[0].timestamp, before = (events[events.length - 1].timestamp - t0) / 1000;
+  const after = (out[out.length - 1].timestamp - t0) / 1000;
+  console.error(`[slidey] re-paced ${inPath}: ${before.toFixed(1)}s -> ${after.toFixed(1)}s (${out.length} events) -> ${outPath}`);
+  process.exit(0);
+}
+
 // ── `slidey drawio <input...> --out-dir <dir>` — Draw.io PNG/XML to SVG ───
 // Converts Draw.io XML, or PNGs exported with an embedded `mxfile` chunk, into
 // themed SVG diagrams suitable for image scenes and self-contained bundles.
