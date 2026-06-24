@@ -220,7 +220,7 @@ const titleSubtitleHTML = computed(() =>
 
     <!-- PITCH STAGE -->
     <div id="pitch-stage">
-      <component :is="activePitch" v-if="activePitch" :key="store.sceneType" />
+      <component :is="activePitch" v-if="activePitch" :key="store.sceneType + ':' + store.sceneNonce" />
     </div>
   </div>
 </template>

@@ -127,6 +127,11 @@ export const store = reactive({
   mode: 'api',
   scene: null,
   sceneType: null,
+  // Monotonic id bumped only when a NEW scene is shown (not on step navigation),
+  // so the viewer can key the scene component on it and remount per scene — this
+  // prevents a previous same-type scene's revealed elements from being reused and
+  // visibly fading out before the new scene reveals (the "rows flash" bug).
+  sceneNonce: 0,
   gifDataUri: '',
   imageDataUri: '',
   leftImageDataUri: '',
@@ -164,6 +169,7 @@ export const store = reactive({
   // ── Title card ────────────────────────────────────────────────────────────
   showTitleCard(scene) {
     this._resetScene();
+    this.sceneNonce++;
     this.scene = scene;
     this.sceneType = 'title';
     this._show('title-card');
@@ -173,6 +179,7 @@ export const store = reactive({
   // ── Request scene ───────────────────────────────────────────────────────
   loadScene(scene, opts) {
     this._resetScene();
+    this.sceneNonce++;
     this.scene = scene;
     this.sceneType = 'request';
     this.isMock     = (opts && opts.isMock)     || scene.mock     === true;
@@ -305,6 +312,7 @@ export const store = reactive({
   showScene(type, scene) {
     this._resetScene();
     this._resetPitch();
+    this.sceneNonce++;
     this.scene = scene;
     this.sceneType = type;
     this.transcriptCard = 0;     // start a transcript at its first turn card
