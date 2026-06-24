@@ -196,9 +196,9 @@ const gridStyle = computed(() => ({
   box-shadow: 0 0 0 6px rgba(88, 166, 255, 0.07);
 }
 .persona-avatar-sm {
-  width: 60px;
-  height: 60px;
-  font-size: 30px;
+  width: 66px;
+  height: 66px;
+  font-size: 33px;
   border-width: 2px;
   box-shadow: none;
 }
@@ -222,22 +222,22 @@ const gridStyle = computed(() => ({
 }
 .persona-body { min-width: 0; }
 .persona-name {
-  font-size: 27px;
+  font-size: 34px;
   font-weight: bold;
   line-height: 1.2;
 }
 .persona-role {
-  font-size: 19px;
+  font-size: 23px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #8b949e;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 .persona-intro {
-  font-size: 21px;
+  font-size: 26px;
   color: #cdd9e5;
   line-height: 1.4;
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
 /* ── USE-CASES rows ────────────────────────────────────────────────────────── */
@@ -260,14 +260,14 @@ const gridStyle = computed(() => ({
 }
 .usecase-actor {
   flex-shrink: 0;
-  width: 150px;
+  width: 176px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
 }
 .usecase-actor-name {
-  font-size: 17px;
+  font-size: 22px;
   font-weight: bold;
   text-align: center;
   line-height: 1.15;
@@ -275,18 +275,18 @@ const gridStyle = computed(() => ({
 .usecase-text {
   min-width: 0;
   border-left: 1px solid #30363d;
-  padding-left: 26px;
+  padding-left: 28px;
 }
 .usecase-action {
-  font-size: 26px;
+  font-size: 31px;
   color: #e6edf3;
   font-weight: bold;
   line-height: 1.3;
 }
 .usecase-detail {
-  font-size: 20px;
+  font-size: 25px;
   color: #8b949e;
   line-height: 1.4;
-  margin-top: 8px;
+  margin-top: 9px;
 }
 </style>
