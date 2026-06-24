@@ -1,71 +1,87 @@
 'use strict';
 
 // Tests for src/rrweb-repace.js — the readable-pacing stretch for captured rrweb
-// tours. It must (a) push distinct content reveals at least minDwell apart,
-// (b) leave already-spaced reveals untouched (only add time, never compress),
-// (c) coalesce a multi-mutation render into one reveal, and (d) append a trailing
-// hold without adding visible content.
+// tours. It must (a) push distinct content reveals at least their readable dwell
+// apart, (b) scale that dwell with the reveal's TEXT length (a long typed answer
+// needs more reading time than a one-word trace row — the "scrolls past the
+// user's input" defect), (c) leave already-roomy reveals untouched (only add
+// time, never compress), (d) coalesce a multi-mutation render into one reveal,
+// (e) append a single idempotent trailing hold, and (f) not mutate inputs.
 //
 //   node --test test/rrweb-repace.test.js
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { repace } = require('../src/rrweb-repace');
+const { repace, readableDwellMs } = require('../src/rrweb-repace');
 
-// A significant content reveal: a mutation adding >=4 element nodes.
-function reveal(ts) {
+// A significant content reveal carrying a text body of the given length.
+function reveal(ts, textLen = 8) {
+  const text = 'x'.repeat(textLen);
   return { type: 3, timestamp: ts, data: { source: 0, adds: [
     { node: { type: 2, tagName: 'div' } }, { node: { type: 2, tagName: 'span' } },
-    { node: { type: 2, tagName: 'p' } }, { node: { type: 3, textContent: 'a message body that is clearly long enough' } },
+    { node: { type: 2, tagName: 'p' } }, { node: { type: 3, textContent: text } },
   ] } };
 }
 const meta = (ts) => ({ type: 4, timestamp: ts, data: {} });
 
-function dwellsBetweenReveals(events) {
-  const sig = events.filter(e => e.type === 3 && e.data && e.data.source === 0 && (e.data.adds || []).length >= 4);
-  const ds = [];
-  for (let i = 1; i < sig.length; i++) ds.push(sig[i].timestamp - sig[i - 1].timestamp);
-  return ds;
+function revealTimes(events) {
+  return events.filter(e => e.type === 3 && e.data && e.data.source === 0 && (e.data.adds || []).length >= 4)
+    .map(e => e.timestamp);
+}
+function dwells(events) {
+  const t = revealTimes(events);
+  const d = [];
+  for (let i = 1; i < t.length; i++) d.push(t[i] - t[i - 1]);
+  return d;
 }
 
-test('crammed tail reveals (distinct, above coalesce) are pushed minDwell apart', () => {
-  // Five distinct reveals 250ms apart (a rushed burst — above the 150ms coalesce).
-  const events = [meta(0), reveal(0), reveal(250), reveal(500), reveal(750), reveal(1000)];
-  const out = repace(events, { minDwellMs: 1400, coalesceMs: 150, holdMs: 0 });
-  const ds = dwellsBetweenReveals(out);
-  assert.ok(ds.length === 4, 'all five reveals preserved');
-  for (const d of ds) assert.ok(d >= 1400, `dwell ${d} >= 1400`);
+const OPTS = { minDwellMs: 1400, maxDwellMs: 3800, msPerChar: 22, coalesceMs: 150, holdMs: 0 };
+
+test('short crammed reveals are pushed to the base dwell', () => {
+  const events = [meta(0), reveal(0, 4), reveal(250, 4), reveal(500, 4)];
+  const out = repace(events, OPTS);
+  for (const d of dwells(out)) assert.ok(d >= 1400, `dwell ${d} >= base 1400`);
 });
 
-test('already well-paced reveals are left unchanged (only adds time)', () => {
-  const events = [meta(0), reveal(0), reveal(2000), reveal(4000)];
-  const out = repace(events, { minDwellMs: 1400, coalesceMs: 150, holdMs: 0 });
-  assert.deepEqual(dwellsBetweenReveals(out), [2000, 2000]);
+test('a LONG typed answer gets proportionally more dwell than a short row', () => {
+  // A 90-char user answer crammed 250ms before the next reveal must be pushed to
+  // its text-scaled readable dwell (1400 + 90*22 = 3380ms), not just 1400.
+  const want = readableDwellMs(90, OPTS); // 3380
+  const events = [meta(0), reveal(0, 90), reveal(250, 6), reveal(500, 6)];
+  const out = repace(events, OPTS);
+  const t = revealTimes(out);
+  assert.ok(t[1] - t[0] >= want, `long reveal dwell ${t[1] - t[0]} >= ${want}`);
+  assert.ok(want > 1400, 'sanity: long text needs more than the base dwell');
+});
+
+test('already-roomy reveals are left unchanged (only adds time)', () => {
+  // Short text → base dwell 1400; spaced 2000 apart (> required) → no change.
+  const events = [meta(0), reveal(0, 4), reveal(2000, 4), reveal(4000, 4)];
+  const out = repace(events, OPTS);
+  assert.deepEqual(dwells(out), [2000, 2000]);
 });
 
 test('a multi-mutation render within coalesce is one reveal, not several', () => {
-  // Three mutations 20ms apart = one logical render, then a distinct reveal.
-  const events = [meta(0), reveal(0), reveal(20), reveal(40), reveal(500)];
-  const out = repace(events, { minDwellMs: 1400, coalesceMs: 150, holdMs: 0 });
-  const sig = out.filter(e => e.type === 3 && (e.data.adds || []).length >= 4);
-  // The first three stay tight (within the group); the fourth is pushed to >=1400
-  // after the group's anchor.
-  assert.ok(sig[1].timestamp - sig[0].timestamp <= 150, 'group stays tight');
-  assert.ok(sig[2].timestamp - sig[0].timestamp <= 150, 'group stays tight');
-  assert.ok(sig[3].timestamp - sig[0].timestamp >= 1400, 'next reveal pushed past minDwell');
+  const events = [meta(0), reveal(0, 6), reveal(20, 6), reveal(40, 6), reveal(500, 6)];
+  const out = repace(events, OPTS);
+  const t = revealTimes(out);
+  assert.ok(t[1] - t[0] <= 150 && t[2] - t[0] <= 150, 'group stays tight');
+  assert.ok(t[3] - t[0] >= 1400, 'next reveal pushed past the dwell');
 });
 
-test('a trailing hold extends duration with a no-op (non-content) mutation', () => {
-  const events = [meta(0), reveal(0), reveal(2000)];
-  const out = repace(events, { minDwellMs: 1400, holdMs: 1500 });
-  const last = out[out.length - 1];
-  assert.equal(last.timestamp, 2000 + 1500, 'final hold at last+holdMs');
-  assert.deepEqual(last.data.adds, [], 'hold adds no content');
+test('re-running is idempotent (single trailing hold, stable timing)', () => {
+  const events = [meta(0), reveal(0, 90), reveal(250, 6), reveal(900, 6)];
+  const once = repace(events, { ...OPTS, holdMs: 1500 });
+  const twice = repace(once, { ...OPTS, holdMs: 1500 });
+  // exactly one hold on each pass, and the second pass changes nothing.
+  assert.equal(once.filter(e => e.data && e.data._slideyHold).length, 1);
+  assert.equal(twice.filter(e => e.data && e.data._slideyHold).length, 1);
+  assert.deepEqual(twice.map(e => e.timestamp), once.map(e => e.timestamp));
 });
 
 test('inputs are not mutated', () => {
-  const events = [meta(0), reveal(0), reveal(100)];
+  const events = [meta(0), reveal(0, 40), reveal(100, 40)];
   const before = JSON.stringify(events);
-  repace(events, { minDwellMs: 1400 });
+  repace(events, OPTS);
   assert.equal(JSON.stringify(events), before);
 });

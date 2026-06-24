@@ -195,7 +195,7 @@ if (args[0] === 'rrweb-repace') {
   const inPath = args[1];
   const outPath = args[2];
   if (!inPath || !outPath) {
-    console.error('[slidey] usage: slidey rrweb-repace <in.rrweb.json> <out.rrweb.json> [--min-dwell ms] [--coalesce ms] [--hold ms]');
+    console.error('[slidey] usage: slidey rrweb-repace <in.rrweb.json> <out.rrweb.json> [--min-dwell ms] [--max-dwell ms] [--per-char ms] [--coalesce ms] [--hold ms]');
     process.exit(1);
   }
   const numOpt = (flag) => { const i = args.indexOf(flag); return i >= 0 ? Number(args[i + 1]) : undefined; };
@@ -205,6 +205,8 @@ if (args[0] === 'rrweb-repace') {
   const events = Array.isArray(raw) ? raw : (raw.events || []);
   const out = repace(events, {
     minDwellMs: numOpt('--min-dwell'),
+    maxDwellMs: numOpt('--max-dwell'),
+    msPerChar: numOpt('--per-char'),
     coalesceMs: numOpt('--coalesce'),
     holdMs: numOpt('--hold'),
   });
