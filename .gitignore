@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output (Vue render bundle + web app + single-file static viewer)
+dist/
+dist-render/
+dist-web-single/
+
+# Render artifacts
+*.mp4
+*.pdf
+.artifacts/
+.worktrees/
+frames/
+*-frames/
+audio/
+*.mp3
+*.png
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*~
+# Kitsoki local runtime
+.kitsoki.local.yaml
+.kitsoki/sessions/
+.artifacts/
+.context
+.worktrees
