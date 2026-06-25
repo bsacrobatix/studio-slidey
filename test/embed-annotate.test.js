@@ -1,54 +1,51 @@
 'use strict';
 
 // embed-annotate — slidey's producer side of the embed annotation protocol.
-// Pins (1) the element model → pick targets math against a fake DOM, and (2) the
-// host→deck enable message producing a deck→host embed:pick on element click.
+// Pins (1) generic pick-target discovery off the rendered layout (every revealed
+// `.reveal` block under the active scene — no per-scene-type map), and (2) the
+// host→deck enable message producing a deck→host embed:pick on element click,
+// including the rebuild when the deck advances to a different slide.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-// A tiny fake DOM: nodes addressable by id/class with a fixed bounding rect.
-function fakeRoot(nodes) {
-  // nodes: { '#image-title': [x,y,w,h], '.cards-card': [[...],[...]] }
+// A tiny fake DOM: querySelectorAll(PICK_SELECTOR) returns the revealed blocks of
+// the active scene. Each node carries an id, an optional attr bag, text, and a
+// fixed bounding rect — exactly what buildPickTargets reads.
+function node({ id, rect, attrs = {}, text = '' }) {
   return {
-    querySelector(sel) {
-      const v = nodes[sel];
-      if (!v || Array.isArray(v[0])) return null;
-      return { getBoundingClientRect: () => ({ x: v[0], y: v[1], width: v[2], height: v[3] }) };
-    },
-    querySelectorAll(sel) {
-      const v = nodes[sel];
-      if (!v || !Array.isArray(v[0])) return [];
-      return v.map((b) => ({ getBoundingClientRect: () => ({ x: b[0], y: b[1], width: b[2], height: b[3] }) }));
-    },
+    id,
+    textContent: text,
+    getAttribute: (n) => (n in attrs ? attrs[n] : null),
+    getBoundingClientRect: () => ({ x: rect[0], y: rect[1], width: rect[2], height: rect[3] }),
   };
 }
+function fakeRoot(nodes) {
+  return { querySelectorAll: () => nodes };
+}
 
-test('buildPickTargets emits <scene>/<field> refs with on-screen bboxes', async () => {
+test('buildPickTargets emits <scene>/<field> refs from id, dropping the type prefix', async () => {
   const { buildPickTargets } = await import('../web/embed-annotate.js');
-  const root = fakeRoot({
-    '#image-title': [10, 20, 300, 40],
-    '#image-frame': [10, 70, 600, 400],
-    // caption omitted on this slide → skipped
-  });
-  const targets = buildPickTargets(root, 'image', 9);
-  assert.deepEqual(
-    targets.map((t) => t.ref),
-    ['9/title', '9/src'],
-    'image scene yields title + image element refs for scene 9 (caption absent → skipped)',
-  );
-  assert.equal(targets[0].label, 'title');
+  const root = fakeRoot([
+    node({ id: 'image-title', rect: [10, 20, 300, 40], text: 'Cat Wrangling' }),
+    // template override: the frame block edits the `src` spec field, not `frame`.
+    node({ id: 'image-frame', rect: [10, 70, 600, 400], attrs: { 'data-embed-field': 'src', 'data-embed-label': 'image' } }),
+  ]);
+  const targets = buildPickTargets(root, 9);
+  assert.deepEqual(targets.map((t) => t.ref), ['9/title', '9/src']);
+  assert.equal(targets[0].label, 'Cat Wrangling', 'label is the block text the operator sees');
+  assert.equal(targets[1].label, 'image', 'data-embed-label overrides');
   assert.deepEqual(targets[1].bbox, [10, 70, 600, 400]);
 });
 
-test('buildPickTargets expands repeated cards to card_<i>', async () => {
+test('buildPickTargets skips zero-area (not-laid-out) blocks', async () => {
   const { buildPickTargets } = await import('../web/embed-annotate.js');
-  const root = fakeRoot({
-    '#cards-title': [0, 0, 100, 30],
-    '.cards-card': [[0, 40, 200, 100], [220, 40, 200, 100], [440, 40, 200, 100]],
-  });
-  const refs = buildPickTargets(root, 'cards', 1).map((t) => t.ref);
-  assert.deepEqual(refs, ['1/title', '1/card_0', '1/card_1', '1/card_2']);
+  const root = fakeRoot([
+    node({ id: 'cards-title', rect: [0, 0, 100, 30], text: 'Agenda' }),
+    node({ id: 'cards-item-0', rect: [0, 0, 0, 0], text: 'collapsed' }),
+    node({ id: 'cards-item-1', rect: [0, 40, 200, 100], text: 'Second card' }),
+  ]);
+  assert.deepEqual(buildPickTargets(root, 1).map((t) => t.ref), ['1/title', '1/item-1']);
 });
 
 test('enabling annotation mode posts embed:pick on element click', async (t) => {
@@ -63,7 +60,7 @@ test('enabling annotation mode posts embed:pick on element click', async (t) => 
     removeEventListener: (type) => { delete listeners[type]; },
   };
   // Minimal fake document: createElement nodes that record click handlers; body
-  // collects appended overlays. querySelector resolves the deck elements.
+  // collects appended overlays; querySelectorAll resolves the revealed blocks.
   const clickHandlers = [];
   const body = { children: [], appendChild(n) { this.children.push(n); }, removeChild(n) { this.children = this.children.filter((c) => c !== n); } };
   function makeEl() {
@@ -75,30 +72,28 @@ test('enabling annotation mode posts embed:pick on element click', async (t) => 
     };
   }
   // Mutable scene state: the operator advances slides while annotation mode is on.
-  let sceneType = 'image';
   let sceneIndex = 9;
-  let deckNodes = { '#image-title': [10, 20, 300, 40], '#image-frame': [10, 70, 600, 400] };
+  let blocks = [
+    node({ id: 'image-title', rect: [10, 20, 300, 40], text: 'Cat Wrangling' }),
+    node({ id: 'image-frame', rect: [10, 70, 600, 400], attrs: { 'data-embed-field': 'src' } }),
+  ];
   const doc = {
     body,
-    createElement() { const el = makeEl(); return el; },
-    querySelector(sel) {
-      const v = deckNodes[sel];
-      return v ? { getBoundingClientRect: () => ({ x: v[0], y: v[1], width: v[2], height: v[3] }) } : null;
-    },
-    querySelectorAll() { return []; },
+    createElement() { return makeEl(); },
+    querySelectorAll() { return blocks; },
   };
 
   const teardown = installEmbedAnnotate(
-    { getRoot: () => doc, getSceneType: () => sceneType, getSceneIndex: () => sceneIndex },
+    { getRoot: () => doc, getSceneIndex: () => sceneIndex },
     win, doc,
   );
   t.after(teardown);
 
-  // Host turns annotation mode on → overlay built with one marker per element.
+  // Host turns annotation mode on → overlay built with one marker per block.
   listeners.message({ data: { type: 'embed:annotate', enabled: true } });
-  assert.equal(clickHandlers.length, 2, 'a marker per pickable element');
+  assert.equal(clickHandlers.length, 2, 'a marker per pickable block');
 
-  // Operator clicks the image element (2nd marker) → embed:pick posted.
+  // Operator clicks the image block (2nd marker) → embed:pick posted.
   clickHandlers[1]({ preventDefault() {}, stopPropagation() {} });
   const pick = posted.find((m) => m.type === 'embed:pick');
   assert.ok(pick, 'embed:pick posted to parent');
@@ -108,9 +103,11 @@ test('enabling annotation mode posts embed:pick on element click', async (t) => 
 
   // Advance to a DIFFERENT slide (a narrative scene) — the markers must REBUILD
   // for the new slide, not stay pinned to scene 9 (the reported bug).
-  sceneType = 'narrative';
   sceneIndex = 12;
-  deckNodes = { '#narrative-lede': [0, 0, 400, 60], '#narrative-body': [0, 80, 800, 300] };
+  blocks = [
+    node({ id: 'narrative-lede', rect: [0, 0, 400, 60], text: 'The thesis' }),
+    node({ id: 'narrative-body', rect: [0, 80, 800, 300], text: 'Body copy' }),
+  ];
   posted.length = 0;
   const before = clickHandlers.length;
   listeners['slidey:scene-changed']({ detail: { sceneIndex: 12 } });

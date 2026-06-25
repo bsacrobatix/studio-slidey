@@ -28,6 +28,8 @@ const mediaStyle = computed(() => ({
       id="image-frame"
       class="image-frame reveal"
       :class="{ shown: shown('image-frame') }"
+      data-embed-field="src"
+      data-embed-label="image"
       :style="frameStyle"
     >
       <img

@@ -8,72 +8,65 @@
 //
 // `ref` is the opaque element id `<sceneIndex>/<field>` the host round-trips into
 // a refine; `scope` is the scene index; `bbox` is the element's on-screen rect.
-// The host needs NO slidey knowledge — slidey owns the element model here, in one
-// place, keyed off the deck's existing stable element ids (no per-component tags).
+// The host needs NO slidey knowledge — slidey owns the element model here.
+//
+// Fidelity: rather than a hand-maintained per-scene-type element map (which only
+// ever covered a handful of the ~20 scene types and drifted from the templates),
+// we discover pickable blocks straight from the LIVE layout the deck rendered:
+// every REVEALED `.reveal` block under the active scene region. Those blocks ARE
+// the deck's own structural / animation units, so coverage tracks the templates
+// automatically — every scene type, every meaningful block, and it follows the
+// in-scene reveal transitions (a block becomes pickable exactly when it appears).
+// A template can override the derived field/label per block with the optional
+// `data-embed-field` / `data-embed-label` attributes when the id-derived value
+// isn't the spec field (e.g. the image frame edits `src`).
 
-// Scene type → the editable elements on that slide. `field` is the spec field a
-// reviser edits; the emitted ref is `<sceneIndex>/<field>`. `selector` locates the
-// rendered node; `selectorAll` + `fieldPattern` handle repeated elements (cards).
-export const SCENE_ELEMENTS = {
-  title: [
-    { field: 'eyebrow', selector: '#title-card-eyebrow', label: 'eyebrow' },
-    { field: 'title', selector: '#title-card-title', label: 'title' },
-    { field: 'subtitle', selector: '#title-card-subtitle', label: 'subtitle' },
-  ],
-  narrative: [
-    { field: 'eyebrow', selector: '#narrative-eyebrow', label: 'eyebrow' },
-    { field: 'lede', selector: '#narrative-lede', label: 'lede' },
-    { field: 'body', selector: '#narrative-body', label: 'body' },
-  ],
-  image: [
-    { field: 'title', selector: '#image-title', label: 'title' },
-    { field: 'src', selector: '#image-frame', label: 'image' },
-    { field: 'caption', selector: '#image-caption', label: 'caption' },
-  ],
-  book: [
-    { field: 'title', selector: '#book-title', label: 'title' },
-    { field: 'caption', selector: '#book-caption', label: 'caption' },
-  ],
-  'diagram-svg': [
-    { field: 'title', selector: '#diagramsvg-title', label: 'title' },
-    { field: 'caption', selector: '#diagramsvg-caption', label: 'caption' },
-  ],
-  cards: [
-    { field: 'title', selector: '#cards-title', label: 'title' },
-    { fieldPattern: 'card_', selectorAll: '.cards-card', label: 'card' },
-  ],
-};
+// The visible, addressable blocks on the slide on screen: a `.reveal` element that
+// has been revealed (`.shown`) and carries a stable id, scoped to the active
+// scene. Unrevealed blocks (opacity 0, not yet stepped to) are intentionally
+// excluded — you can only point at what you can see.
+const PICK_SELECTOR = '.scene-region.active .reveal.shown[id]';
 
-export function sceneElements(sceneType) {
-  return SCENE_ELEMENTS[sceneType] || [];
+function attr(node, name) {
+  return node && typeof node.getAttribute === 'function' ? node.getAttribute(name) : null;
 }
 
-function toTarget(node, ref, label) {
+// Derive the spec field from the element id by dropping the scene-type prefix
+// (the first hyphen-delimited segment): `image-title`→`title`, `narrative-lede`→
+// `lede`, `cards-item-0`→`item-0`, `cards-caption`→`caption`.
+function idToField(id) {
+  const i = id.indexOf('-');
+  return i >= 0 ? id.slice(i + 1) : id;
+}
+
+// A short human label for a block — its own visible text (what the operator sees),
+// falling back to the field name when the block has no text (e.g. an image frame).
+function textSnippet(node) {
+  const t = (node && typeof node.textContent === 'string' ? node.textContent : '').trim();
+  if (!t) return '';
+  const flat = t.replace(/\s+/g, ' ');
+  return flat.length > 48 ? `${flat.slice(0, 47)}…` : flat;
+}
+
+function toTarget(node, sceneIndex) {
   if (!node || typeof node.getBoundingClientRect !== 'function') return null;
   const r = node.getBoundingClientRect();
-  return { ref, label, bbox: [r.x, r.y, r.width, r.height] };
+  if (!r || r.width <= 0 || r.height <= 0) return null; // not laid out / collapsed
+  const field = attr(node, 'data-embed-field') || idToField(node.id || '');
+  const label = attr(node, 'data-embed-label') || textSnippet(node) || field;
+  return { ref: `${sceneIndex}/${field}`, label, bbox: [r.x, r.y, r.width, r.height] };
 }
 
-// buildPickTargets queries the live deck DOM for the current scene's editable
-// elements and returns {ref, label, bbox} for each one present. Missing elements
-// (an optional caption a slide omits) are skipped.
-export function buildPickTargets(root, sceneType, sceneIndex) {
+// buildPickTargets returns {ref, label, bbox} for every revealed, on-screen block
+// of the slide currently on screen — discovered from the rendered layout, so it
+// needs no per-scene-type knowledge and stays in lock-step with the templates.
+export function buildPickTargets(root, sceneIndex) {
+  if (!root || typeof root.querySelectorAll !== 'function') return [];
   const out = [];
-  for (const el of sceneElements(sceneType)) {
-    if (el.selectorAll) {
-      const nodes = root.querySelectorAll(el.selectorAll);
-      let i = 0;
-      nodes.forEach((node) => {
-        const t = toTarget(node, `${sceneIndex}/${el.fieldPattern}${i}`, `${el.label} ${i}`);
-        if (t) out.push(t);
-        i += 1;
-      });
-    } else {
-      const node = root.querySelector(el.selector);
-      const t = toTarget(node, `${sceneIndex}/${el.field}`, el.label);
-      if (t) out.push(t);
-    }
-  }
+  root.querySelectorAll(PICK_SELECTOR).forEach((node) => {
+    const t = toTarget(node, sceneIndex);
+    if (t) out.push(t);
+  });
   return out;
 }
 
@@ -124,7 +117,7 @@ export function installEmbedAnnotate(ctx, win, doc) {
     clearOverlay();
     const root = ctx.getRoot();
     if (!root) return;
-    const targets = buildPickTargets(root, ctx.getSceneType(), ctx.getSceneIndex());
+    const targets = buildPickTargets(root, ctx.getSceneIndex());
     overlay = doc.createElement('div');
     overlay.setAttribute('data-slidey-annotate', '1');
     overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483646;pointer-events:none;';
