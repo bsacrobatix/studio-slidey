@@ -134,6 +134,7 @@ export function createDeck(spec, specBaseUrl = '') {
       state.sceneIndex = cur.sceneIndex;
       state.stepIndex = cur.stepIndex;
       state.stepsInScene = cur.stepsInScene;
+      emitSceneToParent();
       return;
     }
 
@@ -158,11 +159,37 @@ export function createDeck(spec, specBaseUrl = '') {
     state.sceneIndex = cur.sceneIndex;
     state.stepIndex = cur.stepIndex;
     state.stepsInScene = cur.stepsInScene;
+    emitSceneToParent();
+  }
+
+  // Tell an embedding parent (e.g. a kitsoki annotation host) WHICH place in the
+  // artifact is on screen, so a feedback/refine pass can target what the operator
+  // is actually looking at instead of guessing. We speak a GENERIC, host-neutral
+  // embed protocol — `{type:'embed:view', producer, scope, label, count}` — so
+  // the host needs no slidey-specific knowledge: `scope` is the opaque token the
+  // host round-trips back (here the scene index as a string). `type:'slidey:scene'
+  // is also posted for any slidey-aware consumer. No-op when not embedded
+  // (parent === self) or outside a browser; cross-origin-safe.
+  function emitSceneToParent() {
+    try {
+      if (typeof window === 'undefined' || window.parent === window) return;
+      const sc = scenes[state.sceneIndex] || {};
+      const label = sc.title || sc.eyebrow || sc.lede || sc.type || ('Scene ' + state.sceneIndex);
+      const scope = String(state.sceneIndex);
+      window.parent.postMessage(
+        { type: 'embed:view', producer: 'slidey', scope, label, count: scenes.length },
+        '*',
+      );
+      window.parent.postMessage(
+        { type: 'slidey:scene', sceneIndex: state.sceneIndex, label, sceneCount: scenes.length },
+        '*',
+      );
+    } catch (_) { /* cross-origin / no parent — ignore */ }
   }
 
   function go(pos) {
     state.pos = Math.max(0, Math.min(state.total - 1, pos));
-    return render();
+    return render(); // render() notifies the embedding parent of the scene
   }
   const next = () => go(state.pos + 1);
   const prev = () => go(state.pos - 1);
