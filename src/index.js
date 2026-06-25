@@ -276,6 +276,39 @@ if (args[0] === 'rrweb-repace') {
   process.exit(0);
 }
 
+// ── `slidey rrweb-reveal <in.rrweb.json> <out.rrweb.json>` — followable scroll ─
+// Replace a conversation clip's snap-to-bottom auto-scroll with an eased reveal
+// track (hold + ease through each message), so the viewer can follow it. Fixes
+// the "jumpy / can't see the user inputs" defect that a time-only re-pace can't.
+if (args[0] === 'rrweb-reveal') {
+  const inPath = args[1];
+  const outPath = args[2];
+  if (!inPath || !outPath) {
+    console.error('[slidey] usage: slidey rrweb-reveal <in.rrweb.json> <out.rrweb.json> [--scroll-id N] [--hold ms] [--ease-min ms] [--ease-max ms] [--per-px ms] [--steps N] [--tail-hold ms]');
+    process.exit(1);
+  }
+  const numOpt = (flag) => { const i = args.indexOf(flag); return i >= 0 ? Number(args[i + 1]) : undefined; };
+  const { reveal } = require('./rrweb-reveal');
+  const fs = require('fs');
+  const raw = JSON.parse(fs.readFileSync(inPath, 'utf8'));
+  const events = Array.isArray(raw) ? raw : (raw.events || []);
+  const out = reveal(events, {
+    scrollId: numOpt('--scroll-id'),
+    holdMs: numOpt('--hold'),
+    easeMinMs: numOpt('--ease-min'),
+    easeMaxMs: numOpt('--ease-max'),
+    msPerPx: numOpt('--per-px'),
+    steps: numOpt('--steps'),
+    tailHoldMs: numOpt('--tail-hold'),
+  });
+  const result = Array.isArray(raw) ? out : { ...raw, events: out };
+  fs.writeFileSync(outPath, JSON.stringify(result));
+  const t0 = events[0].timestamp, before = (events[events.length - 1].timestamp - t0) / 1000;
+  const after = (out[out.length - 1].timestamp - t0) / 1000;
+  console.error(`[slidey] reveal-track ${inPath}: ${before.toFixed(1)}s -> ${after.toFixed(1)}s (${events.length} -> ${out.length} events) -> ${outPath}`);
+  process.exit(0);
+}
+
 // ── `slidey drawio <input...> --out-dir <dir>` — Draw.io PNG/XML to SVG ───
 // Converts Draw.io XML, or PNGs exported with an embedded `mxfile` chunk, into
 // themed SVG diagrams suitable for image scenes and self-contained bundles.
