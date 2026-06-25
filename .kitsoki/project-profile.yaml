@@ -165,7 +165,7 @@ kitsoki:
   story: dev-story
   instance:
     id: slidey-dev
-    path: "stories/slidey-dev/app.yaml"
+    path: ".kitsoki/stories/slidey-dev/app.yaml"
     bindings:
       ticket: host.local_files.ticket
       vcs: host.git
@@ -199,12 +199,12 @@ setup_plan:
     - path: ".kitsoki/project-profile.yaml"
       action: create
       summary: "Declarative onboarding profile for Slidey."
-    - path: "stories/slidey-dev/app.yaml"
+    - path: ".kitsoki/stories/slidey-dev/app.yaml"
       action: create
       summary: "Materialized dev-story instance for Slidey."
     - path: ".kitsoki.yaml"
       action: create
-      summary: "Discover project-local stories under ./stories."
+      summary: "Discover project-local stories under ./.kitsoki/stories."
     - path: ".gitignore"
       action: merge
       summary: "Ignore local Kitsoki runtime/session artifacts."
@@ -218,7 +218,7 @@ setup_plan:
   verifications:
     - id: story-load
       kind: story
-      command: "kitsoki run stories/slidey-dev/app.yaml"
+      command: "kitsoki run .kitsoki/stories/slidey-dev/app.yaml"
       gate: required
     - id: unit-tests
       kind: tests
