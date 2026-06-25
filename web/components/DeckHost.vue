@@ -138,10 +138,10 @@ const titleSubtitleHTML = computed(() =>
       id="title-card"
       :class="[{ hidden: hidden('title-card') }, title.theme === 'markdown' ? 'title-card-markdown' : '']"
     >
-      <div id="title-card-eyebrow">{{ title.eyebrow || '' }}</div>
+      <div id="title-card-eyebrow" data-embed-field="eyebrow" data-embed-label="eyebrow">{{ title.eyebrow || '' }}</div>
       <div id="title-card-rule"></div>
-      <div id="title-card-title">{{ title.title || '' }}</div>
-      <div id="title-card-subtitle" v-html="titleSubtitleHTML"></div>
+      <div id="title-card-title" data-embed-field="title" data-embed-label="title">{{ title.title || '' }}</div>
+      <div id="title-card-subtitle" data-embed-field="subtitle" data-embed-label="subtitle" v-html="titleSubtitleHTML"></div>
     </div>
 
     <!-- HEADER BAR -->

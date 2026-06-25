@@ -38,6 +38,22 @@ test('buildPickTargets emits <scene>/<field> refs from id, dropping the type pre
   assert.deepEqual(targets[1].bbox, [10, 70, 600, 400]);
 });
 
+test('buildPickTargets covers the title card (data-embed-field, no scene region)', async () => {
+  const { buildPickTargets } = await import('../web/embed-annotate.js');
+  // The title slide renders as a #title-card overlay (no .reveal, no scene
+  // region); its fields are addressable via data-embed-field. idToField would
+  // wrongly yield `card-eyebrow` from the id, so the explicit field is essential
+  // for the edit to land on the right spec field.
+  const root = fakeRoot([
+    node({ id: 'title-card-eyebrow', rect: [40, 200, 400, 30], text: 'A PITCH', attrs: { 'data-embed-field': 'eyebrow', 'data-embed-label': 'eyebrow' } }),
+    node({ id: 'title-card-title', rect: [40, 240, 800, 90], text: 'Kitsoki', attrs: { 'data-embed-field': 'title', 'data-embed-label': 'title' } }),
+    node({ id: 'title-card-subtitle', rect: [40, 340, 600, 40], text: 'Control inversion', attrs: { 'data-embed-field': 'subtitle', 'data-embed-label': 'subtitle' } }),
+  ]);
+  const targets = buildPickTargets(root, 0);
+  assert.deepEqual(targets.map((t) => t.ref), ['0/eyebrow', '0/title', '0/subtitle']);
+  assert.deepEqual(targets.map((t) => t.label), ['eyebrow', 'title', 'subtitle']);
+});
+
 test('buildPickTargets skips zero-area (not-laid-out) blocks', async () => {
   const { buildPickTargets } = await import('../web/embed-annotate.js');
   const root = fakeRoot([

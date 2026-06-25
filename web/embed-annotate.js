@@ -21,11 +21,15 @@
 // `data-embed-field` / `data-embed-label` attributes when the id-derived value
 // isn't the spec field (e.g. the image frame edits `src`).
 
-// The visible, addressable blocks on the slide on screen: a `.reveal` element that
-// has been revealed (`.shown`) and carries a stable id, scoped to the active
-// scene. Unrevealed blocks (opacity 0, not yet stepped to) are intentionally
-// excluded — you can only point at what you can see.
-const PICK_SELECTOR = '.scene-region.active .reveal.shown[id]';
+// The candidate addressable blocks: a revealed `.reveal` block with a stable id,
+// OR any element a template explicitly tagged `data-embed-field` (e.g. the title
+// card, which renders as a `.hidden`-toggled overlay OUTSIDE a scene region and so
+// has no reveal class). We do NOT scope to `.scene-region.active`: an inactive
+// scene region and a hidden title card are both `display:none`, so their blocks
+// measure zero and the area filter in toTarget() drops them — leaving exactly the
+// blocks visible on the slide on screen. Unrevealed (`.reveal` without `.shown`)
+// blocks are excluded too — you can only point at what you can see.
+const PICK_SELECTOR = '.reveal.shown[id], [data-embed-field]';
 
 function attr(node, name) {
   return node && typeof node.getAttribute === 'function' ? node.getAttribute(name) : null;
