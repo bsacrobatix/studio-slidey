@@ -176,6 +176,18 @@ kitsoki:
   judge_mode: human
   autonomy: supervised
 
+dev_story_profile:
+  docs:
+    publish_durable_path: docs/prd
+    prd_doc_filename: ""
+    design_durable_path: docs/proposals
+    design_doc_filename: ""
+    design_template_dir: docs/proposals/templates
+    design_ticket_dir: ""
+  bugfix:
+    build_cmd: "npm run build"
+    test_cmd: "npm test"
+
 mining:
   job: ""
   sample: none
@@ -228,6 +240,12 @@ setup_plan:
       kind: ui
       command: "node src/index.js examples/hello.slidey.json --port 5000 --no-open"
       gate: recommended
+
+onboarding:
+  baseline_commit: 1a018e5939ee662d37c392067ce496d9c94d1b68
+  first_onboarding_commit: 9a8ef20
+  deterministic_flow: stories/dev-story/flows/init_slidey_dogfood.yaml
+  recording_policy: gated-live-allowed
 
 readiness:
   status: not-run
