@@ -89,10 +89,23 @@ export function installEmbedAnnotate(ctx, win, doc) {
   if (!win || !doc) return () => {};
 
   let overlay = null;
+  let enabled = false;
 
   function clearOverlay() {
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
     overlay = null;
+  }
+
+  // Rebuild on the next frame so a just-navigated scene has painted its new
+  // elements before we measure them (the deck re-renders the DOM async). Without
+  // this the markers stay pinned to the slide that was on screen when annotation
+  // mode turned on.
+  function scheduleRender() {
+    if (!enabled) return;
+    const raf = win.requestAnimationFrame
+      ? win.requestAnimationFrame.bind(win)
+      : (fn) => setTimeout(fn, 16);
+    raf(() => { if (enabled) renderOverlay(); });
   }
 
   function postPick(t) {
@@ -134,10 +147,24 @@ export function installEmbedAnnotate(ctx, win, doc) {
   function onMessage(ev) {
     const d = ev && ev.data;
     if (!d || d.type !== 'embed:annotate') return;
-    if (d.enabled) renderOverlay();
+    enabled = !!d.enabled;
+    if (enabled) renderOverlay();
     else clearOverlay();
   }
 
+  // While annotation mode is on, rebuild the markers when the deck advances to a
+  // new slide (so the clickable areas follow the slide on screen) and when the
+  // viewport resizes (the measured bboxes shift).
+  function onSceneChanged() { scheduleRender(); }
+  function onResize() { scheduleRender(); }
+
   win.addEventListener('message', onMessage);
-  return () => { win.removeEventListener('message', onMessage); clearOverlay(); };
+  win.addEventListener('slidey:scene-changed', onSceneChanged);
+  win.addEventListener('resize', onResize);
+  return () => {
+    win.removeEventListener('message', onMessage);
+    win.removeEventListener('slidey:scene-changed', onSceneChanged);
+    win.removeEventListener('resize', onResize);
+    clearOverlay();
+  };
 }

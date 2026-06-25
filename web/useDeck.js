@@ -172,10 +172,19 @@ export function createDeck(spec, specBaseUrl = '') {
   // (parent === self) or outside a browser; cross-origin-safe.
   function emitSceneToParent() {
     try {
-      if (typeof window === 'undefined' || window.parent === window) return;
+      if (typeof window === 'undefined') return;
       const sc = scenes[state.sceneIndex] || {};
       const label = sc.title || sc.eyebrow || sc.lede || sc.type || ('Scene ' + state.sceneIndex);
       const scope = String(state.sceneIndex);
+      // Same-window notification so an in-page controller (the annotation pick
+      // overlay) can rebuild for the new slide as the operator advances — it
+      // can't see the parent-targeted postMessages below.
+      if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('slidey:scene-changed', { detail: { sceneIndex: state.sceneIndex } }));
+      }
+      // Cross-frame notification to an embedding host (kitsoki). No-op when the
+      // deck is the top window (not embedded).
+      if (window.parent === window) return;
       window.parent.postMessage(
         { type: 'embed:view', producer: 'slidey', scope, label, count: scenes.length },
         '*',

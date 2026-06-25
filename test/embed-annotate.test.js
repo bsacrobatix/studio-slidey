@@ -58,6 +58,7 @@ test('enabling annotation mode posts embed:pick on element click', async (t) => 
   const listeners = {};
   const win = {
     parent: { postMessage: (m) => posted.push(m) },
+    requestAnimationFrame: (fn) => fn(), // run rebuilds synchronously in the test
     addEventListener: (type, h) => { listeners[type] = h; },
     removeEventListener: (type) => { delete listeners[type]; },
   };
@@ -73,7 +74,10 @@ test('enabling annotation mode posts embed:pick on element click', async (t) => 
       parentNode: null,
     };
   }
-  const deckNodes = { '#image-title': [10, 20, 300, 40], '#image-frame': [10, 70, 600, 400] };
+  // Mutable scene state: the operator advances slides while annotation mode is on.
+  let sceneType = 'image';
+  let sceneIndex = 9;
+  let deckNodes = { '#image-title': [10, 20, 300, 40], '#image-frame': [10, 70, 600, 400] };
   const doc = {
     body,
     createElement() { const el = makeEl(); return el; },
@@ -85,7 +89,7 @@ test('enabling annotation mode posts embed:pick on element click', async (t) => 
   };
 
   const teardown = installEmbedAnnotate(
-    { getRoot: () => doc, getSceneType: () => 'image', getSceneIndex: () => 9 },
+    { getRoot: () => doc, getSceneType: () => sceneType, getSceneIndex: () => sceneIndex },
     win, doc,
   );
   t.after(teardown);
@@ -101,4 +105,19 @@ test('enabling annotation mode posts embed:pick on element click', async (t) => 
   assert.equal(pick.producer, 'slidey');
   assert.equal(pick.scope, '9');
   assert.equal(pick.ref, '9/src', 'the picked element ref rides back');
+
+  // Advance to a DIFFERENT slide (a narrative scene) — the markers must REBUILD
+  // for the new slide, not stay pinned to scene 9 (the reported bug).
+  sceneType = 'narrative';
+  sceneIndex = 12;
+  deckNodes = { '#narrative-lede': [0, 0, 400, 60], '#narrative-body': [0, 80, 800, 300] };
+  posted.length = 0;
+  const before = clickHandlers.length;
+  listeners['slidey:scene-changed']({ detail: { sceneIndex: 12 } });
+  const fresh = clickHandlers.slice(before);
+  assert.equal(fresh.length, 2, 'overlay rebuilt for the new slide (lede + body)');
+
+  fresh[0]({ preventDefault() {}, stopPropagation() {} });
+  const pick2 = posted.find((m) => m.type === 'embed:pick');
+  assert.equal(pick2.ref, '12/lede', 'clickable areas now target the slide on screen');
 });
