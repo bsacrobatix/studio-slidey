@@ -11,6 +11,7 @@ import FileTree from './FileTree.vue';
 import SceneEditor from './SceneEditor.vue';
 import { store } from '../store.js';
 import { createDeck } from '../useDeck.js';
+import { installEmbedAnnotate } from '../embed-annotate.js';
 
 const deck = shallowRef(null);
 const currentSpec = ref(null);
@@ -235,12 +236,23 @@ async function saveActive() {
   }
 }
 
+let teardownAnnotate = null;
+
 onMounted(async () => {
   try { editMode.value = localStorage.getItem('slidey.editMode') === '1'; } catch (_) {}
   document.body.classList.toggle('slidey-edit-mode', editMode.value);
   document.body.classList.toggle('slidey-presentation-mode', !editMode.value);
   fitScale();
   window.addEventListener('resize', fitScale);
+  // Producer side of the embed annotation protocol: when an embedding host turns
+  // on annotation mode, let the operator point at a real element on the live
+  // slide and post a precise `<scene>/<field>` anchor back. Reads the CURRENT
+  // slide via live accessors. No-op when not embedded.
+  teardownAnnotate = installEmbedAnnotate({
+    getRoot: () => document,
+    getSceneType: () => store.sceneType,
+    getSceneIndex: () => (deck.value && deck.value.state ? deck.value.state.sceneIndex : 0),
+  });
   try {
     // Embedded spec (single-file static build): self-contained, no fetch.
     if (window.__SLIDEY_SPEC__) {
@@ -288,6 +300,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', fitScale);
   if (pollTimer) clearInterval(pollTimer);
   if (errTimer) clearTimeout(errTimer);
+  if (teardownAnnotate) teardownAnnotate();
   document.body.classList.remove('slidey-edit-mode', 'slidey-presentation-mode');
 });
 </script>
