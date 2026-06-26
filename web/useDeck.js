@@ -18,18 +18,60 @@ export function resolveAssetHref(src, specBaseUrl = '', fallbackUrl = '') {
 }
 
 export function createDeck(spec, specBaseUrl = '') {
-  const scenes = spec.scenes || [];
-  let renderedSceneIndex = -1;
-
-  // Flat positions: one entry per reveal step (title scenes get a single entry).
-  const flat = [];
-  scenes.forEach((sc, si) => {
-    const steps = stepsForScene(sc);
-    const list = steps.length ? steps : [null];
-    list.forEach((stepName, sti) => {
-      flat.push({ sceneIndex: si, stepIndex: sti, stepName, stepsInScene: list.length });
+  let scenes = Array.isArray(spec.scenes) ? spec.scenes : [];
+  const buildFlat = (nextScenes) => {
+    const nextFlat = [];
+    nextScenes.forEach((sc, si) => {
+      const steps = stepsForScene(sc);
+      const list = steps.length ? steps : [null];
+      list.forEach((stepName, sti) => {
+        nextFlat.push({ sceneIndex: si, stepIndex: sti, stepName, stepsInScene: list.length });
+      });
     });
-  });
+    return nextFlat;
+  };
+
+  let flat = buildFlat(scenes);
+  let flatSignature = '';
+
+  function flatSignatureFor(nextScenes) {
+    return nextScenes.map((scene, i) => {
+      const steps = stepsForScene(scene);
+      const list = steps.length ? steps : [null];
+      const names = list.map(step => String(step || '')).join(',');
+      return `${i}:${list.length}:${names}`;
+    }).join('|');
+  }
+
+  // Keep derived navigation state in sync if a caller mutates `spec.scenes` in place
+  // (for example, via MCP patch flow). Without this, scene count/length can stay stale
+  // and navigation appears to get stuck after slide edits.
+  function refreshDeckState() {
+    const nextScenes = Array.isArray(spec.scenes) ? spec.scenes : [];
+    const nextSignature = flatSignatureFor(nextScenes);
+    const nextFlat = buildFlat(nextScenes);
+    if (!flat.length && !nextFlat.length) {
+      if (flatSignature !== nextSignature) renderedSceneIndex = -1;
+    } else if (nextFlat.length !== flat.length || flatSignature !== nextSignature || scenes !== nextScenes) {
+      renderedSceneIndex = -1;
+    }
+    scenes = nextScenes;
+    flat = nextFlat;
+    flatSignature = nextSignature;
+    state.total = flat.length;
+    state.sceneCount = scenes.length;
+    state.pos = Math.max(0, Math.min(state.total - 1, state.pos));
+    if (!state.total) {
+      state.sceneIndex = 0;
+      state.stepIndex = 0;
+      state.stepsInScene = 0;
+      return;
+    }
+    const cur = flat[state.pos];
+    state.sceneIndex = cur.sceneIndex;
+    state.stepIndex = cur.stepIndex;
+    state.stepsInScene = cur.stepsInScene;
+  }
 
   const state = reactive({
     pos: 0,
@@ -39,6 +81,7 @@ export function createDeck(spec, specBaseUrl = '') {
     stepsInScene: flat.length ? flat[0].stepsInScene : 0,
     sceneCount: scenes.length,
   });
+  let renderedSceneIndex = -1;
 
   const assetCache = {};
   async function ensureAsset(src) {
@@ -123,6 +166,7 @@ export function createDeck(spec, specBaseUrl = '') {
   }
 
   async function render() {
+    refreshDeckState();
     const cur = flat[state.pos];
     if (!cur) return;
     const sc = scenes[cur.sceneIndex];
@@ -197,6 +241,7 @@ export function createDeck(spec, specBaseUrl = '') {
   }
 
   function go(pos) {
+    refreshDeckState();
     state.pos = Math.max(0, Math.min(state.total - 1, pos));
     return render(); // render() notifies the embedding parent of the scene
   }
@@ -206,6 +251,7 @@ export function createDeck(spec, specBaseUrl = '') {
   const last = () => go(state.total - 1);
   // Jump to the first position of a given scene.
   const gotoScene = si => {
+    refreshDeckState();
     const idx = flat.findIndex(f => f.sceneIndex === si);
     if (idx >= 0) return go(idx);
   };
@@ -215,6 +261,7 @@ export function createDeck(spec, specBaseUrl = '') {
   // and thus the flat step list — may have shifted underneath us. Falls back to
   // the nearest scene (then position 0) when the original scene no longer exists.
   function posForScene(sceneIndex, stepIndex) {
+    refreshDeckState();
     const inScene = flat.filter(f => f.sceneIndex === sceneIndex);
     if (inScene.length) {
       const want = Math.max(0, Math.min(inScene.length - 1, stepIndex || 0));
