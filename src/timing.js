@@ -128,6 +128,13 @@ const TIMING = {
   code_notes:          30,
   code_hold:          180,  // 6.0 s
 
+  // ── MCP drive scene ─────────────────────────────────────────────
+  mcpdrive_prompt:     20,
+  mcpdrive_calls:      34,
+  mcpdrive_outcome:    28,
+  mcpdrive_caption:    24,
+  mcpdrive_hold:      210,
+
   // ── Table scene ─────────────────────────────────────────────────
   table_title:         20,
   table_header:        25,
@@ -390,6 +397,16 @@ function estimateScene(scene, opts = {}) {
       let f = T.code_header + T.code_body;
       if (Array.isArray(scene.annotations) && scene.annotations.length) f += T.code_notes;
       f += scene.hold ?? T.code_hold ?? T.narrative_hold;
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'mcp-drive': {
+      let f = T.mcpdrive_prompt;
+      if ((scene.calls || []).length) f += T.mcpdrive_calls;
+      if (scene.outcome) f += T.mcpdrive_outcome;
+      if (scene.caption) f += T.mcpdrive_caption;
+      f += scene.hold ?? T.mcpdrive_hold ?? T.code_hold;
       f += T.inter_scene;
       return f;
     }

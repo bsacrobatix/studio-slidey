@@ -21,6 +21,7 @@ import CardsScene from './CardsScene.vue';
 import ObjectivesScene from './ObjectivesScene.vue';
 import EvidenceScene from './EvidenceScene.vue';
 import CodeScene from './CodeScene.vue';
+import McpDriveScene from './McpDriveScene.vue';
 import TableScene from './TableScene.vue';
 import ChartScene from './ChartScene.vue';
 import ImageScene from './ImageScene.vue';
@@ -44,6 +45,7 @@ const PITCH_COMPONENTS = {
   objectives: ObjectivesScene,
   evidence: EvidenceScene,
   code: CodeScene,
+  'mcp-drive': McpDriveScene,
   table: TableScene,
   chart: ChartScene,
   image: ImageScene,

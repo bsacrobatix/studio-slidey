@@ -47,6 +47,7 @@ const SCENE_MODULES = {
   evidence:       require('./scenes/evidence'),
   personas:       require('./scenes/personas'),
   code:           require('./scenes/code'),
+  'mcp-drive':    require('./scenes/mcp-drive'),
   table:          require('./scenes/table'),
   chart:          require('./scenes/chart'),
   image:          require('./scenes/image'),

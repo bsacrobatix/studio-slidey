@@ -92,6 +92,12 @@ export function stepsForScene(scene) {
       return ['code_header', 'code_body',
         ...(Array.isArray(s.annotations) && s.annotations.length ? ['code_notes'] : [])];
     }
+    case 'mcp-drive': {
+      return ['mcpdrive_prompt',
+        ...((s.calls || []).length ? ['mcpdrive_calls'] : []),
+        ...(s.outcome ? ['mcpdrive_outcome'] : []),
+        ...(s.caption ? ['mcpdrive_caption'] : [])];
+    }
     case 'table': {
       const MAX_ROWS = 8;
       const rows = (s.rows || []).slice(0, MAX_ROWS);
@@ -163,6 +169,7 @@ export function applyShow(scene, opts) {
     case 'evidence':     slidey.showEvidence(scene); break;
     case 'personas':     slidey.showPersonas(scene); break;
     case 'code':         slidey.showCode(scene); break;
+    case 'mcp-drive':    slidey.showMcpDrive(scene); break;
     case 'table':        slidey.showTable(scene); break;
     case 'chart':        slidey.showChart(scene); break;
     case 'image':        slidey.showImage(scene, o.imageDataUri || ''); break;

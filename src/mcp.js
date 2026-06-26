@@ -100,6 +100,11 @@ function readSpecFile(inputPath) {
   return { abs, raw, spec, generated: /\.jsonl$/i.test(abs) };
 }
 
+function inferMode(spec) {
+  if (spec && spec.meta && spec.meta.mode) return spec.meta.mode;
+  return (spec.scenes || []).some(scene => scene && scene.type === 'request') ? 'api' : 'pitch';
+}
+
 function writeSpecFile(inputPath, spec) {
   const abs = requireSpecPath(inputPath);
   if (!/\.json$/i.test(abs)) throw new Error('only .json specs can be edited; .jsonl traces are generated read-only inputs');
@@ -225,7 +230,10 @@ async function loadRenderPage(spec, specPath, sceneIndex, stepIndex) {
   if (executableError) throw new Error(executableError);
   const puppeteer = require('puppeteer');
   require('./render-bundle').ensureRenderBundle();
-  const { stepsForScene, applyShow } = await import(pathToFileURL(path.join(ROOT_DIR, 'web', 'sceneSteps.mjs')).href);
+  const sceneStepsPath = path.join(ROOT_DIR, 'web', 'sceneSteps.mjs');
+  const sceneStepsUrl = pathToFileURL(sceneStepsPath);
+  sceneStepsUrl.searchParams.set('mtime', String(fs.statSync(sceneStepsPath).mtimeMs));
+  const { stepsForScene, applyShow } = await import(sceneStepsUrl.href);
   const scenes = Array.isArray(spec.scenes) ? spec.scenes : [];
   if (!Number.isInteger(sceneIndex) || sceneIndex < 0 || sceneIndex >= scenes.length) {
     throw new Error(`sceneIndex must be between 0 and ${Math.max(0, scenes.length - 1)}`);
@@ -239,7 +247,7 @@ async function loadRenderPage(spec, specPath, sceneIndex, stepIndex) {
   }
 
   const { width = 1920, height = 1080 } = (spec.meta && spec.meta.resolution) || {};
-  const mode = (spec.meta && spec.meta.mode) || 'api';
+  const mode = inferMode(spec);
   const browser = await puppeteer.launch(launchOptions({ width, height }));
   try {
     const page = await browser.newPage();

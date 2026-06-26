@@ -93,6 +93,11 @@ export const PITCH_REVEALS = {
   code_header: ['code-header'],
   code_body:   ['code-body'],
   code_notes:  ['code-notes'],
+  // ── MCP drive ──
+  mcpdrive_prompt:  ['mcpdrive-prompt'],
+  mcpdrive_calls:   ['mcpdrive-calls'],
+  mcpdrive_outcome: ['mcpdrive-outcome'],
+  mcpdrive_caption: ['mcpdrive-caption'],
   // ── Table ──
   table_title:   ['table-title'],
   table_header:  ['table-header'],

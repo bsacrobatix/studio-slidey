@@ -61,6 +61,26 @@ const EVIDENCE_ITEM = {
   },
 };
 
+const MCP_CALL = {
+  type: 'object',
+  required: ['tool'],
+  properties: {
+    tool: { type: 'string', description: 'MCP tool name, e.g. session.new' },
+    args: { type: 'string', description: 'Compact argument preview' },
+    result: { type: 'string', description: 'Compact result preview' },
+    status: { type: 'string', enum: ['ok', 'warn', 'issue', 'fail'], description: 'Visual status chip' },
+  },
+};
+
+const MCP_OUTCOME = {
+  type: 'object',
+  properties: {
+    status: { type: 'string', description: 'Large outcome label' },
+    ref: { type: 'string', description: 'Artifact, issue, or trace reference' },
+    lines: { type: 'array', items: { type: 'string' }, description: 'Short outcome bullets' },
+  },
+};
+
 const NODE = {
   type: 'object',
   required: ['id'],
@@ -587,6 +607,28 @@ const SCHEMA = {
               call: { type: 'string', description: 'Function invocation expression (function-io variant)' },
               returns: { type: 'string', description: 'Return value display (function-io variant)' },
               tree: { type: 'string', description: 'Indented file tree text (tree variant)' },
+              caption: { type: 'string' },
+              ...COMMON,
+            },
+          },
+          // ── mcp-drive ─────────────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type', 'prompt'],
+            description: 'Claude Code-style prompt surface with MCP tool calls and outcome.',
+            properties: {
+              type: { const: 'mcp-drive' },
+              title: { type: 'string', description: 'Optional scene title or mode label' },
+              agent: { type: 'string', description: 'Agent/subagent name shown in the chrome' },
+              story: { type: 'string', description: 'Story path or workflow context shown in the chrome' },
+              prompt: { type: 'string', description: 'Operator prompt shown as terminal input' },
+              calls: {
+                type: 'array',
+                maxItems: 6,
+                items: MCP_CALL,
+                description: 'MCP tool calls. Keep to 6 or fewer for readability.',
+              },
+              outcome: MCP_OUTCOME,
               caption: { type: 'string' },
               ...COMMON,
             },

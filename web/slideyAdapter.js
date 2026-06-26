@@ -79,6 +79,9 @@ export function installAdapter() {
     showCode(scene) { store.showScene('code', scene); },
     hideCode() { store.hidePitch(); },
 
+    showMcpDrive(scene) { store.showScene('mcp-drive', scene); },
+    hideMcpDrive() { store.hidePitch(); },
+
     showTable(scene) { store.showScene('table', scene); },
     hideTable() { store.hidePitch(); },
 
