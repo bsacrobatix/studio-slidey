@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
@@ -252,18 +253,85 @@ async function loadRenderPage(spec, specPath, sceneIndex, stepIndex) {
       document.body.classList.add('instant');
     }, spec.meta || {}, mode);
     await page.evaluate(applyShow, scene, sceneShowOpts(scene, specPath));
+    // Apply EVERY reveal step up to and including the requested one, so the PNG
+    // shows the cumulative on-screen state the audience actually sees at that
+    // moment (title + items 0..N + caption) — not the single step's element in
+    // isolation. setState() accumulates into the store's `revealed` set, so this
+    // mirrors live nav and the geometry audit (src/audit.js applies pageSteps the
+    // same way). Omitting stepIndex resolves to the last step → the fully-built
+    // composite frame.
+    const appliedSteps = pageSteps.slice(0, resolvedStepIndex + 1).filter(Boolean);
+    if (appliedSteps.length) {
+      await page.evaluate((steps) => { for (const s of steps) window.slidey.setState(s); }, appliedSteps);
+    }
     const step = pageSteps[resolvedStepIndex];
-    if (step) await page.evaluate((s) => window.slidey.setState(s), step);
     await page.evaluate('window.__slideySettle && window.__slideySettle()');
-    return { browser, page, scene, step, steps: pageSteps, width, height, sceneIndex, stepIndex: resolvedStepIndex };
+    return { browser, page, scene, step, appliedSteps, steps: pageSteps, width, height, sceneIndex, stepIndex: resolvedStepIndex };
   } catch (err) {
     await closeBrowser(browser);
     throw err;
   }
 }
 
+// Video scenes are not rendered through the Vue bundle (it excludes the rrweb
+// web player; live render rasterizes natively). Emit a representative poster
+// still instead — the frame a reviewer actually QAs — mirroring the PNG
+// exporter (src/png.js). rrweb-log sources seek-rasterize a single frame; MP4
+// `src` sources grab a frame ~10% in. Returns null if the source is missing so
+// the caller can fall back to the (placeholder) Vue render.
+async function renderVideoPoster(args, spec, specPath, sceneIndex, scene) {
+  const executableError = browserExecutableError();
+  if (executableError) throw new Error(executableError);
+  const { width = 1920, height = 1080 } = (spec.meta && spec.meta.resolution) || {};
+  const tmpPng = path.join(os.tmpdir(), `slidey-mcp-poster-${process.pid}-${sceneIndex}.png`);
+  const specDir = path.dirname(specPath || '.');
+  try {
+    if (scene.rrweb) {
+      const rrwebPath = path.resolve(specDir, scene.rrweb);
+      if (!fs.existsSync(rrwebPath)) return null;
+      const { extractRrwebPoster } = require('./rrweb-render');
+      await extractRrwebPoster(rrwebPath, tmpPng, { width, height, fit: scene.fit || 'contain', atSec: scene.start || undefined });
+    } else if (scene.src) {
+      const v = require('./video');
+      const src = path.resolve(specDir, scene.src);
+      if (!fs.existsSync(src)) return null;
+      const dur = v.probeDuration(src);
+      const at = Math.max(0, scene.start || 0) + Math.min(1, (dur || 0) * 0.1);
+      v.extractPoster({ src, outPng: tmpPng, width, height, fit: scene.fit || 'contain', atSec: at });
+    } else {
+      return null;
+    }
+    const data = fs.readFileSync(tmpPng).toString('base64');
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            path: args.path,
+            sceneIndex,
+            poster: true,
+            note: 'video scene rendered as a native poster still (the Vue bundle excludes the live rrweb player)',
+            source: scene.rrweb || scene.src,
+            width,
+            height,
+          }, null, 2),
+        },
+        { type: 'image', mimeType: 'image/png', data },
+      ],
+    };
+  } finally {
+    try { fs.unlinkSync(tmpPng); } catch (_) { /* best-effort cleanup */ }
+  }
+}
+
 async function renderPng(args) {
   const { abs, spec } = readSpecFile(args.path);
+  const scenes = Array.isArray(spec.scenes) ? spec.scenes : [];
+  const scene = scenes[args.sceneIndex];
+  if (scene && scene.type === 'video' && (scene.rrweb || scene.src)) {
+    const poster = await renderVideoPoster(args, spec, abs, args.sceneIndex, scene);
+    if (poster) return poster;
+  }
   const session = await loadRenderPage(spec, abs, args.sceneIndex, args.stepIndex);
   try {
     const data = await session.page.screenshot({ type: 'png', encoding: 'base64' });
@@ -276,6 +344,7 @@ async function renderPng(args) {
             sceneIndex: session.sceneIndex,
             stepIndex: session.stepIndex,
             step: session.step,
+            appliedSteps: session.appliedSteps,
             steps: session.steps,
             width: session.width,
             height: session.height,
@@ -316,6 +385,7 @@ async function renderHtml(args) {
       sceneIndex: session.sceneIndex,
       stepIndex: session.stepIndex,
       step: session.step,
+      appliedSteps: session.appliedSteps,
       steps: session.steps,
       html,
     });
