@@ -1,9 +1,9 @@
 'use strict';
 
 // Regression: when a deck is embedded in an iframe (e.g. a kitsoki annotation
-// host), navigating to a scene must postMessage that scene to the parent so a
-// feedback/refine pass targets the slide the operator is looking at — and must
-// stay a no-op when the deck is the top window (not embedded).
+// host), navigating to a scene/reveal step must postMessage that exact view to
+// the parent so feedback/refine/annotation targets the visual state the operator
+// is looking at — and must stay a no-op when the deck is the top window.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -50,11 +50,13 @@ test('embedded deck posts the current scene to the parent on navigation', async 
   const first = posted[0];
   assert.equal(first.producer, 'slidey');
   assert.equal(first.scope, '0', 'scope is the opaque scene token the host round-trips');
+  assert.equal(first.step, '0', 'step is the reveal transition within that scene');
   assert.equal(first.label, 'Intro');
   assert.equal(first.count, 3);
 
   const last = posted[posted.length - 1];
   assert.equal(last.scope, '2', 'navigation landed on scene 2');
+  assert.equal(last.step, '0', 'navigation reports the exact reveal transition too');
   assert.equal(last.label, 'Cat Wrangling', 'parent learns WHICH slide is on screen');
 
   // A slidey-aware consumer can still use the namespaced event.
@@ -71,4 +73,14 @@ test('top-window (non-embedded) deck does not post to a parent', async (t) => {
   await deck.render();
   await deck.gotoScene(1);
   assert.equal(global.window.posted.length, 0);
+});
+
+test('initial view query preserves scene and reveal step on boot', async () => {
+  const { initialViewFromSearch } = await import('../web/initial-view.js');
+
+  assert.deepEqual(initialViewFromSearch('?scene=9&step=2'), { sceneIndex: 9, stepIndex: 2 });
+  assert.deepEqual(initialViewFromSearch('?scene=9'), { sceneIndex: 9, stepIndex: 0 });
+  assert.equal(initialViewFromSearch('?scene=-1&step=2'), null);
+  assert.equal(initialViewFromSearch('?scene=cat&step=2'), null);
+  assert.equal(initialViewFromSearch('?step=2'), null);
 });

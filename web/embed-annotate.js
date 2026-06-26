@@ -76,7 +76,9 @@ export function buildPickTargets(root, sceneIndex) {
 
 // installEmbedAnnotate wires the producer side to the window. ctx supplies live
 // accessors (getRoot/getSceneType/getSceneIndex) so the controller always reads
-// the CURRENT slide. Returns a teardown function.
+// the CURRENT slide. `gotoView(scope, step)` is optional; when supplied, an
+// embedding host can ask a fresh annotation iframe to restore the exact
+// scene/reveal transition before markers are drawn. Returns a teardown function.
 //
 // Browser-only effects (the marker overlay) are isolated behind `doc`/`win`
 // (injectable for tests). The pure target math lives in buildPickTargets above.
@@ -141,12 +143,26 @@ export function installEmbedAnnotate(ctx, win, doc) {
     doc.body.appendChild(overlay);
   }
 
+  async function restoreRequestedView(d) {
+    if (!ctx.gotoView || d.scope === undefined || d.scope === null) return;
+    const sceneIndex = Number(d.scope);
+    const stepIndex = d.step === undefined || d.step === null || d.step === ''
+      ? 0
+      : Number(d.step);
+    if (!Number.isInteger(sceneIndex) || sceneIndex < 0) return;
+    if (!Number.isInteger(stepIndex) || stepIndex < 0) return;
+    await ctx.gotoView(sceneIndex, stepIndex);
+  }
+
   function onMessage(ev) {
     const d = ev && ev.data;
     if (!d || d.type !== 'embed:annotate') return;
     enabled = !!d.enabled;
-    if (enabled) renderOverlay();
-    else clearOverlay();
+    if (!enabled) {
+      clearOverlay();
+      return;
+    }
+    Promise.resolve(restoreRequestedView(d)).finally(scheduleRender);
   }
 
   // While annotation mode is on, rebuild the markers when the deck advances to a

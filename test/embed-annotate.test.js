@@ -107,6 +107,7 @@ test('enabling annotation mode posts embed:pick on element click', async (t) => 
 
   // Host turns annotation mode on → overlay built with one marker per block.
   listeners.message({ data: { type: 'embed:annotate', enabled: true } });
+  await Promise.resolve();
   assert.equal(clickHandlers.length, 2, 'a marker per pickable block');
 
   // Operator clicks the image block (2nd marker) → embed:pick posted.
@@ -127,10 +128,59 @@ test('enabling annotation mode posts embed:pick on element click', async (t) => 
   posted.length = 0;
   const before = clickHandlers.length;
   listeners['slidey:scene-changed']({ detail: { sceneIndex: 12 } });
+  await Promise.resolve();
   const fresh = clickHandlers.slice(before);
   assert.equal(fresh.length, 2, 'overlay rebuilt for the new slide (lede + body)');
 
   fresh[0]({ preventDefault() {}, stopPropagation() {} });
   const pick2 = posted.find((m) => m.type === 'embed:pick');
   assert.equal(pick2.ref, '12/lede', 'clickable areas now target the slide on screen');
+});
+
+test('enabling annotation mode restores the requested scene and transition before drawing markers', async (t) => {
+  const { installEmbedAnnotate } = await import('../web/embed-annotate.js');
+
+  const listeners = {};
+  const win = {
+    parent: { postMessage() {} },
+    requestAnimationFrame: (fn) => fn(),
+    addEventListener: (type, h) => { listeners[type] = h; },
+    removeEventListener: (type) => { delete listeners[type]; },
+  };
+  const body = { children: [], appendChild(n) { this.children.push(n); }, removeChild(n) { this.children = this.children.filter((c) => c !== n); } };
+  function makeEl() {
+    return {
+      style: {}, children: [],
+      setAttribute() {}, appendChild(n) { this.children.push(n); }, set title(_) {},
+      addEventListener() {},
+      parentNode: null,
+    };
+  }
+  const doc = {
+    body,
+    createElement() { return makeEl(); },
+    querySelectorAll() {
+      return [
+        node({ id: 'narrative-body', rect: [0, 80, 800, 300], text: 'Revealed body' }),
+      ];
+    },
+  };
+
+  const calls = [];
+  const teardown = installEmbedAnnotate(
+    {
+      getRoot: () => doc,
+      getSceneIndex: () => 9,
+      gotoView: async (sceneIndex, stepIndex) => { calls.push({ sceneIndex, stepIndex }); },
+    },
+    win, doc,
+  );
+  t.after(teardown);
+
+  listeners.message({ data: { type: 'embed:annotate', enabled: true, scope: '9', step: '2' } });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(calls, [{ sceneIndex: 9, stepIndex: 2 }]);
+  assert.equal(body.children.length, 1, 'markers are drawn after the requested view is restored');
 });

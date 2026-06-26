@@ -186,7 +186,7 @@ export function createDeck(spec, specBaseUrl = '') {
       // deck is the top window (not embedded).
       if (window.parent === window) return;
       window.parent.postMessage(
-        { type: 'embed:view', producer: 'slidey', scope, label, count: scenes.length },
+        { type: 'embed:view', producer: 'slidey', scope, step: String(state.stepIndex), label, count: scenes.length },
         '*',
       );
       window.parent.postMessage(

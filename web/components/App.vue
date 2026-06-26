@@ -12,6 +12,7 @@ import SceneEditor from './SceneEditor.vue';
 import { store } from '../store.js';
 import { createDeck } from '../useDeck.js';
 import { installEmbedAnnotate } from '../embed-annotate.js';
+import { initialViewFromSearch } from '../initial-view.js';
 
 const deck = shallowRef(null);
 const currentSpec = ref(null);
@@ -87,7 +88,7 @@ async function loadSchema() {
 }
 
 // ── Workspace: load a spec selected in the file tree ────────────────────────
-async function openPath(rel) {
+async function openPath(rel, restore) {
   try {
     loading.value = true;
     const res = await fetch(`/api/spec?path=${encodeURIComponent(rel)}`);
@@ -96,7 +97,7 @@ async function openPath(rel) {
     // Spec-relative gif/img assets resolve under /workspace/<dir>/ in the CLI
     // viewer, or through a VS Code webview resource URI when embedded there.
     const base = data.assetBase || new URL(`/workspace/${data.dir ? data.dir + '/' : ''}`, window.location.href).href;
-    await loadSpec(data.spec, base);
+    await loadSpec(data.spec, base, restore);
     activePath.value = rel;
     // Fresh file → reset the live-reload watch to this version.
     loadedMtime = latestMtime = data.mtimeMs || 0;
@@ -252,16 +253,21 @@ onMounted(async () => {
     getRoot: () => document,
     getSceneType: () => store.sceneType,
     getSceneIndex: () => (deck.value && deck.value.state ? deck.value.state.sceneIndex : 0),
+    gotoView: (sceneIndex, stepIndex) => {
+      if (!deck.value) return;
+      return deck.value.go(deck.value.posForScene(sceneIndex, stepIndex));
+    },
   });
   try {
+    const initialView = initialViewFromSearch(window.location.search);
     // Embedded spec (single-file static build): self-contained, no fetch.
     if (window.__SLIDEY_SPEC__) {
-      await loadSpec(window.__SLIDEY_SPEC__, window.location.href);
+      await loadSpec(window.__SLIDEY_SPEC__, window.location.href, initialView);
       return;
     }
     const param = new URLSearchParams(window.location.search).get('spec');
     if (param) {
-      await loadSpec(await fetchSpec(param), new URL(param, window.location.href).href);
+      await loadSpec(await fetchSpec(param), new URL(param, window.location.href).href, initialView);
       return;
     }
     // Workspace mode: the slidey CLI viewer serves /api/config + /api/tree.
@@ -281,14 +287,14 @@ onMounted(async () => {
         try { tree.value = await (await fetch('/api/tree')).json(); } catch (_) { tree.value = null; }
         await loadSchema();
       }
-      if (cfg.openFile) await openPath(cfg.openFile);
+      if (cfg.openFile) await openPath(cfg.openFile, initialView);
       fitScale();
       // Watch the open spec for on-disk edits (CLI viewer only).
       pollTimer = setInterval(pollMtime, POLL_MS);
       return;
     }
     // Convenience default for `npm run dev`: a spec.json beside index.html.
-    await loadSpec(await fetchSpec('./spec.json'), window.location.href);
+    await loadSpec(await fetchSpec('./spec.json'), window.location.href, initialView);
   } catch (err) {
     error.value = String(err.message || err);
   } finally {
