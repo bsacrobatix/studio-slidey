@@ -18,6 +18,7 @@ import TraceScene from './TraceScene.vue';
 import TranscriptScene from './TranscriptScene.vue';
 import ThreadScene from './ThreadScene.vue';
 import CardsScene from './CardsScene.vue';
+import ObjectivesScene from './ObjectivesScene.vue';
 import CodeScene from './CodeScene.vue';
 import TableScene from './TableScene.vue';
 import ChartScene from './ChartScene.vue';
@@ -39,6 +40,7 @@ const PITCH_COMPONENTS = {
   transcript: TranscriptScene,
   thread: ThreadScene,
   cards: CardsScene,
+  objectives: ObjectivesScene,
   code: CodeScene,
   table: TableScene,
   chart: ChartScene,

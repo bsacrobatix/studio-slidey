@@ -56,6 +56,15 @@ export const PITCH_REVEALS = {
   cards_item_6:   ['cards-item-6'],
   cards_item_7:   ['cards-item-7'],
   cards_caption:  ['cards-caption'],
+  // ── Objectives ──
+  objectives_title:   ['objectives-title'],
+  objectives_item_0:  ['objectives-item-0'],
+  objectives_item_1:  ['objectives-item-1'],
+  objectives_item_2:  ['objectives-item-2'],
+  objectives_item_3:  ['objectives-item-3'],
+  objectives_item_4:  ['objectives-item-4'],
+  objectives_item_5:  ['objectives-item-5'],
+  objectives_caption: ['objectives-caption'],
   // ── Personas / use-cases ──
   personas_title:   ['personas-title'],
   personas_item_0:  ['personas-item-0'],

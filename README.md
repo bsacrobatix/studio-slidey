@@ -330,8 +330,9 @@ sampling (≈8/658 on the sample deck — on par with the legacy renderer).
 
 Internally, scene types fall into two families the template toggles between: a
 *slides* family (`title`, `narrative`, `diagram`, `diagram-svg`, `mermaid`,
-`trace`, `transcript`, `thread`, `stat`, `cta`, `terminal-gif`, `cards`, `code`,
-`table`, `chart`, `image`, `image-compare`, `book`, `video`, `personas`) and an
+`trace`, `transcript`, `thread`, `stat`, `cta`, `terminal-gif`, `cards`,
+`objectives`, `code`, `table`, `chart`, `image`, `image-compare`, `book`,
+`video`, `personas`) and an
 *api* family (`request`). The
 spec's optional `meta.mode` selects the default; you rarely set it by hand. (In
 the code this distinction still carries its original `pitch`/`api` names — e.g.
@@ -395,6 +396,7 @@ Each scene is an object with a `type` discriminator. Render handlers live in
 | Cast of roles, stakeholders, or user journeys | `personas` |
 | Book recommendations / bibliography | `book` |
 | Lists, comparisons, and Q&A | `cards` |
+| Objective status / done vs issue vs next | `objectives` |
 | Source, diff, logs, config, function I/O | `code` |
 | Tables and scorecards | `table` |
 | Quantitative charts | `chart` |
@@ -716,6 +718,29 @@ One scene type, many shapes selected by `variant`:
   use `left` and `right` card objects instead of the `cards` array.
 - **Q&A** — `qa`: a `question` string and an `answer` (string or array of
   bullet lines).
+
+#### `objectives` — objective status with visual feedback
+
+Use `objectives` for eval/report decks where the viewer needs to know whether
+the work is done, in progress, blocked, or has issues. Do not use a generic
+`table` for this; status needs a large glyph and color, not just text in a cell.
+
+```json
+{ "type": "objectives", "title": "Objective status",
+  "items": [
+    { "label": "Harness objective", "status": "done",
+      "detail": "One local entrypoint and project catalog are in place." },
+    { "label": "HTML preview", "status": "issue",
+      "detail": "Bundle render is blocked by sandbox write permissions." },
+    { "label": "Product-site journey", "status": "next",
+      "detail": "Run production web build for A/B walkthroughs." }
+  ],
+  "caption": "Core harness complete; runtime preview still needs a clean environment." }
+```
+
+Statuses: `done` renders a large green checkmark; `issue` and `blocked` render a
+large red exclamation mark; `next`, `progress`, `pending`, and `skipped` are
+visually distinct but less final. Keep to six items or fewer.
 
 #### `personas` — reusable cast and use-case rows
 

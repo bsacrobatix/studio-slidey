@@ -56,6 +56,11 @@ const CONTRAST_INVISIBLE = 1.3;
 const CONTRAST_SMALL_MIN = 2.0;
 const CONTRAST_SMALL_FONT_PX = 20;
 
+function inferMode(spec) {
+  if (spec.meta && spec.meta.mode) return spec.meta.mode;
+  return (spec.scenes || []).some(scene => scene && scene.type === 'request') ? 'api' : 'pitch';
+}
+
 /**
  * The in-page audit. Serialized and run via page.evaluate in the render bundle's
  * browser context, so it can only use browser globals. Returns a plain array of
@@ -386,7 +391,7 @@ async function auditSpec(spec, opts = {}) {
 
   const { stepsForScene, applyShow } = await import('../web/sceneSteps.mjs');
   const { width = 1920, height = 1080 } = (spec.meta && spec.meta.resolution) || {};
-  const mode = (spec.meta && spec.meta.mode) || 'api';
+  const mode = inferMode(spec);
 
   const browser = await launchBrowser({ puppeteer, width, height });
 

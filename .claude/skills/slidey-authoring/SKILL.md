@@ -106,6 +106,7 @@ All are declared in JSON; render handlers live in `src/scenes/`:
 | `request` | API request/response card (live/mock/playback) | see `src/scenes/request.js` | varies |
 | `transcript` | Full agent/chat session as per-turn cards | `turns: [...]` | varies |
 | `cards` | Peer items OR side-by-side contrast | `variant`, `cards[]` \| `left`/`right` \| `question`/`answer` | 8–14s |
+| `objectives` | Objective/status report with large visual status glyphs | `items: [{label, status, detail}]` | 8–12s |
 | `personas` | Reusable cast intro or persona-attributed use-case rows | `meta.personas`, `variant`, `personas[]`, `cases[]` | 8–12s |
 | `code` | Real text artifacts (source, diff, function I/O, tree, config, log) | `variant`, `lang`, `code`, `highlight[]`, `annotations[]` | 8–12s |
 | `table` | Data / comparison / scorecard tables | `variant`, `columns[]`, `rows: [{cells[], highlight}]`, `winner` | 8–12s |
@@ -123,6 +124,7 @@ The full catalogue (45 layouts across 9 communicative families) and the design r
 | list N peer items (no flow) | `cards` | `grid` · `list` · `numbered` · `icon-row` · `agenda` |
 | weigh X against Y / before↔after / claim↔rebuttal | `cards` | `before-after` · `versus` · `point-counterpoint` · `pros-cons` |
 | stage a question + its answer | `cards` | `qa` |
+| show objective state / done vs issue vs next | `objectives` | `done` · `issue` · `blocked` · `next` · `progress` |
 | show the literal text of an artifact | `code` | `source` · `diff` · `function-io` · `tree` · `config` · `log` |
 | compare named options across criteria / show exact values | `table` | `comparison` · `scorecard` · `data` |
 | show what the numbers say | `chart` | `bar` (compare) · `line`/`area` (trend) · `pie` (composition) · `scatter`/`quadrant` (relate) |
@@ -144,6 +146,32 @@ maintained artifact or when a standard sequence/state/flow diagram is enough; us
 - **Two-column variants** (`before-after`/`versus`/`point-counterpoint`/`pros-cons`): `left: {label, lines:[]}` and `right: {label, lines:[]}` — contrasting accents, centre divider. `pros-cons` auto-glyphs ✓/✗.
 - **`qa`**: `question: "…"`, `answer: ["…","…"]` (string or array of lines).
 - Common: `title`, `caption`. Supersedes the legacy ASCII `diagram` comparison.
+
+#### `objectives` — objective status with visual feedback
+
+Use `objectives` for eval/report decks where the viewer needs to know whether
+the work is done, in progress, blocked, or has issues. Do not use a generic
+`table` for this; status needs a large glyph and color, not just text in a cell.
+
+```json
+{
+  "type": "objectives",
+  "title": "Objective status",
+  "items": [
+    { "label": "Harness objective", "status": "done",
+      "detail": "One local entrypoint and project catalog are in place." },
+    { "label": "HTML preview", "status": "issue",
+      "detail": "Bundle render is blocked by sandbox write permissions." },
+    { "label": "Product-site journey", "status": "next",
+      "detail": "Run production web build for A/B walkthroughs." }
+  ],
+  "caption": "Core harness complete; runtime preview still needs a clean environment."
+}
+```
+
+Statuses: `done` renders a large green checkmark; `issue` and `blocked` render a
+large red exclamation mark; `next`, `progress`, `pending`, and `skipped` are
+visually distinct but less final. Keep to six items or fewer.
 
 #### `personas` — reusable cast and who-does-what rows
 

@@ -26,6 +26,20 @@ const CARDS_ITEM = {
   },
 };
 
+const OBJECTIVE_ITEM = {
+  type: 'object',
+  required: ['label', 'status', 'detail'],
+  properties: {
+    label: { type: 'string', description: 'Objective area or milestone label' },
+    status: {
+      type: 'string',
+      enum: ['done', 'issue', 'blocked', 'next', 'progress', 'pending', 'skipped'],
+      description: 'Visual status. done renders a large green checkmark; issue/blocked render a large red exclamation mark.',
+    },
+    detail: { type: 'string', description: 'Concrete evidence, blocker, or next condition' },
+  },
+};
+
 const NODE = {
   type: 'object',
   required: ['id'],
@@ -423,6 +437,25 @@ const SCHEMA = {
               caption: { type: 'string' },
               outro: { type: 'string', description: 'Optional prose below peer items, used by imported Markdown decks' },
               outroHtml: { type: 'string', description: 'Sanitized inline HTML for imported Markdown outro emphasis' },
+              ...COMMON,
+            },
+          },
+          // ── objectives ─────────────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type', 'items'],
+            description: 'Objective/status report layout with large status glyphs.',
+            properties: {
+              type: { const: 'objectives' },
+              title: { type: 'string', description: 'Optional eyebrow header' },
+              items: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 6,
+                items: OBJECTIVE_ITEM,
+                description: 'Objective rows. Keep to 6 or fewer so status feedback remains visual.',
+              },
+              caption: { type: 'string' },
               ...COMMON,
             },
           },
