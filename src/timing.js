@@ -111,6 +111,17 @@ const TIMING = {
   objectives_caption:  30,
   objectives_hold:    220,
 
+  // ── Evidence scene ───────────────────────────────────────────────
+  evidence_title:      20,
+  evidence_item_0:     24,
+  evidence_item_1:     24,
+  evidence_item_2:     24,
+  evidence_item_3:     24,
+  evidence_item_4:     24,
+  evidence_item_5:     24,
+  evidence_caption:    30,
+  evidence_hold:      220,
+
   // ── Code scene ──────────────────────────────────────────────────
   code_header:         20,
   code_body:           40,
@@ -245,6 +256,7 @@ function estimateScene(scene, opts = {}) {
       case 'thread':       return hold('thread_hold',      scene.hold);
       case 'cards':        return scene.hold ?? T.cards_hold ?? T.thread_hold;
       case 'objectives':   return scene.hold ?? T.objectives_hold ?? T.cards_hold;
+      case 'evidence':     return scene.hold ?? T.evidence_hold ?? T.cards_hold;
       case 'code':         return scene.hold ?? T.code_hold ?? T.narrative_hold;
       case 'table':        return scene.hold ?? T.table_hold ?? T.trace_hold;
       case 'chart':        return scene.hold ?? T.chart_hold ?? T.diagramsvg_hold;
@@ -358,6 +370,18 @@ function estimateScene(scene, opts = {}) {
       for (let i = 0; i < n; i++) f += T[`objectives_item_${i}`] ?? 24;
       if (scene.caption) f += T.objectives_caption;
       f += scene.hold ?? T.objectives_hold ?? T.cards_hold;
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'evidence': {
+      const MAX_ITEMS = 6;
+      const n = Math.min(MAX_ITEMS, (scene.items || []).length);
+      let f = 0;
+      if (scene.title) f += T.evidence_title;
+      for (let i = 0; i < n; i++) f += T[`evidence_item_${i}`] ?? 24;
+      if (scene.caption) f += T.evidence_caption;
+      f += scene.hold ?? T.evidence_hold ?? T.cards_hold;
       f += T.inter_scene;
       return f;
     }

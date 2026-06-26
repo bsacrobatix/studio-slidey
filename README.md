@@ -331,8 +331,8 @@ sampling (≈8/658 on the sample deck — on par with the legacy renderer).
 Internally, scene types fall into two families the template toggles between: a
 *slides* family (`title`, `narrative`, `diagram`, `diagram-svg`, `mermaid`,
 `trace`, `transcript`, `thread`, `stat`, `cta`, `terminal-gif`, `cards`,
-`objectives`, `code`, `table`, `chart`, `image`, `image-compare`, `book`,
-`video`, `personas`) and an
+`objectives`, `evidence`, `code`, `table`, `chart`, `image`, `image-compare`,
+`book`, `video`, `personas`) and an
 *api* family (`request`). The
 spec's optional `meta.mode` selects the default; you rarely set it by hand. (In
 the code this distinction still carries its original `pitch`/`api` names — e.g.
@@ -397,6 +397,7 @@ Each scene is an object with a `type` discriminator. Render handlers live in
 | Book recommendations / bibliography | `book` |
 | Lists, comparisons, and Q&A | `cards` |
 | Objective status / done vs issue vs next | `objectives` |
+| Evidence, checks, commands, paths, and logs | `evidence` |
 | Source, diff, logs, config, function I/O | `code` |
 | Tables and scorecards | `table` |
 | Quantitative charts | `chart` |
@@ -741,6 +742,34 @@ the work is done, in progress, blocked, or has issues. Do not use a generic
 Statuses: `done` renders a large green checkmark; `issue` and `blocked` render a
 large red exclamation mark; `next`, `progress`, `pending`, and `skipped` are
 visually distinct but less final. Keep to six items or fewer.
+
+#### `evidence` — checks, artifacts, commands, and paths
+
+Use `evidence` for report decks where each row answers "what proof exists, what
+state is it in, and where do I rerun or inspect it?" Do not use a wide `table`
+for commands or artifact paths; the evidence layout gives each row a status
+glyph and keeps the command/path in a monospace chip.
+
+```json
+{ "type": "evidence", "title": "Latest check state",
+  "items": [
+    { "label": "PostgreSQL", "status": "validated",
+      "detail": "ALTER DOMAIN oracle proves baseline red and fix green.",
+      "refType": "command",
+      "ref": "bash tools/product-journey/checks/postgresql-oracle.sh" },
+    { "label": "Run log", "status": "implemented",
+      "detail": "Chronological job state and lane validation record.",
+      "refType": "log",
+      "ref": ".context/product-journey-runlog.md" }
+  ],
+  "caption": "Each evidence row has a visible state plus a concrete reference." }
+```
+
+Statuses: `done`, `validated`, and `implemented` render green checkmarks;
+`issue` and `blocked` render red exclamation marks; `next`, `progress`,
+`pending`, and `skipped` are visually distinct but less final. `refType` may be
+`command`, `artifact`, `path`, `log`, `doc`, or `test`. Keep to six rows or
+fewer.
 
 #### `personas` — reusable cast and use-case rows
 

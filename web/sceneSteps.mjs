@@ -72,6 +72,14 @@ export function stepsForScene(scene) {
         ...(s.caption ? ['objectives_caption'] : []),
       ];
     }
+    case 'evidence': {
+      const MAX_ITEMS = 6;
+      return [
+        ...(s.title ? ['evidence_title'] : []),
+        ...range((s.items || []).slice(0, MAX_ITEMS).length, 'evidence_item_'),
+        ...(s.caption ? ['evidence_caption'] : []),
+      ];
+    }
     case 'personas': {
       const n = (s.variant === 'use-cases' ? (s.cases || []) : (s.personas || [])).length;
       return [
@@ -152,6 +160,7 @@ export function applyShow(scene, opts) {
     case 'thread':       slidey.showThread(scene); break;
     case 'cards':        slidey.showCards(scene); break;
     case 'objectives':   slidey.showObjectives(scene); break;
+    case 'evidence':     slidey.showEvidence(scene); break;
     case 'personas':     slidey.showPersonas(scene); break;
     case 'code':         slidey.showCode(scene); break;
     case 'table':        slidey.showTable(scene); break;

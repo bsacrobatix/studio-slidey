@@ -70,6 +70,9 @@ export function installAdapter() {
     showObjectives(scene) { store.showScene('objectives', scene); },
     hideObjectives() { store.hidePitch(); },
 
+    showEvidence(scene) { store.showScene('evidence', scene); },
+    hideEvidence() { store.hidePitch(); },
+
     showPersonas(scene) { store.showScene('personas', scene); },
     hidePersonas() { store.hidePitch(); },
 

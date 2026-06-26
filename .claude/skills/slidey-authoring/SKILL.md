@@ -107,6 +107,7 @@ All are declared in JSON; render handlers live in `src/scenes/`:
 | `transcript` | Full agent/chat session as per-turn cards | `turns: [...]` | varies |
 | `cards` | Peer items OR side-by-side contrast | `variant`, `cards[]` \| `left`/`right` \| `question`/`answer` | 8–14s |
 | `objectives` | Objective/status report with large visual status glyphs | `items: [{label, status, detail}]` | 8–12s |
+| `evidence` | Status-forward checks, artifacts, commands, paths, and logs | `items: [{label, status, detail, refType, ref}]` | 8–12s |
 | `personas` | Reusable cast intro or persona-attributed use-case rows | `meta.personas`, `variant`, `personas[]`, `cases[]` | 8–12s |
 | `code` | Real text artifacts (source, diff, function I/O, tree, config, log) | `variant`, `lang`, `code`, `highlight[]`, `annotations[]` | 8–12s |
 | `table` | Data / comparison / scorecard tables | `variant`, `columns[]`, `rows: [{cells[], highlight}]`, `winner` | 8–12s |
@@ -125,6 +126,7 @@ The full catalogue (45 layouts across 9 communicative families) and the design r
 | weigh X against Y / before↔after / claim↔rebuttal | `cards` | `before-after` · `versus` · `point-counterpoint` · `pros-cons` |
 | stage a question + its answer | `cards` | `qa` |
 | show objective state / done vs issue vs next | `objectives` | `done` · `issue` · `blocked` · `next` · `progress` |
+| show evidence state plus rerun/inspect command or path | `evidence` | `command` · `artifact` · `path` · `log` · `doc` · `test` |
 | show the literal text of an artifact | `code` | `source` · `diff` · `function-io` · `tree` · `config` · `log` |
 | compare named options across criteria / show exact values | `table` | `comparison` · `scorecard` · `data` |
 | show what the numbers say | `chart` | `bar` (compare) · `line`/`area` (trend) · `pie` (composition) · `scatter`/`quadrant` (relate) |
@@ -172,6 +174,37 @@ the work is done, in progress, blocked, or has issues. Do not use a generic
 Statuses: `done` renders a large green checkmark; `issue` and `blocked` render a
 large red exclamation mark; `next`, `progress`, `pending`, and `skipped` are
 visually distinct but less final. Keep to six items or fewer.
+
+#### `evidence` — checks, artifacts, commands, and paths
+
+Use `evidence` for report decks where each row answers "what proof exists, what
+state is it in, and where do I rerun or inspect it?" Do not use a wide `table`
+for commands or artifact paths; the evidence layout gives each row a status
+glyph and keeps the command/path in a monospace chip.
+
+```json
+{
+  "type": "evidence",
+  "title": "Latest check state",
+  "items": [
+    { "label": "PostgreSQL", "status": "validated",
+      "detail": "ALTER DOMAIN oracle proves baseline red and fix green.",
+      "refType": "command",
+      "ref": "bash tools/product-journey/checks/postgresql-oracle.sh" },
+    { "label": "Run log", "status": "implemented",
+      "detail": "Chronological job state and lane validation record.",
+      "refType": "log",
+      "ref": ".context/product-journey-runlog.md" }
+  ],
+  "caption": "Each evidence row has a visible state plus a concrete reference."
+}
+```
+
+Statuses: `done`, `validated`, and `implemented` render green checkmarks;
+`issue` and `blocked` render red exclamation marks; `next`, `progress`,
+`pending`, and `skipped` are visually distinct but less final. `refType` may be
+`command`, `artifact`, `path`, `log`, `doc`, or `test`. Keep to six rows or
+fewer.
 
 #### `personas` — reusable cast and who-does-what rows
 

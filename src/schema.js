@@ -40,6 +40,27 @@ const OBJECTIVE_ITEM = {
   },
 };
 
+const EVIDENCE_ITEM = {
+  type: 'object',
+  required: ['label', 'status', 'detail'],
+  properties: {
+    label: { type: 'string', description: 'Evidence target, check name, or artifact surface' },
+    status: {
+      type: 'string',
+      enum: ['done', 'validated', 'implemented', 'issue', 'blocked', 'next', 'progress', 'pending', 'skipped'],
+      description: 'Visual status. validated/implemented/done render a green checkmark; issue/blocked render a red exclamation mark.',
+    },
+    detail: { type: 'string', description: 'Short evidence summary, result, or reason this item matters' },
+    refType: {
+      type: 'string',
+      enum: ['command', 'artifact', 'path', 'log', 'doc', 'test'],
+      description: 'Label for the monospace reference chip',
+    },
+    ref: { type: 'string', description: 'Command, file path, log path, or artifact reference shown as a monospace chip' },
+    note: { type: 'string', description: 'Small right-aligned qualifier, such as no-LLM or opt-in' },
+  },
+};
+
 const NODE = {
   type: 'object',
   required: ['id'],
@@ -454,6 +475,25 @@ const SCHEMA = {
                 maxItems: 6,
                 items: OBJECTIVE_ITEM,
                 description: 'Objective rows. Keep to 6 or fewer so status feedback remains visual.',
+              },
+              caption: { type: 'string' },
+              ...COMMON,
+            },
+          },
+          // ── evidence ───────────────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type', 'items'],
+            description: 'Status-forward evidence ledger for commands, checks, paths, and proof artifacts.',
+            properties: {
+              type: { const: 'evidence' },
+              title: { type: 'string', description: 'Optional eyebrow header' },
+              items: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 6,
+                items: EVIDENCE_ITEM,
+                description: 'Evidence rows. Keep to 6 or fewer; put commands/paths in ref rather than prose.',
               },
               caption: { type: 'string' },
               ...COMMON,
