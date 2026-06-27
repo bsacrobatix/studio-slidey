@@ -4,7 +4,12 @@
 import { onMounted, onUnmounted } from 'vue';
 import { store } from '../store.js';
 
-const props = defineProps({ deck: { type: Object, required: true } });
+const props = defineProps({
+  deck: { type: Object, required: true },
+  isInlineEditing: { type: Boolean, default: false },
+  suppressDeckClick: { type: Boolean, default: false },
+  clearDeckClickSuppression: { type: Function, default: () => {} },
+});
 const s = props.deck.state;
 
 function onKey(e) {
@@ -28,6 +33,11 @@ function onKey(e) {
   }
 }
 function onClick(e) {
+  if (props.suppressDeckClick) {
+    props.clearDeckClickSuppression();
+    return;
+  }
+  if (props.isInlineEditing) return;
   // Click right 2/3 → next, left 1/3 → prev (ignore clicks on the HUD and the
   // workspace file-tree sidebar so selecting a deck doesn't advance the slide).
   if (e.target.closest('.slidey-hud')) return;

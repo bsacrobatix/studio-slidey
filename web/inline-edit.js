@@ -38,6 +38,8 @@ function isSvgText(el) {
 //   ctx.getSceneIndex() → index of the on-screen scene (paths are scene-relative)
 //   ctx.render()        → re-render the deck (async); returns a promise
 //   ctx.markDirty()     → flag the spec as having unsaved edits
+//   ctx.setInlineEditing(boolean) → track whether an inline field is currently active
+//   ctx.suppressDeckClick()    → ask deck-level nav to ignore the current click
 // Returns a teardown function. Browser globals are injectable for tests.
 export function installInlineEdit(ctx, win, doc) {
   win = win || (typeof window !== 'undefined' ? window : undefined);
@@ -45,6 +47,12 @@ export function installInlineEdit(ctx, win, doc) {
   if (!win || !doc) return () => {};
 
   let active = null; // { el, path, restore, cleanup } — the field being edited
+  const setEditingState = (v) => {
+    if (typeof ctx.setInlineEditing === 'function') ctx.setInlineEditing(Boolean(v));
+  };
+  const requestDeckClickSuppression = () => {
+    if (typeof ctx.suppressDeckClick === 'function') ctx.suppressDeckClick();
+  };
 
   function resolve(el) {
     const host = el.closest && el.closest('[data-edit-path]');
@@ -78,6 +86,7 @@ export function installInlineEdit(ctx, win, doc) {
   function teardownEditor() {
     if (!active) return;
     if (active.cleanup) active.cleanup();
+    setEditingState(false);
     active = null;
   }
 
@@ -95,7 +104,7 @@ export function installInlineEdit(ctx, win, doc) {
     host.addEventListener('keydown', onKey);
     host.addEventListener('blur', onBlur, { once: true });
     active = {
-      host, path: info.path, kind: info.kind, original: info.value,
+      host, path: info.path, kind: info.kind, original: info.value, field: null,
       cleanup() {
         host.removeAttribute('contenteditable');
         host.classList.remove('slidey-inline-editing');
@@ -103,6 +112,7 @@ export function installInlineEdit(ctx, win, doc) {
         host.removeEventListener('blur', onBlur);
       },
     };
+    setEditingState(true);
   }
 
   // ── SVG <text>: overlay a positioned input matched to the text's font ─────
@@ -131,13 +141,15 @@ export function installInlineEdit(ctx, win, doc) {
     field.addEventListener('keydown', onKey);
     field.addEventListener('blur', onBlur, { once: true });
     active = {
-      host, path: info.path, kind: info.kind, original: info.value,
+      host, path: info.path, kind: info.kind, original: info.value, field,
       cleanup() {
         host.classList.remove('slidey-inline-editing');
         field.removeEventListener('blur', onBlur);
+        field.removeEventListener('keydown', onKey);
         if (field.parentNode) field.parentNode.removeChild(field);
       },
     };
+    setEditingState(true);
   }
 
   function selectAll(el) {
@@ -153,7 +165,11 @@ export function installInlineEdit(ctx, win, doc) {
   function onClick(e) {
     if (!ctx.isActive()) return;
     // A click outside the active field commits it (blur handles that); ignore.
-    if (active && (e.target === active.host || (active.host.contains && active.host.contains(e.target)))) return;
+    if (active) {
+      if (e.target === active.host || (active.host.contains && active.host.contains(e.target))) return;
+      if (active.field && (e.target === active.field || active.field.contains(e.target))) return;
+      requestDeckClickSuppression();
+    }
     const info = resolve(e.target);
     if (!info) return;
     e.preventDefault();

@@ -34,6 +34,8 @@ const isEditMode = computed(() => viewerMode.value === 'edit');
 const dirty = ref(false);
 const saving = ref(false);
 const saveError = ref('');
+const isInlineEditing = ref(false);
+const suppressDeckNavClick = ref(false);
 const schema = shallowRef(null);
 const sessionSpec = ref(null);         // snapshot of the latest loaded/reloaded spec
 const activeSpecBaseUrl = ref('');     // base URL for currently open workspace spec
@@ -251,6 +253,15 @@ function markDirty() {
   dirty.value = true;
   saveError.value = '';
 }
+function setInlineEditing(v) {
+  isInlineEditing.value = Boolean(v);
+}
+function suppressDeckClick() {
+  suppressDeckNavClick.value = true;
+}
+function clearDeckClickSuppression() {
+  suppressDeckNavClick.value = false;
+}
 
 async function saveActive() {
   if (!activePath.value || !currentSpec.value || saving.value || !activeSpecEditable.value) return;
@@ -349,6 +360,8 @@ onMounted(async () => {
     getSceneIndex: () => (deck.value && deck.value.state ? deck.value.state.sceneIndex : 0),
     render: () => deck.value && deck.value.render(),
     markDirty,
+    setInlineEditing,
+    suppressDeckClick,
   });
   try {
     const initialView = initialViewFromSearch(window.location.search);
@@ -529,7 +542,14 @@ onUnmounted(() => {
   </div>
 
   <DeckHost />
-  <NavController v-if="deck" :key="activePath" :deck="deck" />
+  <NavController
+    v-if="deck"
+    :key="activePath"
+    :deck="deck"
+    :is-inline-editing="isInlineEditing"
+    :suppress-deck-click="suppressDeckNavClick"
+    :clear-deck-click-suppression="clearDeckClickSuppression"
+  />
   <div v-if="workspace && !embedded && viewerMode === 'present' && deck" class="slidey-present-toolbar" role="group" aria-label="Viewer mode">
     <button
       type="button"
