@@ -146,6 +146,7 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
   const nodes   = panel.nodes || [];
   const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
   const markerId = `arrow-${idx}`;
+  const OUTSIDE_BUS_GUTTER = 70;
 
   const needsAutoLayout =
     panel.auto_layout === true ||
@@ -199,6 +200,21 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
   const elbowEdges = (panel.edges || []).filter(e => e.elbow);
   const elbowOutCount = {};
   for (const e of elbowEdges) elbowOutCount[e.from] = (elbowOutCount[e.from] || 0) + 1;
+  const nodeBounds = nodes.reduce((bounds, n) => {
+    const nd = needsAutoLayout && layoutMap?.[n.id]
+      ? { ...n, ...layoutMap[n.id] }
+      : n;
+    return {
+      minX: Math.min(bounds.minX, nd.x),
+      maxX: Math.max(bounds.maxX, nd.x + nd.w),
+    };
+  }, { minX: Infinity, maxX: -Infinity });
+  const normalizeOutsideBus = busX => {
+    if (!Number.isFinite(nodeBounds.minX) || !Number.isFinite(nodeBounds.maxX)) return busX;
+    if (busX < nodeBounds.minX) return Math.min(busX, nodeBounds.minX - OUTSIDE_BUS_GUTTER);
+    if (busX > nodeBounds.maxX) return Math.max(busX, nodeBounds.maxX + OUTSIDE_BUS_GUTTER);
+    return busX;
+  };
 
   const renderEdges = (panel.edges || []).map(e => {
     const from = nodeMap[e.from], to = nodeMap[e.to];
@@ -261,7 +277,7 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
     // deterministic) — `e.land` offsets the TARGET re-entry so a from==to loop
     // exits and re-enters at different heights.
     if (e.bus !== undefined) {
-      const busX = e.bus;
+      const busX = normalizeOutsideBus(e.bus);
       const sx = from.x + from.w, sy = fromCy + (e.lift || 0);
       const tx = to.x + to.w,     ty = toCy + (e.land || 0);
       const isBack = e.style === 'back';

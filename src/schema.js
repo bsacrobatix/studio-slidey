@@ -107,7 +107,7 @@ const EDGE = {
     gate: { type: 'string', description: 'Dashed-line checkpoint condition label' },
     side: { type: 'string', enum: ['left', 'right'], description: 'Parallel arrow side' },
     style: { type: 'string', description: 'Renderer-specific edge routing/style hint such as "back" or "recycle"' },
-    bus: { type: 'number', description: 'SVG coordinate for routed/back-edge bus lines' },
+    bus: { type: 'number', description: 'SVG coordinate for routed/back-edge bus lines; near-outside lanes are padded to a clear gutter' },
     lift: { type: 'number', description: 'SVG routing offset for edge departure' },
     land: { type: 'number', description: 'SVG routing offset for edge arrival' },
     highlighted: { type: 'boolean', description: 'Accent this edge in the rendered diagram' },
