@@ -137,6 +137,33 @@ test('MCP server exposes spec editing and validation over stdio', async (t) => {
   assert.match(escape.result.content[0].text, /escapes workspace root/);
 });
 
+test('MCP validates an ABSOLUTE spec path outside the workspace root', async (t) => {
+  // Regression: safeResolve() previously did path.resolve(root, './' + input),
+  // which mangled an absolute path into `<root>/abs/...` → "spec not found".
+  // An explicit absolute path (e.g. a deck in another repo) must validate.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-root-'));
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-elsewhere-'));
+  const absSpec = path.join(elsewhere, 'outside.slidey.json');
+  fs.writeFileSync(absSpec, JSON.stringify({
+    scenes: [{ type: 'title', title: 'Outside', subtitle: 'absolute path' }],
+  }, null, 2) + '\n');
+
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+
+  const init = await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+  assert.ifError(init.error);
+
+  const validate = await server.send('tools/call', {
+    name: 'slidey_validate',
+    arguments: { path: absSpec },
+  });
+  assert.ifError(validate.error);
+  assert.notEqual(validate.result.isError, true, validate.result.content && validate.result.content[0] && validate.result.content[0].text);
+  const validation = JSON.parse(validate.result.content[0].text);
+  assert.equal(validation.valid, true);
+});
+
 test('MCP browser diagnostics return instead of hanging when Chrome cannot launch', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-browser-test-'));
   const server = startServer(root, {
