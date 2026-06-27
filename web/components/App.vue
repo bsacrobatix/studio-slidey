@@ -368,17 +368,17 @@ onMounted(async () => {
       const r = await fetch('/api/config');
       if (r.ok) cfg = await r.json();
     } catch (_) { /* not the CLI viewer — fall through */ }
-    if (cfg && cfg.root) {
-      workspace.value = true;
-      embedded.value = !!cfg.embedded;
-      document.body.classList.add('slidey-workspace');
-      if (embedded.value) {
-        document.body.classList.add('slidey-embedded');
-        // The embedded preview offers only Edit / Present (no Browse — there is no
-        // file tree to browse). Coerce any persisted 'browse' state to 'present'.
-        if (viewerMode.value === 'browse') setViewerMode('present');
-      }
-      fitScale();
+      if (cfg && cfg.root) {
+        workspace.value = true;
+        embedded.value = !!cfg.embedded;
+        document.body.classList.add('slidey-workspace');
+        if (embedded.value) {
+          document.body.classList.add('slidey-embedded');
+          // VS Code webview preview (embedded mode) should default to Present
+          // on first load, not Edit, even when a previous session stored that.
+          setViewerMode('present');
+        }
+        fitScale();
       // The file tree is workspace-only; embedded preview reuses the same scene
       // editor in-place.
       if (!embedded.value) {
