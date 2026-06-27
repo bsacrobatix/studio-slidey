@@ -77,7 +77,9 @@ npm run build:single -- examples/hello.slidey.json hello.html   # one self-conta
 ```
 
 Slidey specs use the `.slidey.json` extension (this is what the file-tree sidebar
-and the VS Code extension auto-discover). `examples/hello.slidey.json` is the
+and the VS Code extension auto-discover), and `.readonly.slidey.json` is the
+authoritative, non-editable variant for reports/artifacts.
+`examples/hello.slidey.json` is the
 smallest starting point; `examples/kitsoki-pitch.slidey.json` and
 `examples/layout-gallery.slidey.json` exercise every scene type. All are safe to
 delete or copy as templates.
@@ -278,10 +280,11 @@ slidey-mcp --root /path/to/presentation-workspace
 The server keeps all file access inside `--root` and exposes tools for the full
 authoring loop:
 
-- `slidey_workspace_tree`, `slidey_read_spec` — discover and read `.json` decks
-  and generated `.jsonl` trace decks.
+- `slidey_workspace_tree`, `slidey_read_spec` — discover/read `.slidey.json`,
+  `.readonly.slidey.json`, and generated `.jsonl` trace decks.
 - `slidey_write_spec`, `slidey_patch_spec` — edit `.json` specs directly;
-  `.jsonl` traces stay read-only because their specs are generated.
+  `.jsonl` and `.readonly.slidey.json` are read-only because their specs are
+  generated or authoritative.
 - `slidey_validate`, `slidey_check`, `slidey_audit` — schema/semantic
   validation, static `diagram-svg` geometry checks, and rendered browser
   geometry debugging.

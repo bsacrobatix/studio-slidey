@@ -74,6 +74,30 @@ body.slidey-workspace #app {
   color: #fff;
   box-shadow: 0 0 0 1px #58a6ff55;
 }
+.slidey-mode-toggle button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.slidey-sidebar-clone {
+  margin-left: auto;
+  border: 1px solid #ffd33d;
+  border-radius: 999px;
+  background: #ffd33d1f;
+  color: #ffd33d;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.slidey-sidebar-clone:hover {
+  background: #ffd33d33;
+}
+.slidey-sidebar-clone:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
 /* Live-reload pill — shown in the header when the open spec changes on disk. */
 .slidey-reload {
@@ -128,6 +152,11 @@ body.slidey-workspace #app {
 .slidey-tree-row.dir { color: #8b949e; }
 .slidey-tree-caret { width: 12px; display: inline-block; font-size: 10px; color: #6e7681; }
 .slidey-tree-name { overflow: hidden; text-overflow: ellipsis; }
+.slidey-tree-lock {
+  font-size: 11px;
+  color: #e3b341;
+  opacity: 0.85;
+}
 .slidey-tree-row.file.active {
   background: #1f6feb33;
   color: #79c0ff;
@@ -244,6 +273,59 @@ body.slidey-workspace #app {
   padding: 16px;
   border-bottom: 1px solid #21262d;
   overflow: visible;
+}
+.slidey-editor-section-compact {
+  gap: 10px;
+}
+.slidey-editor-slide-meta {
+  color: #8b949e;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+.slidey-editor-slide-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.slidey-editor-btn {
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #21262d;
+  color: #e6edf3;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.slidey-editor-btn:hover {
+  border-color: #1f6feb;
+}
+.slidey-editor-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.slidey-gallery-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.slidey-editor-select {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #161b22;
+  color: #e6edf3;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 8px 9px;
+  outline: none;
+}
+.slidey-editor-select:focus {
+  border-color: #1f6feb;
+  box-shadow: 0 0 0 2px #1f6feb33;
 }
 .slidey-editor-section:last-child {
   flex: 1;

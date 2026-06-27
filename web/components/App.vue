@@ -37,6 +37,9 @@ const saveError = ref('');
 const schema = shallowRef(null);
 const sessionSpec = ref(null);         // snapshot of the latest loaded/reloaded spec
 const activeSpecBaseUrl = ref('');     // base URL for currently open workspace spec
+const activeSpecEditable = ref(true);
+const cloning = ref(false);
+const cloneError = ref('');
 
 // Live on-disk reload: poll the open spec's mtime and offer a reload when it
 // changes underneath us. A failed reload never tears down the session — it
@@ -55,8 +58,20 @@ function inferMode(spec) {
   return (spec.scenes || []).some(scene => scene && scene.type === 'request') ? 'api' : 'pitch';
 }
 
+function isEditableResponse(data, rel) {
+  if (typeof data.editable === 'boolean') return data.editable;
+  if (/\.readonly\.slidey\.json$/i.test(rel || '')) return false;
+  return /\.json$/i.test(rel || '');
+}
+
 function cloneSpec(raw) {
   return JSON.parse(JSON.stringify(raw));
+}
+
+function applySpecMeta(data, rel) {
+  activeSpecEditable.value = isEditableResponse(data, rel);
+  cloneError.value = '';
+  if (!activeSpecEditable.value && isEditMode.value) setViewerMode('browse');
 }
 
 async function loadSpec(spec, baseUrl, restore) {
@@ -104,6 +119,7 @@ async function openPath(rel, restore) {
     const res = await fetch(`/api/spec?path=${encodeURIComponent(rel)}`);
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || `${res.status} loading ${rel}`);
+    applySpecMeta(data, rel);
     // Spec-relative gif/img assets resolve under /workspace/<dir>/ in the CLI
     // viewer, or through a VS Code webview resource URI when embedded there.
     const base = data.assetBase || new URL(`/workspace/${data.dir ? data.dir + '/' : ''}`, window.location.href).href;
@@ -164,6 +180,7 @@ async function reloadActive() {
     const res = await fetch(`/api/spec?path=${encodeURIComponent(rel)}`);
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || `${res.status} loading ${rel}`);
+    applySpecMeta(data, rel);
     const base = data.assetBase || new URL(`/workspace/${data.dir ? data.dir + '/' : ''}`, window.location.href).href;
     await loadSpec(data.spec, base, restore);   // swaps deck.value only on success
     loadedMtime = latestMtime = data.mtimeMs || latestMtime;
@@ -192,7 +209,7 @@ async function onFile(e) {
 
 function fitScale() {
   const sw = workspace.value && !embedded.value && viewerMode.value !== 'present' ? sidebarWidth.value : 0;
-  const ew = workspace.value && !embedded.value && deck.value && isEditMode.value ? editorWidth.value : 0;
+  const ew = workspace.value && deck.value && isEditMode.value ? editorWidth.value : 0;
   const availableW = Math.max(320, window.innerWidth - sw - ew);
   const scale = Math.min(availableW / 1920, window.innerHeight / 1080);
   document.documentElement.style.setProperty('--slidey-scale', String(scale));
@@ -202,6 +219,7 @@ function fitScale() {
 
 function setViewerMode(mode) {
   if (mode !== 'browse' && mode !== 'edit' && mode !== 'present') return;
+  if (mode === 'edit' && workspace.value && !activeSpecEditable.value) return;
   document.body.classList.toggle('slidey-edit-mode', mode === 'edit');
   document.body.classList.toggle('slidey-browse-mode', mode === 'browse');
   document.body.classList.toggle('slidey-present-mode', mode === 'present');
@@ -235,7 +253,7 @@ function markDirty() {
 }
 
 async function saveActive() {
-  if (!activePath.value || !currentSpec.value || saving.value) return;
+  if (!activePath.value || !currentSpec.value || saving.value || !activeSpecEditable.value) return;
   saving.value = true;
   saveError.value = '';
   try {
@@ -258,7 +276,7 @@ async function saveActive() {
 }
 
 async function revertActive() {
-  if (!workspace.value || !currentSpec.value || !sessionSpec.value || !deck.value || !dirty.value || saving.value) return;
+  if (!workspace.value || !currentSpec.value || !sessionSpec.value || !deck.value || !dirty.value || saving.value || !activeSpecEditable.value) return;
   saveError.value = '';
   const cur = deck.value.state;
   const restore = cur ? { sceneIndex: cur.sceneIndex, stepIndex: cur.stepIndex } : null;
@@ -266,6 +284,27 @@ async function revertActive() {
     await loadSpec(cloneSpec(sessionSpec.value), activeSpecBaseUrl.value, restore);
   } catch (err) {
     saveError.value = String(err.message || err);
+  }
+}
+
+async function cloneActive() {
+  if (!activePath.value || cloning.value || !workspace.value) return;
+  cloning.value = true;
+  cloneError.value = '';
+  try {
+    const res = await fetch(`/api/clone-spec?path=${encodeURIComponent(activePath.value)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `${res.status} cloning ${activePath.value}`);
+    await openPath(data.path);
+    setViewerMode('edit');
+  } catch (err) {
+    cloneError.value = String(err.message || err);
+  } finally {
+    cloning.value = false;
   }
 }
 
@@ -304,7 +343,7 @@ onMounted(async () => {
   // Click-to-edit text directly on the slide (workspace edit mode only). Writes
   // through the same in-memory spec the side form + Save button use.
   teardownInlineEdit = installInlineEdit({
-    isActive: () => workspace.value && isEditMode.value && !!deck.value
+    isActive: () => workspace.value && isEditMode.value && activeSpecEditable.value && !!deck.value
       && /\.json$/i.test(activePath.value || ''),
     getSpec: () => currentSpec.value,
     getSceneIndex: () => (deck.value && deck.value.state ? deck.value.state.sceneIndex : 0),
@@ -340,7 +379,8 @@ onMounted(async () => {
         if (viewerMode.value === 'browse') setViewerMode('present');
       }
       fitScale();
-      // The file tree and scene editor only exist outside the embedded preview.
+      // The file tree is workspace-only; embedded preview reuses the same scene
+      // editor in-place.
       if (!embedded.value) {
         try { tree.value = await (await fetch('/api/tree')).json(); } catch (_) { tree.value = null; }
         await loadSchema();
@@ -389,9 +429,10 @@ onUnmounted(() => {
           type="button"
           :class="{ active: viewerMode === 'edit' }"
           :aria-pressed="viewerMode === 'edit'"
-          title="Edit mode"
+          :disabled="!activeSpecEditable"
+          :title="activeSpecEditable ? 'Edit mode' : 'Read-only: clone this report to edit'"
           @click.stop="setViewerMode('edit')"
-        >Edit</button>
+        >{{ activeSpecEditable ? 'Edit' : 'Read-only' }}</button>
         <button
           type="button"
           :class="{ active: viewerMode === 'present' }"
@@ -409,6 +450,14 @@ onUnmounted(() => {
         title="This deck changed on disk — click to reload"
         @click.stop="reloadActive"
       >⟳ reload</button>
+      <button
+        v-if="activePath && deck && !activeSpecEditable"
+        class="slidey-sidebar-clone"
+        :disabled="cloning"
+        title="Create an editable .slidey.json copy of this report deck"
+        @click.stop="cloneActive"
+      >{{ cloning ? 'Cloning…' : 'Clone editable copy' }}</button>
+      <span v-if="cloneError" class="slidey-embedded-saveerr" :title="cloneError">⚠ {{ cloneError }}</span>
     </div>
     <div class="slidey-sidebar-body">
       <FileTree
@@ -422,15 +471,15 @@ onUnmounted(() => {
     <div class="slidey-sidebar-resize" @mousedown="startResize"></div>
   </aside>
 
-  <!-- Embedded preview (VS Code): floating edit controls. The file-tree sidebar
-       that carries these in the CLI viewer is hidden here, so the mode toggle +
-       Save live as an overlay. In-place editing itself works the same way. -->
+  <!-- Embedded preview (VS Code): floating mode controls. In-place editing
+       uses the same scene editor overlay as CLI + workspace. -->
   <div v-if="embedded && deck" class="slidey-embedded-edit">
     <div class="slidey-embedded-toggle" role="group" aria-label="Viewer mode">
       <button
         type="button"
         :class="{ active: viewerMode === 'edit' }"
         :aria-pressed="viewerMode === 'edit'"
+        :disabled="!activeSpecEditable"
         title="Edit mode — click any text on the slide to edit it"
         @click.stop="setViewerMode('edit')"
       >Edit</button>
@@ -442,24 +491,24 @@ onUnmounted(() => {
         @click.stop="setViewerMode('present')"
       >Present</button>
     </div>
-    <button
-      v-if="isEditMode"
-      type="button"
-      class="slidey-embedded-save"
-      :class="{ dirty }"
-      :disabled="!dirty || saving"
-      :title="saveError || 'Save edits back to the file'"
-      @click.stop="saveActive"
-    >{{ saving ? 'Saving…' : (dirty ? 'Save' : 'Saved') }}</button>
-    <button
-      v-if="isEditMode"
-      type="button"
-      class="slidey-embedded-revert"
-      :disabled="!dirty || saving"
-      title="Discard edits and revert to the last saved version"
-      @click.stop="revertActive"
-    >Revert</button>
-    <span v-if="isEditMode && saveError" class="slidey-embedded-saveerr" :title="saveError">⚠ save failed</span>
+      <button
+        v-if="isEditMode && !embedded"
+        type="button"
+        class="slidey-embedded-save"
+        :class="{ dirty }"
+        :disabled="!dirty || saving || !activeSpecEditable"
+        :title="saveError || 'Save edits back to the file'"
+        @click.stop="saveActive"
+      >{{ saving ? 'Saving…' : (dirty ? 'Save' : 'Saved') }}</button>
+      <button
+        v-if="isEditMode && !embedded"
+        type="button"
+        class="slidey-embedded-revert"
+        :disabled="!dirty || saving || !activeSpecEditable"
+        title="Discard edits and revert to the last saved version"
+        @click.stop="revertActive"
+      >Revert</button>
+    <span v-if="isEditMode && !embedded && saveError" class="slidey-embedded-saveerr" :title="saveError">⚠ save failed</span>
   </div>
 
   <!-- Embedded preview: floating manual-reload button (deck also auto-reloads). -->
@@ -489,16 +538,17 @@ onUnmounted(() => {
       title="Browse mode"
       @click.stop="setViewerMode('browse')"
     >Browse</button>
-    <button
-      type="button"
-      :class="{ active: viewerMode === 'edit' }"
-      :aria-pressed="viewerMode === 'edit'"
-      title="Edit mode"
-      @click.stop="setViewerMode('edit')"
-    >Edit</button>
+      <button
+        type="button"
+        :class="{ active: viewerMode === 'edit' }"
+        :aria-pressed="viewerMode === 'edit'"
+        :disabled="!activeSpecEditable"
+        title="Edit mode"
+        @click.stop="setViewerMode('edit')"
+      >Edit</button>
   </div>
   <SceneEditor
-    v-if="workspace && !embedded && isEditMode && deck && currentSpec"
+    v-if="workspace && isEditMode && deck && currentSpec && activeSpecEditable"
     :key="activePath"
     :deck="deck"
     :spec="currentSpec"

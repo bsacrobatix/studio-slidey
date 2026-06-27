@@ -14,13 +14,52 @@ const RUNTIME_SRC_DIR = fs.existsSync(path.join(PACKAGED_RUNTIME_DIR, 'schema.js
   ? PACKAGED_RUNTIME_DIR
   : path.join(CHECKOUT_ROOT, 'src');
 const SPEC_EXT = new Set(['.json', '.jsonl']);
+const READONLY_SUFFIX = '.readonly.slidey.json';
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-render', 'dist-web-single', '.slidey-dist', '.slidey-runtime', '.git']);
 
 // The sidebar tree only auto-lists specs that follow the `.slidey.json`
 // convention (plus generated `.jsonl` traces). Plain `.json` files still
 // preview when opened explicitly, they just don't clutter the picker.
 function isDiscoverableSpec(name) {
-  return /\.slidey\.json$/i.test(name) || /\.jsonl$/i.test(name);
+  return /\.(?:readonly\.)?slidey\.json$/i.test(name) || /\.jsonl$/i.test(name);
+}
+
+function isReadOnlySlideySpec(abs) {
+  return new RegExp(`${READONLY_SUFFIX.replace('.', '\\.')}$`, 'i').test(abs);
+}
+
+function isEditableSpec(abs) {
+  return /\.json$/i.test(abs) && !isReadOnlySlideySpec(abs);
+}
+
+function defaultCloneTarget(sourceRel) {
+  const normalized = sourceRel.replace(/\\/g, '/');
+  const dir = path.posix.dirname(normalized);
+  const base = path.posix.basename(normalized);
+  const candidate = base
+    .replace(/\.readonly\.slidey\.json$/i, '.slidey.json')
+    .replace(/\.jsonl$/i, '.slidey.json');
+  return dir === '.' ? candidate : path.posix.join(dir, candidate);
+}
+
+function uniqueRel(baseRel) {
+  if (!baseRel) return baseRel;
+  const normalized = baseRel.replace(/\\/g, '/');
+  const abs = path.resolve(normalized);
+  const parsed = path.parse(abs);
+  let i = 0;
+  let current = normalized;
+  let currentAbs = abs;
+  while (fs.existsSync(currentAbs)) {
+    i += 1;
+    const suffix = `-${i}`;
+    current = path.posix.join(
+      path.posix.dirname(normalized),
+      `${parsed.name}${suffix}${parsed.ext}`,
+    );
+    currentAbs = path.resolve(current);
+  }
+  return current;
 }
 
 function safeResolve(root, rel) {
@@ -52,7 +91,7 @@ function buildTree(absDir, root, relDir = '') {
       if (children.length) dirs.push({ name: e.name, type: 'dir', path: childRel, children });
     } else if (e.isFile() && isDiscoverableSpec(e.name)) {
       const rel = relDir ? `${relDir}/${e.name}` : e.name;
-      files.push({ name: e.name, type: 'file', path: rel });
+      files.push({ name: e.name, type: 'file', path: rel, editable: isEditableSpec(e.name) });
     }
   }
   const byName = (a, b) => a.name.localeCompare(b.name);
@@ -119,6 +158,7 @@ function handleApiRequest({ root, openFile, webview, vscode }, request) {
         dir: dir === '.' ? '' : dir,
         assetBase: assetBaseFor(webview, vscode, abs),
         mtimeMs: stat.mtimeMs,
+        editable: isEditableSpec(abs) && !/\.jsonl$/i.test(abs),
       });
     } catch (err) {
       return response(400, { error: String(err.message || err) });
@@ -130,6 +170,35 @@ function handleApiRequest({ root, openFile, webview, vscode }, request) {
   // synchronous path only ever sees it if that interception is bypassed.
   if (pathname === '/api/spec' && request.method === 'POST') {
     return response(405, { error: 'spec writes are handled asynchronously' });
+  }
+
+  if (pathname === '/api/clone-spec' && request.method === 'POST') {
+    const rel = url.searchParams.get('path') || '';
+    const source = safeResolve(workspaceRoot, rel);
+    if (!source || !fs.existsSync(source)) return response(404, { error: `not found: ${rel}` });
+    if (!/\.json$/i.test(source) && !/\.jsonl$/i.test(source)) {
+      return response(400, { error: `only JSON specs can be cloned: ${rel}` });
+    }
+    let payload = {};
+    try {
+      payload = JSON.parse(request.body || '{}');
+    } catch (err) {
+      return response(400, { error: `invalid JSON body: ${err.message}` });
+    }
+    const requestedTarget = typeof payload.target === 'string' ? payload.target.trim() : '';
+    const targetRel = requestedTarget ? requestedTarget : defaultCloneTarget(rel);
+    const target = safeResolve(workspaceRoot, targetRel);
+    if (!target) return response(400, { error: 'invalid clone target path' });
+    if (target === source) return response(400, { error: 'clone target must differ from source' });
+    const finalRel = uniqueRel(path.relative(workspaceRoot, target).replace(/\\/g, '/'));
+    const finalAbs = safeResolve(workspaceRoot, finalRel);
+    fs.writeFileSync(finalAbs, fs.readFileSync(source, 'utf8'), 'utf8');
+    return response(200, {
+      source: rel,
+      path: posixRel(workspaceRoot, finalAbs),
+      mtimeMs: fs.statSync(finalAbs).mtimeMs,
+      editable: isEditableSpec(finalAbs),
+    });
   }
 
   if (pathname === '/api/stat') {
@@ -156,7 +225,7 @@ async function handleSpecWrite({ root, vscode }, request) {
   const rel = url.searchParams.get('path') || '';
   const abs = safeResolve(workspaceRoot, rel);
   if (!abs || !fs.existsSync(abs)) return response(404, { error: `not found: ${rel}` });
-  if (!/\.json$/i.test(abs)) return response(400, { error: 'only .json specs can be edited in the preview' });
+  if (!isEditableSpec(abs)) return response(400, { error: 'only editable .json specs can be edited in the preview; clone .readonly.slidey.json first' });
 
   let payload;
   try {

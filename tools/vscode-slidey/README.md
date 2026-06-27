@@ -1,10 +1,10 @@
 # Slidey VS Code Extension
 
-Preview Slidey `.slidey.json` and `.jsonl` presentations in a VS Code webview
-editor tab using the same built web viewer that `slidey <file>` serves in a
-browser. Plain `.json` specs can also be opened explicitly with the command; the
-Explorer and editor-title menus only auto-surface for `.slidey.json` decks and
-`.jsonl` traces so ordinary JSON files do not clutter the UI.
+Preview Slidey `.slidey.json` and `.readonly.slidey.json` presentations in a VS
+Code webview editor tab using the same built web viewer that `slidey <file>`
+serves in a browser. Plain `.json` specs can also be opened explicitly with the
+command; the Explorer and editor-title menus only auto-surface for `.slidey.json`
+decks and `.jsonl` traces so ordinary JSON files do not clutter the UI.
 
 ## Use
 
@@ -15,13 +15,15 @@ make vscode-install-local
 ```
 
 Then open a spec and run `Slidey: Preview Presentation`, or use the editor title
-or Explorer context menu on a `.slidey.json` / `.jsonl` file.
+or Explorer context menu on a `.slidey.json` / `.readonly.slidey.json` / `.jsonl`
+file.
 
 The preview opens beside the JSON file. It embeds the Slidey viewer in single-file
 mode, hides the workspace file tree, serves spec and asset reads through the VS
 Code webview bridge, and reloads from disk when the source file changes. Use the
 preview to step through the deck with the normal Slidey HUD and navigation, or edit
-text directly on the slide (see below).
+text directly on the slide (see below). `.readonly.slidey.json` opens in
+Browse/Present mode only, since it is treated as an authoritative artifact.
 
 ### In-place editing
 
@@ -43,7 +45,7 @@ the embedded preview — VS Code editing is in-place only. Edit structural field
 
 The preview supports the same scene/runtime surface as the web viewer, including:
 
-- `.slidey.json` specs and generated `.jsonl` trace decks.
+- `.slidey.json` specs, generated `.jsonl` trace decks, and read-only `.readonly.slidey.json` artifacts.
 - Local image assets resolved relative to the spec.
 - Mermaid scenes rendered as themed SVG.
 - `video` scenes that reference MP4 or rrweb sources, including the live rrweb

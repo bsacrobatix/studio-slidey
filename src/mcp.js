@@ -18,11 +18,26 @@ const { tempRoot } = require('./temp-path');
 const ROOT_DIR = path.resolve(__dirname, '..');
 const RENDER_BUNDLE = path.join(ROOT_DIR, 'dist-render', 'render.html');
 const SPEC_EXT = new Set(['.json', '.jsonl']);
+const READONLY_SUFFIX = '.readonly.slidey.json';
 
 // Auto-discovery (workspace_tree) lists specs that follow the `.slidey.json`
 // convention plus generated `.jsonl` traces. Explicit reads stay permissive.
 function isDiscoverableSpec(name) {
-  return /\.slidey\.json$/i.test(name) || /\.jsonl$/i.test(name);
+  return /\.(?:readonly\.)?slidey\.json$/i.test(name) || /\.jsonl$/i.test(name);
+}
+
+function isReadOnlySlideySpec(name) {
+  return new RegExp(`${READONLY_SUFFIX.replace('.', '\\.')}$`, 'i').test(name);
+}
+
+function isEditableSpec(name) {
+  return /\.json$/i.test(name) && !isReadOnlySlideySpec(name);
+}
+
+function ensureEditable(abs) {
+  if (!isEditableSpec(abs)) {
+    throw new Error('only editable .json specs can be edited; .readonly.slidey.json is read-only');
+  }
 }
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-render', 'dist-web-single', '.git', '.worktrees']);
 
@@ -56,6 +71,101 @@ function parseArgs(argv) {
 const CONFIG = parseArgs(process.argv.slice(2));
 const BROWSER_TOOL_TIMEOUT_MS = Number(process.env.SLIDEY_MCP_BROWSER_TIMEOUT_MS || 30000);
 const BROWSER_TOOLS = new Set(['slidey_render_png', 'slidey_render_html', 'slidey_audit', 'slidey_doctor']);
+const LAYOUT_GALLERY = [
+  {
+    id: 'title',
+    label: 'Title',
+    scene: {
+      type: 'title',
+      title: 'Title slide',
+      subtitle: 'Add your subtitle',
+      eyebrow: 'Section',
+    },
+  },
+  {
+    id: 'narrative',
+    label: 'Narrative',
+    scene: {
+      type: 'narrative',
+      eyebrow: 'Narrative',
+      lede: 'A short takeaway',
+      body: 'Start writing the scene copy here.',
+    },
+  },
+  {
+    id: 'cards-grid',
+    label: 'Cards (grid)',
+    scene: {
+      type: 'cards',
+      variant: 'grid',
+      title: 'Grid cards',
+      columns: 2,
+      cards: [
+        { label: 'Point', sub: 'Describe a key idea' },
+        { label: 'Point', sub: 'Add supporting context' },
+      ],
+    },
+  },
+  {
+    id: 'code-source',
+    label: 'Code block',
+    scene: {
+      type: 'code',
+      variant: 'source',
+      title: 'Code',
+      lang: 'javascript',
+      code: "console.log('Hello from Slidey');",
+    },
+  },
+  {
+    id: 'diagram-svg',
+    label: 'Diagram',
+    scene: {
+      type: 'diagram-svg',
+      title: 'Diagram',
+      panels: [
+        {
+          label: 'Main flow',
+          nodes: [
+            { id: 'start', label: 'Start' },
+            { id: 'end', label: 'Done' },
+          ],
+          edges: [{ from: 'start', to: 'end' }],
+        },
+      ],
+    },
+  },
+  {
+    id: 'table-data',
+    label: 'Table',
+    scene: {
+      type: 'table',
+      variant: 'data',
+      title: 'Table',
+      columns: ['Stage', 'Status'],
+      rows: [{ cells: ['Draft', 'Ready'] }],
+    },
+  },
+  {
+    id: 'chart-bar',
+    label: 'Chart',
+    scene: {
+      type: 'chart',
+      variant: 'bar',
+      title: 'Chart',
+      series: [{ name: 'Series 1', points: [{ x: 'A', y: 7 }, { x: 'B', y: 12 }] }],
+    },
+  },
+  {
+    id: 'mermaid',
+    label: 'Mermaid',
+    scene: {
+      type: 'mermaid',
+      title: 'Mermaid',
+      source: 'flowchart TD\nA[Input] --> B[Process]\nB --> C[Output]',
+    },
+  },
+];
 
 function jsonText(value) {
   return [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }];
@@ -105,7 +215,8 @@ function readSpecFile(inputPath) {
   const abs = requireSpecPath(inputPath);
   const raw = fs.readFileSync(abs, 'utf8');
   const spec = /\.jsonl$/i.test(abs) ? require('./trace').buildSpecFromFile(abs) : JSON.parse(raw);
-  return { abs, raw, spec, generated: /\.jsonl$/i.test(abs) };
+  const generated = /\.jsonl$/i.test(abs);
+  return { abs, raw, spec, generated, editable: isEditableSpec(abs) && !generated };
 }
 
 function inferMode(spec) {
@@ -115,12 +226,36 @@ function inferMode(spec) {
 
 function writeSpecFile(inputPath, spec) {
   const abs = requireSpecPath(inputPath);
-  if (!/\.json$/i.test(abs)) throw new Error('only .json specs can be edited; .jsonl traces are generated read-only inputs');
+    ensureEditable(abs);
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new Error('spec must be a JSON object');
   if (!Array.isArray(spec.scenes) || spec.scenes.length === 0) throw new Error('spec must have a non-empty "scenes" array');
   const body = JSON.stringify(spec, null, 2) + '\n';
   fs.writeFileSync(abs, body, 'utf8');
   return { path: relPath(abs), bytes: Buffer.byteLength(body), mtimeMs: fs.statSync(abs).mtimeMs };
+}
+
+function cloneSpecValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function layoutById(layoutId) {
+  return LAYOUT_GALLERY.find((entry) => entry.id === layoutId) || null;
+}
+
+function clampSceneIndex(index, sceneCount) {
+  if (!Number.isInteger(index)) throw new Error('sceneIndex must be an integer');
+  if (sceneCount <= 0) throw new Error('spec must contain at least one scene');
+  if (index < 0 || index >= sceneCount) throw new Error(`sceneIndex must be between 0 and ${sceneCount - 1}`);
+  return index;
+}
+
+function clampIndexForInsert(index, length) {
+  if (!Number.isInteger(index)) return length;
+  return Math.max(0, Math.min(index, length));
+}
+
+function sanitizeScene(scene) {
+  return cloneSpecValue(scene);
 }
 
 function buildTree(absDir, relDir = '') {
@@ -141,7 +276,7 @@ function buildTree(absDir, relDir = '') {
       const children = buildTree(childAbs, childRel);
       if (children.length) dirs.push({ name: entry.name, type: 'dir', path: childRel, children });
     } else if (entry.isFile() && isDiscoverableSpec(entry.name)) {
-      files.push({ name: entry.name, type: 'file', path: childRel, editable: /\.json$/i.test(entry.name) });
+      files.push({ name: entry.name, type: 'file', path: childRel, editable: isEditableSpec(entry.name) });
     }
   }
   const byName = (a, b) => a.name.localeCompare(b.name);
@@ -432,14 +567,14 @@ function toolInputSchema(properties, required = []) {
 const TOOLS = [
   {
     name: 'slidey_workspace_tree',
-    description: 'List editable Slidey .slidey.json specs and generated .jsonl trace specs under the MCP workspace root.',
+    description: 'List Slidey .slidey.json specs, read-only .readonly.slidey.json specs, and generated .jsonl trace specs.',
     inputSchema: toolInputSchema({}),
   },
   {
     name: 'slidey_read_spec',
-    description: 'Read a Slidey spec. .jsonl traces are converted to generated specs and returned read-only.',
+    description: 'Read a Slidey spec. .jsonl traces and .readonly.slidey.json decks are returned read-only.',
     inputSchema: toolInputSchema({
-      path: { type: 'string', description: 'Workspace-relative .slidey.json or .jsonl path.' },
+      path: { type: 'string', description: 'Workspace-relative .slidey.json, .readonly.slidey.json, or .jsonl path.' },
     }, ['path']),
   },
   {
@@ -469,6 +604,54 @@ const TOOLS = [
         },
       },
     }, ['path', 'operations']),
+  },
+  {
+    name: 'slidey_layout_gallery',
+    description: 'List reusable scene layouts that can be inserted as new slides.',
+    inputSchema: toolInputSchema({}),
+  },
+  {
+    name: 'slidey_add_slide',
+    description: 'Add a new slide from the layout gallery.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      layout: { type: 'string', description: 'One of the IDs returned by slidey_layout_gallery.' },
+      insertIndex: {
+        type: 'integer',
+        minimum: 0,
+        description: 'Insert position in scenes array. Defaults to append to end.',
+      },
+    }, ['path', 'layout']),
+  },
+  {
+    name: 'slidey_duplicate_slide',
+    description: 'Duplicate a slide and insert it after the original by default.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      sourceIndex: { type: 'integer', minimum: 0, description: 'Index of the source scene to duplicate.' },
+      insertIndex: {
+        type: 'integer',
+        minimum: 0,
+        description: 'Insert position in scenes array. Defaults to sourceIndex + 1.',
+      },
+    }, ['path', 'sourceIndex']),
+  },
+  {
+    name: 'slidey_remove_slide',
+    description: 'Remove a slide from a deck.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      sceneIndex: { type: 'integer', minimum: 0, description: 'Index of the scene to remove.' },
+    }, ['path', 'sceneIndex']),
+  },
+  {
+    name: 'slidey_reorder_slide',
+    description: 'Move a slide from one index to another.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      fromIndex: { type: 'integer', minimum: 0, description: 'Source index to move.' },
+      toIndex: { type: 'integer', minimum: 0, description: 'Destination index in the resulting scenes array.' },
+    }, ['path', 'fromIndex', 'toIndex']),
   },
   {
     name: 'slidey_validate',
@@ -541,8 +724,8 @@ async function callTool(name, args = {}) {
       return okResult({ root: CONFIG.root, children: buildTree(CONFIG.root) });
 
     case 'slidey_read_spec': {
-      const { abs, raw, spec, generated } = readSpecFile(args.path);
-      return okResult({ path: relPath(abs), generated, editable: !generated, raw: generated ? undefined : raw, spec });
+      const { abs, raw, spec, generated, editable } = readSpecFile(args.path);
+      return okResult({ path: relPath(abs), generated, editable: editable, raw: generated ? undefined : raw, spec });
     }
 
     case 'slidey_write_spec': {
@@ -553,11 +736,101 @@ async function callTool(name, args = {}) {
 
     case 'slidey_patch_spec': {
       const { abs, spec } = readSpecFile(args.path);
-      if (!/\.json$/i.test(abs)) throw new Error('only .json specs can be edited; .jsonl traces are generated read-only inputs');
+      ensureEditable(abs);
       const patched = applyJsonPatch(spec, args.operations);
       const written = writeSpecFile(args.path, patched);
       const validation = validateSpec(patched, { specPath: abs });
       return okResult({ ok: validation.valid, written, validation, spec: patched });
+    }
+    case 'slidey_layout_gallery':
+      return okResult({
+        layouts: LAYOUT_GALLERY.map((entry) => ({
+          id: entry.id,
+          label: entry.label,
+          type: entry.scene.type,
+          scene: entry.scene,
+        })),
+      });
+
+    case 'slidey_add_slide': {
+      const { abs, spec } = readSpecFile(args.path);
+      ensureEditable(abs);
+      const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
+      const layout = layoutById(args.layout);
+      if (!layout) {
+        const validLayouts = LAYOUT_GALLERY.map((entry) => entry.id).join(', ');
+        throw new Error(`unknown layout "${args.layout}". use slidey_layout_gallery to list valid values: ${validLayouts}`);
+      }
+      const insertIndex = clampIndexForInsert(args.insertIndex, scenes.length);
+      const scene = sanitizeScene(layout.scene);
+      scenes.splice(insertIndex, 0, scene);
+      const updated = { ...spec, scenes };
+      const written = writeSpecFile(args.path, updated);
+      const validation = validateSpec(updated, { specPath: abs });
+      return okResult({ ok: validation.valid, written, validation, sceneIndex: insertIndex, scene, spec: updated });
+    }
+
+    case 'slidey_duplicate_slide': {
+      const { abs, spec } = readSpecFile(args.path);
+      ensureEditable(abs);
+      const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
+      const sourceIndex = clampSceneIndex(args.sourceIndex, scenes.length);
+      const insertIndex = clampIndexForInsert(
+        Number.isInteger(args.insertIndex) ? args.insertIndex : sourceIndex + 1,
+        scenes.length + 1,
+      );
+      const scene = sanitizeScene(scenes[sourceIndex]);
+      scenes.splice(insertIndex, 0, scene);
+      const updated = { ...spec, scenes };
+      const written = writeSpecFile(args.path, updated);
+      const validation = validateSpec(updated, { specPath: abs });
+      return okResult({
+        ok: validation.valid,
+        written,
+        validation,
+        sourceIndex,
+        sceneIndex: insertIndex,
+        scene,
+        spec: updated,
+      });
+    }
+
+    case 'slidey_remove_slide': {
+      const { abs, spec } = readSpecFile(args.path);
+      ensureEditable(abs);
+      const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
+      if (scenes.length <= 1) throw new Error('deck must contain at least one scene');
+      const sceneIndex = clampSceneIndex(args.sceneIndex, scenes.length);
+      const removed = scenes.splice(sceneIndex, 1)[0];
+      const updated = { ...spec, scenes };
+      const written = writeSpecFile(args.path, updated);
+      const validation = validateSpec(updated, { specPath: abs });
+      return okResult({
+        ok: validation.valid,
+        written,
+        validation,
+        removedSceneIndex: sceneIndex,
+        scene: removed,
+        sceneCount: updated.scenes.length,
+        spec: updated,
+      });
+    }
+
+    case 'slidey_reorder_slide': {
+      const { abs, spec } = readSpecFile(args.path);
+      ensureEditable(abs);
+      const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
+      const fromIndex = clampSceneIndex(args.fromIndex, scenes.length);
+      const toIndex = clampSceneIndex(args.toIndex, scenes.length);
+      if (fromIndex === toIndex) {
+        return okResult({ ok: true, written: { path: relPath(abs), bytes: 0, mtimeMs: fs.statSync(abs).mtimeMs }, validation: validateSpec(spec, { specPath: abs }), spec, sourceIndex: fromIndex, targetIndex: toIndex });
+      }
+      const [scene] = scenes.splice(fromIndex, 1);
+      scenes.splice(toIndex, 0, scene);
+      const updated = { ...spec, scenes };
+      const written = writeSpecFile(args.path, updated);
+      const validation = validateSpec(updated, { specPath: abs });
+      return okResult({ ok: validation.valid, written, validation, sourceIndex: fromIndex, targetIndex: toIndex, spec: updated });
     }
 
     case 'slidey_validate': {

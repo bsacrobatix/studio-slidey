@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { getByPath, setByPath, coerceValue } from '../spec-paths.js';
 
 const props = defineProps({
@@ -12,6 +12,102 @@ const props = defineProps({
   schema: { type: Object, default: null },
 });
 const emit = defineEmits(['change', 'save', 'revert']);
+
+const LAYOUT_GALLERY = [
+  {
+    id: 'title',
+    label: 'Title',
+    scene: {
+      type: 'title',
+      title: 'Title slide',
+      subtitle: 'Add your subtitle',
+      eyebrow: 'Section',
+    },
+  },
+  {
+    id: 'narrative',
+    label: 'Narrative',
+    scene: {
+      type: 'narrative',
+      eyebrow: 'Narrative',
+      lede: 'A short takeaway',
+      body: 'Start writing the scene copy here.',
+    },
+  },
+  {
+    id: 'cards-grid',
+    label: 'Cards (grid)',
+    scene: {
+      type: 'cards',
+      variant: 'grid',
+      title: 'Grid cards',
+      columns: 2,
+      cards: [
+        { label: 'Point', sub: 'Describe a key idea' },
+        { label: 'Point', sub: 'Add supporting context' },
+      ],
+    },
+  },
+  {
+    id: 'code-source',
+    label: 'Code block',
+    scene: {
+      type: 'code',
+      variant: 'source',
+      title: 'Code',
+      lang: 'javascript',
+      code: "console.log('Hello from Slidey');",
+    },
+  },
+  {
+    id: 'diagram-svg',
+    label: 'Diagram',
+    scene: {
+      type: 'diagram-svg',
+      title: 'Diagram',
+      panels: [
+        {
+          label: 'Main flow',
+          nodes: [
+            { id: 'start', label: 'Start' },
+            { id: 'end', label: 'Done' },
+          ],
+          edges: [{ from: 'start', to: 'end' }],
+        },
+      ],
+    },
+  },
+  {
+    id: 'table-data',
+    label: 'Table',
+    scene: {
+      type: 'table',
+      variant: 'data',
+      title: 'Table',
+      columns: ['Stage', 'Status'],
+      rows: [{ cells: ['Draft', 'Ready'] }],
+    },
+  },
+  {
+    id: 'chart-bar',
+    label: 'Chart',
+    scene: {
+      type: 'chart',
+      variant: 'bar',
+      title: 'Chart',
+      series: [{ name: 'Series 1', points: [{ x: 'A', y: 7 }, { x: 'B', y: 12 }] }],
+    },
+  },
+  {
+    id: 'mermaid',
+    label: 'Mermaid',
+    scene: {
+      type: 'mermaid',
+      title: 'Mermaid',
+      source: 'flowchart TD\nA[Input] --> B[Process]\nB --> C[Output]',
+    },
+  },
+];
 
 const SKIP_KEYS = new Set([
   'gif', 'src', 'capture', 'from', 'to', 'id', 'markerId',
@@ -27,7 +123,80 @@ const sceneIndex = computed(() => props.deck.state.sceneIndex);
 const scene = computed(() => (props.spec.scenes || [])[sceneIndex.value] || {});
 const canSave = computed(() => /\.json$/i.test(props.activePath || ''));
 const semanticMessages = reactive({});
+const selectedLayout = ref(LAYOUT_GALLERY[0]?.id || 'title');
 const canRevert = computed(() => canSave.value && props.dirty && !props.saving);
+const sceneCount = computed(() => Array.isArray(props.spec.scenes) ? props.spec.scenes.length : 0);
+const selectedGallery = computed(() => LAYOUT_GALLERY.find(item => item.id === selectedLayout.value) || LAYOUT_GALLERY[0]);
+const canDuplicateCurrent = computed(() => canSave.value && scene.value.type);
+const canDeleteCurrent = computed(() => canSave.value && sceneCount.value > 1);
+const canMoveCurrentUp = computed(() => canSave.value && sceneIndex.value > 0);
+const canMoveCurrentDown = computed(() => canSave.value && sceneIndex.value + 1 < sceneCount.value);
+
+function specScenes() {
+  if (!Array.isArray(props.spec.scenes)) return [];
+  return props.spec.scenes;
+}
+
+function cloneScene(sceneData) {
+  return JSON.parse(JSON.stringify(sceneData));
+}
+
+async function goToScene(index) {
+  if (!props.deck) return;
+  const max = Math.max(0, (Array.isArray(props.spec.scenes) ? props.spec.scenes.length : 1) - 1);
+  const safeIndex = Math.max(0, Math.min(index, max));
+  if (typeof props.deck.gotoScene === 'function') return props.deck.gotoScene(safeIndex);
+  if (props.deck.state && typeof props.deck.state.sceneIndex === 'number') props.deck.state.sceneIndex = safeIndex;
+  return props.deck.render();
+}
+
+async function duplicateCurrentScene() {
+  if (!canDuplicateCurrent.value) return;
+  const scenes = specScenes();
+  const index = sceneIndex.value;
+  scenes.splice(index + 1, 0, cloneScene(scene.value));
+  emit('change');
+  await props.deck.render();
+  await goToScene(index + 1);
+}
+
+async function removeCurrentScene() {
+  if (!canDeleteCurrent.value) return;
+  const scenes = specScenes();
+  const index = sceneIndex.value;
+  scenes.splice(index, 1);
+  const next = Math.min(Math.max(index, 0), scenes.length - 1);
+  emit('change');
+  await props.deck.render();
+  await goToScene(next);
+}
+
+function moveCurrentSceneBy(offset) {
+  if (!canSave.value) return;
+  const scenes = specScenes();
+  const from = sceneIndex.value;
+  const to = from + offset;
+  if (to < 0 || to >= scenes.length) return;
+  const sceneToMove = scenes.splice(from, 1)[0];
+  scenes.splice(to, 0, sceneToMove);
+  emit('change');
+  return (async () => {
+    await props.deck.render();
+    return goToScene(to);
+  })();
+}
+
+async function addSlideFromGallery() {
+  if (!canSave.value) return;
+  const scenes = specScenes();
+  const template = selectedGallery.value?.scene;
+  if (!template) return;
+  const index = sceneIndex.value + 1;
+  scenes.splice(index, 0, cloneScene(template));
+  emit('change');
+  await props.deck.render();
+  await goToScene(index);
+}
 
 function labelFor(path) {
   const pretty = path
@@ -280,6 +449,56 @@ function validatePythonByPattern(source) {
         >Revert</button>
       </div>
     </div>
+
+    <section class="slidey-editor-section slidey-editor-section-compact">
+      <div class="slidey-editor-section-title">Slide actions</div>
+      <div class="slidey-editor-slide-meta">Current slide {{ sceneIndex + 1 }} of {{ sceneCount }}</div>
+      <div class="slidey-editor-slide-controls">
+        <button
+          class="slidey-editor-btn"
+          :disabled="!canDuplicateCurrent"
+          title="Create a copy of the current slide and insert after it"
+          @click="duplicateCurrentScene"
+        >Duplicate</button>
+        <button
+          class="slidey-editor-btn"
+          :disabled="!canDeleteCurrent"
+          title="Delete the current slide"
+          @click="removeCurrentScene"
+        >Delete</button>
+        <button
+          class="slidey-editor-btn"
+          :disabled="!canMoveCurrentUp"
+          title="Move this slide up"
+          @click="moveCurrentSceneBy(-1)"
+        >Move up</button>
+        <button
+          class="slidey-editor-btn"
+          :disabled="!canMoveCurrentDown"
+          title="Move this slide down"
+          @click="moveCurrentSceneBy(1)"
+        >Move down</button>
+      </div>
+      <div class="slidey-editor-field">
+        <span>New slide layout</span>
+        <div class="slidey-gallery-row">
+          <select
+            v-model="selectedLayout"
+            class="slidey-editor-select"
+            :disabled="!canSave"
+          >
+            <option v-for="item in LAYOUT_GALLERY" :key="item.id" :value="item.id">
+              {{ item.label }}
+            </option>
+          </select>
+          <button
+            class="slidey-editor-add"
+            :disabled="!canSave"
+            @click="addSlideFromGallery"
+          >Add slide</button>
+        </div>
+      </div>
+    </section>
 
     <div v-if="saveError" class="slidey-editor-error">{{ saveError }}</div>
     <div v-if="!canSave" class="slidey-editor-note">This deck is view-only because it is not a JSON spec.</div>
