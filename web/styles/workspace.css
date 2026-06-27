@@ -169,7 +169,8 @@ body.slidey-workspace #app {
   font-weight: bold;
 }
 .slidey-editor-save,
-.slidey-editor-add {
+.slidey-editor-add,
+.slidey-editor-revert {
   border: 1px solid #1f6feb;
   border-radius: 6px;
   background: #1f6feb;
@@ -194,6 +195,22 @@ body.slidey-workspace #app {
 }
 .slidey-editor-add:disabled {
   opacity: 0.55;
+  cursor: default;
+}
+.slidey-editor-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.slidey-editor-revert {
+  padding: 7px 12px;
+  border-color: #30363d;
+  background: #21262d;
+}
+.slidey-editor-revert:disabled {
+  border-color: #21262d;
+  background: #161b22;
+  color: #8b949e;
   cursor: default;
 }
 .slidey-editor-error,

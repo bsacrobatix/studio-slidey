@@ -1,5 +1,6 @@
 <script setup>
 import { computed, reactive } from 'vue';
+import { getByPath, setByPath, coerceValue } from '../spec-paths.js';
 
 const props = defineProps({
   deck: { type: Object, required: true },
@@ -10,7 +11,7 @@ const props = defineProps({
   saveError: { type: String, default: '' },
   schema: { type: Object, default: null },
 });
-const emit = defineEmits(['change', 'save']);
+const emit = defineEmits(['change', 'save', 'revert']);
 
 const SKIP_KEYS = new Set([
   'gif', 'src', 'capture', 'from', 'to', 'id', 'markerId',
@@ -26,6 +27,7 @@ const sceneIndex = computed(() => props.deck.state.sceneIndex);
 const scene = computed(() => (props.spec.scenes || [])[sceneIndex.value] || {});
 const canSave = computed(() => /\.json$/i.test(props.activePath || ''));
 const semanticMessages = reactive({});
+const canRevert = computed(() => canSave.value && props.dirty && !props.saving);
 
 function labelFor(path) {
   const pretty = path
@@ -33,16 +35,6 @@ function labelFor(path) {
     .map(p => typeof p === 'number' ? `#${p + 1}` : String(p).replace(/([A-Z])/g, ' $1'))
     .join(' / ');
   return pretty.charAt(0).toUpperCase() + pretty.slice(1);
-}
-
-function getByPath(root, path) {
-  return path.reduce((obj, key) => (obj == null ? undefined : obj[key]), root);
-}
-
-function setByPath(root, path, value) {
-  let obj = root;
-  for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]];
-  obj[path[path.length - 1]] = value;
 }
 
 function sceneSchemas() {
@@ -90,16 +82,6 @@ function inputKind(schema, value) {
   if (schema?.type === 'boolean' || typeof value === 'boolean') return 'boolean';
   if (schema?.type === 'number' || schema?.type === 'integer' || typeof value === 'number') return 'number';
   return 'string';
-}
-
-function coerceValue(raw, field) {
-  if (field.kind === 'boolean') return !!raw;
-  if (field.kind === 'number') {
-    if (raw === '') return '';
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : raw;
-  }
-  return raw;
 }
 
 function collectFields(value, path = [], fields = [], opts = {}) {
@@ -161,8 +143,8 @@ const narrationFields = computed(() => {
 const hasNarration = computed(() => scene.value.narration != null);
 
 async function update(path, value) {
-  const field = { path, kind: inputKind(schemaForPath(path), getByPath(scene.value, path)) };
-  setByPath(scene.value, path, coerceValue(value, field));
+  const kind = inputKind(schemaForPath(path), getByPath(scene.value, path));
+  setByPath(scene.value, path, coerceValue(value, kind));
   validateField(path);
   try {
     await props.deck.render();
@@ -283,12 +265,20 @@ function validatePythonByPattern(source) {
         <div class="slidey-editor-kicker">scene {{ sceneIndex + 1 }}</div>
         <div class="slidey-editor-title">{{ scene.type || 'scene' }}</div>
       </div>
-      <button
-        class="slidey-editor-save"
-        :disabled="!canSave || !dirty || saving"
-        :title="canSave ? 'Save changes to disk' : 'Only .json specs can be saved'"
-        @click="emit('save')"
-      >{{ saving ? 'Saving' : dirty ? 'Save' : 'Saved' }}</button>
+      <div class="slidey-editor-head-actions">
+        <button
+          class="slidey-editor-save"
+          :disabled="!canSave || !dirty || saving"
+          :title="canSave ? 'Save changes to disk' : 'Only .json specs can be saved'"
+          @click="emit('save')"
+        >{{ saving ? 'Saving' : dirty ? 'Save' : 'Saved' }}</button>
+        <button
+          class="slidey-editor-revert"
+          :disabled="!canRevert"
+          title="Discard changes from this edit session"
+          @click="emit('revert')"
+        >Revert</button>
+      </div>
     </div>
 
     <div v-if="saveError" class="slidey-editor-error">{{ saveError }}</div>
