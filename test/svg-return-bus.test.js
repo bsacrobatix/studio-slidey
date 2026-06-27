@@ -77,3 +77,46 @@ test('cycle layout places nodes around a single background arrow', async () => {
     ['qa', 160, 300],
   ]);
 });
+
+test('cycle layout can render a recycle-mark loop with real gaps', async () => {
+  const { buildPanel } = await import('../web/svg.js');
+  const panel = buildPanel({
+    layout: 'cycle',
+    cycle: { center: { x: 500, y: 360 }, rx: 240, ry: 160, arrowRx: 280, arrowRy: 210, variant: 'recycle' },
+    nodes: [
+      { id: 'proposal', label: 'proposal', slot: 'left', w: 200, h: 120 },
+      { id: 'build', label: 'feature', slot: 'top', w: 200, h: 120 },
+      { id: 'demo', label: 'demo', slot: 'right', w: 200, h: 120 },
+      { id: 'qa', label: 'QA', slot: 'bottom', w: 200, h: 120 },
+    ],
+  }, 0);
+
+  assert.equal(panel.cycleArrows.length, 3);
+  assert.deepEqual(panel.cycleArrows.map(a => a.markerId), ['cycle-arrow-0', 'cycle-arrow-0', 'cycle-arrow-0']);
+  assert.deepEqual(panel.cycleArrows.map(a => a.d), [
+    'M 315 272 C 377 140 590 146 662 247',
+    'M 702 318 C 780 394 662 520 517 532',
+    'M 461 528 C 315 515 226 410 293 343',
+  ]);
+  assert.ok(panel.cycleArrows.every(a => !a.ellipse));
+});
+
+test('cycle layout can render a recycle logo watermark', async () => {
+  const { buildPanel } = await import('../web/svg.js');
+  const panel = buildPanel({
+    layout: 'cycle',
+    cycle: { center: { x: 500, y: 360 }, variant: 'recycle-logo', glyphY: 420, glyphSize: 380 },
+    nodes: [
+      { id: 'proposal', label: 'proposal', slot: 'left', w: 200, h: 120 },
+      { id: 'build', label: 'feature', slot: 'top', w: 200, h: 120 },
+    ],
+  }, 0);
+
+  assert.deepEqual(panel.cycleArrows, [{
+    glyph: '♻',
+    glyphX: 500,
+    glyphY: 420,
+    glyphSize: 380,
+    markerId: 'cycle-arrow-0',
+  }]);
+});

@@ -106,6 +106,58 @@ function applyCycleLayout(panel, nodeMap) {
   });
 
   if (cycle.arrow === false) return [];
+  if (cycle.variant === 'recycle-logo') {
+    return [{
+      glyph: cycle.glyph || '♻',
+      glyphX: cycle.glyphX ?? center.x,
+      glyphY: cycle.glyphY ?? center.y + 95,
+      glyphSize: cycle.glyphSize || 420,
+    }];
+  }
+
+  if (cycle.variant === 'recycle') {
+    const markerId = cycle.markerId;
+    const topLeft = {
+      x: Math.round(center.x - arrowRx * 0.66),
+      y: Math.round(center.y - arrowRy * 0.42),
+    };
+    const topRight = {
+      x: Math.round(center.x + arrowRx * 0.58),
+      y: Math.round(center.y - arrowRy * 0.54),
+    };
+    const right = {
+      x: Math.round(center.x + arrowRx * 0.72),
+      y: Math.round(center.y - arrowRy * 0.20),
+    };
+    const bottom = {
+      x: Math.round(center.x + arrowRx * 0.06),
+      y: Math.round(center.y + arrowRy * 0.82),
+    };
+    const bottomLeft = {
+      x: Math.round(center.x - arrowRx * 0.14),
+      y: Math.round(center.y + arrowRy * 0.80),
+    };
+    const left = {
+      x: Math.round(center.x - arrowRx * 0.74),
+      y: Math.round(center.y - arrowRy * 0.08),
+    };
+
+    return [
+      {
+        d: `M ${topLeft.x} ${topLeft.y} C ${Math.round(center.x - arrowRx * 0.44)} ${Math.round(center.y - arrowRy * 1.05)} ${Math.round(center.x + arrowRx * 0.32)} ${Math.round(center.y - arrowRy * 1.02)} ${topRight.x} ${topRight.y}`,
+        markerId,
+      },
+      {
+        d: `M ${right.x} ${right.y} C ${Math.round(center.x + arrowRx * 1.0)} ${Math.round(center.y + arrowRy * 0.16)} ${Math.round(center.x + arrowRx * 0.58)} ${Math.round(center.y + arrowRy * 0.76)} ${bottom.x} ${bottom.y}`,
+        markerId,
+      },
+      {
+        d: `M ${bottomLeft.x} ${bottomLeft.y} C ${Math.round(center.x - arrowRx * 0.66)} ${Math.round(center.y + arrowRy * 0.74)} ${Math.round(center.x - arrowRx * 0.98)} ${Math.round(center.y + arrowRy * 0.24)} ${left.x} ${left.y}`,
+        markerId,
+      },
+    ];
+  }
+
   const startAngle = (cycle.startAngle ?? -130) * Math.PI / 180;
   const endAngle = (cycle.endAngle ?? -45) * Math.PI / 180;
   const startX = Math.round(center.x + Math.cos(startAngle) * arrowRx);

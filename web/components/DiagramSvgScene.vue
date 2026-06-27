@@ -132,11 +132,12 @@ onUpdated(async () => { await nextTick(); autoSizeNodes(); });
             <marker :id="`arrow-recycle-${i}`" class="dsvg-arrow-recycle" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" />
             </marker>
-            <marker :id="p.cycleMarkerId" class="dsvg-arrow-cycle" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="28" markerHeight="28" markerUnits="userSpaceOnUse" orient="auto">
+            <marker :id="p.cycleMarkerId" class="dsvg-arrow-cycle" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="46" markerHeight="46" markerUnits="userSpaceOnUse" orient="auto">
               <path d="M 0 0 L 10 5 L 0 10 z" />
             </marker>
           </defs>
           <g v-for="(a, c) in p.cycleArrows || []" :key="`c${c}`" class="dsvg-cycle-arrow">
+            <text v-if="a.glyph" class="dsvg-cycle-glyph" :x="a.glyphX" :y="a.glyphY" text-anchor="middle" dominant-baseline="middle" :style="{ fontSize: `${a.glyphSize}px` }">{{ a.glyph }}</text>
             <ellipse v-if="a.ellipse" class="dsvg-cycle-guide" :cx="a.ellipse.cx" :cy="a.ellipse.cy" :rx="a.ellipse.rx" :ry="a.ellipse.ry" />
             <path :d="a.d" :marker-end="`url(#${a.markerId})`" />
             <text v-if="a.label" class="dsvg-edge-label dsvg-cycle-label" :x="a.labelX" :y="a.labelY" text-anchor="middle" dominant-baseline="middle">{{ a.label }}</text>
