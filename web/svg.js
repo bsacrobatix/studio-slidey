@@ -18,6 +18,22 @@
 import dagre from 'dagre';
 
 // ---------------------------------------------------------------------------
+const LAYOUT_DIRECTIONS = new Set(['TB', 'BT', 'LR', 'RL']);
+
+function clampPositiveNumber(value, fallback) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(0, value);
+}
+
+function clampIterations(value, fallback, maxIterations = 24) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(0, Math.round(value)), maxIterations);
+}
+
+function normalizeRankDir(value) {
+  return LAYOUT_DIRECTIONS.has(value) ? value : 'TB';
+}
+
 // Size estimation — used for dagre when no override is available.
 // Per-char width of 16px is deliberately generous so the first pass never
 // under-estimates; Feature A corrects the actual DOM rects post-render and
@@ -41,12 +57,12 @@ function estimateNodeSize(n, override) {
 // Simple iterative AABB push-apart — runs until stable or 12 iterations.
 // Only shifts on the smaller overlap axis to minimise graph distortion.
 // ---------------------------------------------------------------------------
-function resolveOverlaps(positions) {
-  const GAP   = 24;
+function resolveOverlaps(positions, gap = 24, maxIterations = 12) {
+  const GAP = gap;
   const nodes  = Object.values(positions);
   let changed = true;
 
-  for (let iter = 0; changed && iter < 12; iter++) {
+  for (let iter = 0; changed && iter < maxIterations; iter++) {
     changed = false;
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
@@ -180,14 +196,22 @@ function applyCycleLayout(panel, nodeMap) {
 function applyAutoLayout(panel, sizeOverrides) {
   const nodes = panel.nodes || [];
   const edges = panel.edges || [];
+  const rankdir = normalizeRankDir(panel.rankdir);
+  const ranksep = clampPositiveNumber(panel.ranksep, 100);
+  const nodesep = clampPositiveNumber(panel.nodesep, 80);
+  const marginx = clampPositiveNumber(panel.marginx, 50);
+  const marginy = clampPositiveNumber(panel.marginy, 50);
+  const overlapGap = clampPositiveNumber(panel.overlap_gap, 24);
+  const overlapIterations = clampIterations(panel.overlap_iterations, 12);
+  const resolveOverlapsWithSettings = panel.resolve_overlaps !== false;
 
   const g = new dagre.graphlib.Graph();
   g.setGraph({
-    rankdir: panel.rankdir || 'TB',
-    ranksep: panel.ranksep || 100,
-    nodesep: panel.nodesep || 80,
-    marginx: 50,
-    marginy: 50,
+    rankdir,
+    ranksep,
+    nodesep,
+    marginx,
+    marginy,
   });
   g.setDefaultEdgeLabel(() => ({}));
 
@@ -227,7 +251,9 @@ function applyAutoLayout(panel, sizeOverrides) {
     };
   }
 
-  resolveOverlaps(result);
+  if (resolveOverlapsWithSettings) {
+    resolveOverlaps(result, overlapGap, overlapIterations);
+  }
 
   // Auto viewBox — tight fit around all nodes plus padding.
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
