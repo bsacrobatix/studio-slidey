@@ -71,101 +71,90 @@ function parseArgs(argv) {
 const CONFIG = parseArgs(process.argv.slice(2));
 const BROWSER_TOOL_TIMEOUT_MS = Number(process.env.SLIDEY_MCP_BROWSER_TIMEOUT_MS || 30000);
 const BROWSER_TOOLS = new Set(['slidey_render_png', 'slidey_render_html', 'slidey_audit', 'slidey_doctor']);
-const LAYOUT_GALLERY = [
-  {
-    id: 'title',
-    label: 'Title',
-    scene: {
-      type: 'title',
-      title: 'Title slide',
-      subtitle: 'Add your subtitle',
-      eyebrow: 'Section',
-    },
-  },
-  {
-    id: 'narrative',
-    label: 'Narrative',
-    scene: {
-      type: 'narrative',
-      eyebrow: 'Narrative',
-      lede: 'A short takeaway',
-      body: 'Start writing the scene copy here.',
-    },
-  },
-  {
-    id: 'cards-grid',
-    label: 'Cards (grid)',
-    scene: {
-      type: 'cards',
-      variant: 'grid',
-      title: 'Grid cards',
-      columns: 2,
-      cards: [
-        { label: 'Point', sub: 'Describe a key idea' },
-        { label: 'Point', sub: 'Add supporting context' },
-      ],
-    },
-  },
-  {
-    id: 'code-source',
-    label: 'Code block',
-    scene: {
-      type: 'code',
-      variant: 'source',
-      title: 'Code',
-      lang: 'javascript',
-      code: "console.log('Hello from Slidey');",
-    },
-  },
-  {
-    id: 'diagram-svg',
-    label: 'Diagram',
-    scene: {
-      type: 'diagram-svg',
-      title: 'Diagram',
-      panels: [
-        {
-          label: 'Main flow',
-          nodes: [
-            { id: 'start', label: 'Start' },
-            { id: 'end', label: 'Done' },
-          ],
-          edges: [{ from: 'start', to: 'end' }],
-        },
-      ],
-    },
-  },
-  {
-    id: 'table-data',
-    label: 'Table',
-    scene: {
-      type: 'table',
-      variant: 'data',
-      title: 'Table',
-      columns: ['Stage', 'Status'],
-      rows: [{ cells: ['Draft', 'Ready'] }],
-    },
-  },
-  {
-    id: 'chart-bar',
-    label: 'Chart',
-    scene: {
-      type: 'chart',
-      variant: 'bar',
-      title: 'Chart',
-      series: [{ name: 'Series 1', points: [{ x: 'A', y: 7 }, { x: 'B', y: 12 }] }],
-    },
-  },
-  {
-    id: 'mermaid',
-    label: 'Mermaid',
-    scene: {
-      type: 'mermaid',
-      title: 'Mermaid',
-      source: 'flowchart TD\nA[Input] --> B[Process]\nB --> C[Output]',
-    },
-  },
-];
+const LAYOUT_GALLERY_PATH = path.join(ROOT_DIR, 'examples', 'layout-gallery.slidey.json');
+
+function loadLayoutGuideDeck() {
+  try {
+    const raw = fs.readFileSync(LAYOUT_GALLERY_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed.scenes) ? parsed.scenes : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function layoutGalleryId(type, variant = '') {
+  return variant ? `${type}-${variant}` : type;
+}
+
+function layoutGalleryLabel(scene, type, variant) {
+  if (typeof scene.title === 'string' && scene.title.trim()) return scene.title.trim();
+  if (typeof scene.eyebrow === 'string' && scene.eyebrow.trim()) return `${type}: ${scene.eyebrow.trim()}`;
+  if (typeof scene.question === 'string' && scene.question.trim()) return `${type}: ${scene.question.trim()}`;
+  if (typeof scene.lede === 'string' && scene.lede.trim()) return `${type}: ${scene.lede.trim()}`;
+  return variant ? `${type} (${variant})` : type;
+}
+
+function buildLayoutGalleryFromGuide(scenes) {
+  const sourceScenes = Array.isArray(scenes) ? scenes : [];
+  const seen = new Set();
+  const layouts = [];
+  const issues = [];
+
+  for (const scene of sourceScenes) {
+    if (!scene || typeof scene !== 'object') {
+      issues.push('layout guide contains a non-object scene entry');
+      continue;
+    }
+    const type = typeof scene.type === 'string' ? scene.type.trim() : '';
+    if (!type) {
+      issues.push('layout guide scene is missing required "type"');
+      continue;
+    }
+    const variant = typeof scene.variant === 'string' ? scene.variant.trim() : '';
+    const id = layoutGalleryId(type, variant);
+    if (seen.has(id)) continue;
+
+    layouts.push({
+      id,
+      label: layoutGalleryLabel(scene, type, variant),
+      type,
+      variant,
+      scene,
+    });
+    seen.add(id);
+  }
+
+  return {
+    layouts,
+    issues,
+    valid: issues.length === 0,
+    sourceScenes: sourceScenes.length,
+    uniqueScenes: layouts.length,
+  };
+}
+
+function fallbackLayoutGallery() {
+  return [
+    { id: 'title', label: 'Title', type: 'title', variant: '', scene: { type: 'title', title: 'Title slide', subtitle: 'Add your subtitle', eyebrow: 'Section' } },
+    { id: 'narrative', label: 'Narrative', type: 'narrative', variant: '', scene: { type: 'narrative', eyebrow: 'Narrative', lede: 'A short takeaway', body: 'Start writing the scene copy here.' } },
+    { id: 'cards-grid', label: 'Cards (grid)', type: 'cards', variant: 'grid', scene: { type: 'cards', variant: 'grid', title: 'Grid cards', columns: 2, cards: [{ label: 'Point', sub: 'Describe a key idea' }, { label: 'Point', sub: 'Add supporting context' }] } },
+    { id: 'code-source', label: 'Code block', type: 'code', variant: 'source', scene: { type: 'code', variant: 'source', title: 'Code', lang: 'javascript', code: "console.log('Hello from Slidey');" } },
+    { id: 'diagram-svg', label: 'Diagram', type: 'diagram-svg', variant: '', scene: { type: 'diagram-svg', title: 'Diagram', panels: [{ label: 'Main flow', nodes: [{ id: 'start', label: 'Start' }, { id: 'end', label: 'Done' }], edges: [{ from: 'start', to: 'end' }] }] } },
+    { id: 'table-data', label: 'Table', type: 'table', variant: 'data', scene: { type: 'table', variant: 'data', title: 'Table', columns: ['Stage', 'Status'], rows: [{ cells: ['Draft', 'Ready'] }] } },
+    { id: 'chart-bar', label: 'Chart', type: 'chart', variant: 'bar', scene: { type: 'chart', variant: 'bar', title: 'Chart', series: [{ name: 'Series 1', points: [{ x: 'A', y: 7 }, { x: 'B', y: 12 }] }] } },
+    { id: 'mermaid', label: 'Mermaid', type: 'mermaid', variant: '', scene: { type: 'mermaid', title: 'Mermaid', source: 'flowchart TD\nA[Input] --> B[Process]\nB --> C[Output]' } },
+  ];
+}
+
+const LAYOUT_GUIDE_BUILD = buildLayoutGalleryFromGuide(loadLayoutGuideDeck());
+const LAYOUT_GALLERY = LAYOUT_GUIDE_BUILD.layouts.length
+  ? LAYOUT_GUIDE_BUILD.layouts
+  : fallbackLayoutGallery();
+
+if (LAYOUT_GUIDE_BUILD.layouts.length && !LAYOUT_GUIDE_BUILD.valid) {
+  console.error(`slidey layout gallery integrity warning: ${LAYOUT_GUIDE_BUILD.issues.join('; ')}`);
+}
 
 function jsonText(value) {
   return [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }];
