@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
 import { getByPath, setByPath, coerceValue } from '../spec-paths.js';
+import layoutGalleryDeck from '../../examples/layout-gallery.slidey.json';
 
 const props = defineProps({
   deck: { type: Object, required: true },
@@ -13,101 +14,80 @@ const props = defineProps({
 });
 const emit = defineEmits(['change', 'save', 'revert']);
 
-const LAYOUT_GALLERY = [
-  {
-    id: 'title',
-    label: 'Title',
-    scene: {
-      type: 'title',
-      title: 'Title slide',
-      subtitle: 'Add your subtitle',
-      eyebrow: 'Section',
-    },
-  },
-  {
-    id: 'narrative',
-    label: 'Narrative',
-    scene: {
-      type: 'narrative',
-      eyebrow: 'Narrative',
-      lede: 'A short takeaway',
-      body: 'Start writing the scene copy here.',
-    },
-  },
-  {
-    id: 'cards-grid',
-    label: 'Cards (grid)',
-    scene: {
-      type: 'cards',
-      variant: 'grid',
-      title: 'Grid cards',
-      columns: 2,
-      cards: [
-        { label: 'Point', sub: 'Describe a key idea' },
-        { label: 'Point', sub: 'Add supporting context' },
-      ],
-    },
-  },
-  {
-    id: 'code-source',
-    label: 'Code block',
-    scene: {
-      type: 'code',
-      variant: 'source',
-      title: 'Code',
-      lang: 'javascript',
-      code: "console.log('Hello from Slidey');",
-    },
-  },
-  {
-    id: 'diagram-svg',
-    label: 'Diagram',
-    scene: {
-      type: 'diagram-svg',
-      title: 'Diagram',
-      panels: [
-        {
-          label: 'Main flow',
-          nodes: [
-            { id: 'start', label: 'Start' },
-            { id: 'end', label: 'Done' },
-          ],
-          edges: [{ from: 'start', to: 'end' }],
-        },
-      ],
-    },
-  },
-  {
-    id: 'table-data',
-    label: 'Table',
-    scene: {
-      type: 'table',
-      variant: 'data',
-      title: 'Table',
-      columns: ['Stage', 'Status'],
-      rows: [{ cells: ['Draft', 'Ready'] }],
-    },
-  },
-  {
-    id: 'chart-bar',
-    label: 'Chart',
-    scene: {
-      type: 'chart',
-      variant: 'bar',
-      title: 'Chart',
-      series: [{ name: 'Series 1', points: [{ x: 'A', y: 7 }, { x: 'B', y: 12 }] }],
-    },
-  },
-  {
-    id: 'mermaid',
-    label: 'Mermaid',
-    scene: {
-      type: 'mermaid',
-      title: 'Mermaid',
-      source: 'flowchart TD\nA[Input] --> B[Process]\nB --> C[Output]',
-    },
-  },
+const LAYOUT_GALLERY_FALLBACK = [
+  { id: 'title', label: 'Title', type: 'title', variant: '', scene: { type: 'title', title: 'Title slide', subtitle: 'Add your subtitle', eyebrow: 'Section' } },
+  { id: 'narrative', label: 'Narrative', type: 'narrative', variant: '', scene: { type: 'narrative', eyebrow: 'Narrative', lede: 'A short takeaway', body: 'Start writing the scene copy here.' } },
+  { id: 'cards-grid', label: 'Cards (grid)', type: 'cards', variant: 'grid', scene: { type: 'cards', variant: 'grid', title: 'Grid cards', columns: 2, cards: [{ label: 'Point', sub: 'Describe a key idea' }, { label: 'Point', sub: 'Add supporting context' }] } },
+  { id: 'code-source', label: 'Code block', type: 'code', variant: 'source', scene: { type: 'code', variant: 'source', title: 'Code', lang: 'javascript', code: "console.log('Hello from Slidey');" } },
+  { id: 'diagram-svg', label: 'Diagram', type: 'diagram-svg', variant: '', scene: { type: 'diagram-svg', title: 'Diagram', panels: [{ label: 'Main flow', nodes: [{ id: 'start', label: 'Start' }, { id: 'end', label: 'Done' }], edges: [{ from: 'start', to: 'end' }] }] } },
+  { id: 'table-data', label: 'Table', type: 'table', variant: 'data', scene: { type: 'table', variant: 'data', title: 'Table', columns: ['Stage', 'Status'], rows: [{ cells: ['Draft', 'Ready'] }] } },
+  { id: 'chart-bar', label: 'Chart', type: 'chart', variant: 'bar', scene: { type: 'chart', variant: 'bar', title: 'Chart', series: [{ name: 'Series 1', points: [{ x: 'A', y: 7 }, { x: 'B', y: 12 }] }] } },
+  { id: 'mermaid', label: 'Mermaid', type: 'mermaid', variant: '', scene: { type: 'mermaid', title: 'Mermaid', source: 'flowchart TD\nA[Input] --> B[Process]\nB --> C[Output]' } },
 ];
+
+function layoutGalleryId(type, variant = '') {
+  return variant ? `${type}-${variant}` : type;
+}
+
+function layoutGalleryLabel(scene, type, variant) {
+  if (typeof scene.title === 'string' && scene.title.trim()) return scene.title.trim();
+  if (typeof scene.eyebrow === 'string' && scene.eyebrow.trim()) return `${type}: ${scene.eyebrow.trim()}`;
+  if (typeof scene.question === 'string' && scene.question.trim()) return `${type}: ${scene.question.trim()}`;
+  if (typeof scene.lede === 'string' && scene.lede.trim()) return `${type}: ${scene.lede.trim()}`;
+  return variant ? `${type} (${variant})` : type;
+}
+
+function buildLayoutGalleryFromGuide(scenes) {
+  const sourceScenes = Array.isArray(scenes) ? scenes : [];
+  const seen = new Set();
+  const layouts = [];
+  const issues = [];
+  for (const scene of sourceScenes) {
+    if (!scene || typeof scene !== 'object') {
+      issues.push('layout guide contains a non-object scene entry');
+      continue;
+    }
+    const type = typeof scene.type === 'string' ? scene.type.trim() : '';
+    if (!type) {
+      issues.push('layout guide scene is missing required "type"');
+      continue;
+    }
+    const variant = typeof scene.variant === 'string' ? scene.variant.trim() : '';
+    const id = layoutGalleryId(type, variant);
+    if (seen.has(id)) {
+      issues.push(`duplicate layout id "${id}" in guide deck`);
+      continue;
+    }
+    layouts.push({ id, label: layoutGalleryLabel(scene, type, variant), type, variant, scene });
+    seen.add(id);
+  }
+  return {
+    layouts,
+    issues,
+    sourceScenes: sourceScenes.length,
+    valid: issues.length === 0,
+  };
+}
+
+const LAYOUT_GUIDE_BUILD = buildLayoutGalleryFromGuide(layoutGalleryDeck?.scenes || []);
+const LAYOUT_GALLERY = LAYOUT_GUIDE_BUILD.layouts.length ? LAYOUT_GUIDE_BUILD.layouts : LAYOUT_GALLERY_FALLBACK;
+const LAYOUT_GALLERY_MAP = new Map(LAYOUT_GALLERY.map((item) => [item.id, item]));
+const layoutGalleryIntegrity = computed(() => {
+  const messages = [];
+  if (!Array.isArray(layoutGalleryDeck?.scenes)) messages.push('layout guide deck missing or unreadable');
+  if (!LAYOUT_GUIDE_BUILD.layouts.length) messages.push('layout guide returned no valid entries; using fallback list');
+  for (const issue of LAYOUT_GUIDE_BUILD.issues) messages.push(issue);
+  const deckCount = Array.isArray(layoutGalleryDeck?.scenes) ? layoutGalleryDeck.scenes.length : 0;
+  if (deckCount > LAYOUT_GUIDE_BUILD.layouts.length) {
+    const skipped = deckCount - LAYOUT_GUIDE_BUILD.layouts.length;
+    messages.push(`layout parser skipped ${skipped} scene(s) while building gallery; check for duplicates or malformed entries`);
+  }
+  return messages;
+});
+
+function findGalleryLayout(id) {
+  return LAYOUT_GALLERY_MAP.get(id);
+}
 
 const SKIP_KEYS = new Set([
   'gif', 'src', 'capture', 'from', 'to', 'id', 'markerId',
@@ -124,6 +104,7 @@ const scene = computed(() => (props.spec.scenes || [])[sceneIndex.value] || {});
 const canSave = computed(() => /\.json$/i.test(props.activePath || ''));
 const semanticMessages = reactive({});
 const selectedLayout = ref(LAYOUT_GALLERY[0]?.id || 'title');
+const showLayoutGallery = ref(false);
 const canRevert = computed(() => canSave.value && props.dirty && !props.saving);
 const sceneCount = computed(() => Array.isArray(props.spec.scenes) ? props.spec.scenes.length : 0);
 const selectedGallery = computed(() => LAYOUT_GALLERY.find(item => item.id === selectedLayout.value) || LAYOUT_GALLERY[0]);
@@ -131,6 +112,16 @@ const canDuplicateCurrent = computed(() => canSave.value && scene.value.type);
 const canDeleteCurrent = computed(() => canSave.value && sceneCount.value > 1);
 const canMoveCurrentUp = computed(() => canSave.value && sceneIndex.value > 0);
 const canMoveCurrentDown = computed(() => canSave.value && sceneIndex.value + 1 < sceneCount.value);
+
+function openLayoutGallery() {
+  if (!canSave.value) return;
+  selectedLayout.value = selectedGallery.value?.id || LAYOUT_GALLERY[0]?.id || 'title';
+  showLayoutGallery.value = true;
+}
+
+function closeLayoutGallery() {
+  showLayoutGallery.value = false;
+}
 
 function specScenes() {
   if (!Array.isArray(props.spec.scenes)) return [];
@@ -186,16 +177,36 @@ function moveCurrentSceneBy(offset) {
   })();
 }
 
-async function addSlideFromGallery() {
+function previewLineFor(layout) {
+  const scene = layout?.scene || {};
+  const candidates = [scene.title, scene.eyebrow, scene.lede, scene.question, scene.subtitle, scene.label];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  if (Array.isArray(scene.cards)) return `${scene.cards.length} cards`;
+  if (Array.isArray(scene.series)) return `${scene.series.length} series`;
+  if (Array.isArray(scene.panels)) return `${scene.panels.length} panel(s)`;
+  if (Array.isArray(scene.rows)) return `${scene.rows.length} rows`;
+  return '';
+}
+
+function onPickLayout(layoutId) {
+  selectedLayout.value = layoutId || selectedLayout.value;
+  void addSlideFromGallery(layoutId);
+}
+
+async function addSlideFromGallery(layoutId) {
   if (!canSave.value) return;
   const scenes = specScenes();
-  const template = selectedGallery.value?.scene;
+  const targetId = layoutId || selectedLayout.value;
+  const template = findGalleryLayout(targetId)?.scene;
   if (!template) return;
   const index = sceneIndex.value + 1;
   scenes.splice(index, 0, cloneScene(template));
   emit('change');
   await props.deck.render();
   await goToScene(index);
+  closeLayoutGallery();
 }
 
 function labelFor(path) {
@@ -482,21 +493,23 @@ function validatePythonByPattern(source) {
       <div class="slidey-editor-field">
         <span>New slide layout</span>
         <div class="slidey-gallery-row">
-          <select
-            v-model="selectedLayout"
-            class="slidey-editor-select"
+          <button
+            class="slidey-editor-btn slidey-layout-picker-trigger"
             :disabled="!canSave"
+            @click="openLayoutGallery"
           >
-            <option v-for="item in LAYOUT_GALLERY" :key="item.id" :value="item.id">
-              {{ item.label }}
-            </option>
-          </select>
+            Select layout ({{ selectedGallery?.label || 'pick one' }})
+          </button>
           <button
             class="slidey-editor-add"
             :disabled="!canSave"
-            @click="addSlideFromGallery"
+            @click="onPickLayout(selectedLayout)"
           >Add slide</button>
         </div>
+        <p v-if="layoutGalleryIntegrity.length" class="slidey-editor-note slidey-layout-integrity-note">
+          Layout catalog warning: <br />
+          {{ layoutGalleryIntegrity.join(' | ') }}
+        </p>
       </div>
     </section>
 
@@ -572,5 +585,34 @@ function validatePythonByPattern(source) {
         </p>
       </label>
     </section>
+    <div v-if="showLayoutGallery" class="slidey-layout-modal-backdrop" @click.self="closeLayoutGallery">
+      <div class="slidey-layout-modal" role="dialog" aria-modal="true" aria-label="Add slide layout">
+        <header class="slidey-layout-modal-head">
+          <div>
+            <h2>Choose layout</h2>
+            <p>Select one layout to insert after slide {{ sceneIndex + 1 }}</p>
+          </div>
+          <button class="slidey-layout-close" @click="closeLayoutGallery" aria-label="Close layout picker">×</button>
+        </header>
+        <div class="slidey-layout-grid">
+          <button
+            v-for="item in LAYOUT_GALLERY"
+            :key="item.id"
+            class="slidey-layout-card"
+            :class="{ 'is-active': item.id === selectedLayout }"
+            @click="onPickLayout(item.id)"
+          >
+            <div class="slidey-layout-card-preview" :class="`type-${item.type}`">
+              <div class="slidey-layout-card-preview-title">{{ item.type }}</div>
+              <div v-if="item.variant" class="slidey-layout-card-preview-variant">{{ item.variant }}</div>
+            </div>
+            <div class="slidey-layout-card-copy">
+              <p class="slidey-layout-card-label">{{ item.label }}</p>
+              <p class="slidey-layout-card-subtitle">{{ previewLineFor(item) }}</p>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
