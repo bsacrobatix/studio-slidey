@@ -52,3 +52,28 @@ test('diagram edges can pin labels at authored coordinates', async () => {
   assert.equal(panel.edges[0].labelY, 215);
   assert.equal(panel.edges[0].anchor, 'start');
 });
+
+test('cycle layout places nodes around a single background arrow', async () => {
+  const { buildPanel } = await import('../web/svg.js');
+  const panel = buildPanel({
+    layout: 'cycle',
+    cycle: { center: { x: 500, y: 360 }, rx: 240, ry: 160, label: 'iterate' },
+    nodes: [
+      { id: 'proposal', label: 'proposal', slot: 'top', w: 200, h: 120 },
+      { id: 'build', label: 'feature', slot: 'right', w: 200, h: 120 },
+      { id: 'demo', label: 'demo', slot: 'bottom', w: 200, h: 120 },
+      { id: 'qa', label: 'QA', slot: 'left', w: 200, h: 120 },
+    ],
+  }, 0);
+
+  assert.equal(panel.cycleArrows.length, 1);
+  assert.equal(panel.cycleArrows[0].markerId, 'cycle-arrow-0');
+  assert.deepEqual(panel.cycleArrows[0].ellipse, { cx: 500, cy: 360, rx: 320, ry: 220 });
+  assert.equal(panel.cycleArrows[0].d, 'M 294 191 A 320 220 0 1 1 726 204');
+  assert.deepEqual(panel.nodes.map(n => [n.id, n.rect.x, n.rect.y]), [
+    ['proposal', 400, 140],
+    ['build', 640, 300],
+    ['demo', 400, 460],
+    ['qa', 160, 300],
+  ]);
+});

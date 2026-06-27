@@ -93,6 +93,8 @@ const NODE = {
     y: { type: 'number', description: 'Top edge in SVG user units' },
     w: { type: 'number', description: 'Width in SVG user units' },
     h: { type: 'number', description: 'Height in SVG user units' },
+    slot: { type: 'string', enum: ['top', 'right', 'bottom', 'left', 'top-right', 'bottom-right', 'bottom-left', 'top-left'], description: 'Position around a diagram-svg panel with layout:"cycle"' },
+    cycle: { type: 'boolean', description: 'Set false to exclude this node from layout:"cycle" placement' },
     style: { type: 'string', enum: ['primary', 'secondary'], description: 'Node colour accent' },
   },
 };
@@ -278,6 +280,30 @@ const SCHEMA = {
                     label: { type: 'string', description: 'Panel heading' },
                     caption: { type: 'string', description: 'Panel-local caption' },
                     viewBox: { type: 'string', description: 'SVG viewBox, e.g. "0 0 800 600"' },
+                    layout: { type: 'string', enum: ['cycle'], description: 'Optional panel layout template; cycle places nodes around an ellipse with a single background recycle arrow' },
+                    cycle: {
+                      type: 'object',
+                      description: 'Options for layout:"cycle"',
+                      properties: {
+                        center: {
+                          type: 'object',
+                          properties: {
+                            x: { type: 'number' },
+                            y: { type: 'number' },
+                          },
+                        },
+                        rx: { type: 'number', description: 'Horizontal radius of the cycle arrow and node slots' },
+                        ry: { type: 'number', description: 'Vertical radius of the cycle arrow and node slots' },
+                        arrowRx: { type: 'number', description: 'Optional horizontal radius for the background cycle arrow; defaults outside the node slots' },
+                        arrowRy: { type: 'number', description: 'Optional vertical radius for the background cycle arrow; defaults outside the node slots' },
+                        startAngle: { type: 'number', description: 'Cycle arrow start angle in degrees; 0 is right, 90 is down' },
+                        endAngle: { type: 'number', description: 'Cycle arrow end angle in degrees; 0 is right, 90 is down' },
+                        label: { type: 'string', description: 'Optional label drawn inside the cycle arrow' },
+                        labelX: { type: 'number' },
+                        labelY: { type: 'number' },
+                        arrow: { type: 'boolean', description: 'Set false to suppress the background cycle arrow' },
+                      },
+                    },
                     nodes: {
                       type: 'array',
                       items: NODE,

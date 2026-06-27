@@ -70,6 +70,58 @@ function resolveOverlaps(positions) {
   }
 }
 
+function applyCycleLayout(panel, nodeMap) {
+  const cycle = panel.cycle || {};
+  const center = cycle.center || { x: 660, y: 380 };
+  const rx = cycle.rx || 360;
+  const ry = cycle.ry || 230;
+  const arrowRx = cycle.arrowRx || rx + 80;
+  const arrowRy = cycle.arrowRy || ry + 60;
+  const slots = {
+    top: -90,
+    right: 0,
+    bottom: 90,
+    left: 180,
+    'top-right': -45,
+    'bottom-right': 45,
+    'bottom-left': 135,
+    'top-left': -135,
+  };
+  const cycleNodes = (panel.nodes || []).filter(n => n.cycle !== false);
+  cycleNodes.forEach((n, i) => {
+    if (n.x != null && n.y != null) return;
+    const angleDeg = n.slot && slots[n.slot] != null
+      ? slots[n.slot]
+      : -90 + (360 / Math.max(cycleNodes.length, 1)) * i;
+    const angle = angleDeg * Math.PI / 180;
+    const w = n.w || 320;
+    const h = n.h || 170;
+    nodeMap[n.id] = {
+      ...n,
+      x: Math.round(center.x + Math.cos(angle) * rx - w / 2),
+      y: Math.round(center.y + Math.sin(angle) * ry - h / 2),
+      w,
+      h,
+    };
+  });
+
+  if (cycle.arrow === false) return [];
+  const startAngle = (cycle.startAngle ?? -130) * Math.PI / 180;
+  const endAngle = (cycle.endAngle ?? -45) * Math.PI / 180;
+  const startX = Math.round(center.x + Math.cos(startAngle) * arrowRx);
+  const startY = Math.round(center.y + Math.sin(startAngle) * arrowRy);
+  const endX = Math.round(center.x + Math.cos(endAngle) * arrowRx);
+  const endY = Math.round(center.y + Math.sin(endAngle) * arrowRy);
+  return [{
+    ellipse: { cx: center.x, cy: center.y, rx: arrowRx, ry: arrowRy },
+    d: `M ${startX} ${startY} A ${arrowRx} ${arrowRy} 0 1 1 ${endX} ${endY}`,
+    markerId: cycle.markerId,
+    label: cycle.label || null,
+    labelX: cycle.labelX ?? center.x,
+    labelY: cycle.labelY ?? center.y,
+  }];
+}
+
 // ---------------------------------------------------------------------------
 // Dagre auto-layout
 // ---------------------------------------------------------------------------
@@ -146,6 +198,7 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
   const nodes   = panel.nodes || [];
   const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
   const markerId = `arrow-${idx}`;
+  const cycleMarkerId = `cycle-arrow-${idx}`;
   const OUTSIDE_BUS_GUTTER = 70;
 
   const needsAutoLayout =
@@ -166,10 +219,14 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
     }
   }
 
+  const cycleArrows = panel.layout === 'cycle'
+    ? applyCycleLayout(panel, nodeMap).map(a => ({ ...a, markerId: a.markerId || cycleMarkerId }))
+    : [];
+
   const renderNodes = nodes.map(n => {
-    const nd = needsAutoLayout && layoutMap?.[n.id]
+    const nd = nodeMap[n.id] || (needsAutoLayout && layoutMap?.[n.id]
       ? { ...n, ...layoutMap[n.id] }
-      : n;
+      : n);
 
     const cx = nd.x + nd.w / 2;
     const cy = nd.y + nd.h / 2;
@@ -201,9 +258,9 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
   const elbowOutCount = {};
   for (const e of elbowEdges) elbowOutCount[e.from] = (elbowOutCount[e.from] || 0) + 1;
   const nodeBounds = nodes.reduce((bounds, n) => {
-    const nd = needsAutoLayout && layoutMap?.[n.id]
+    const nd = nodeMap[n.id] || (needsAutoLayout && layoutMap?.[n.id]
       ? { ...n, ...layoutMap[n.id] }
-      : n;
+      : n);
     return {
       minX: Math.min(bounds.minX, nd.x),
       maxX: Math.max(bounds.maxX, nd.x + nd.w),
@@ -372,8 +429,10 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
   return {
     viewBox,
     markerId,
+    cycleMarkerId,
     label: panel.label || null,
     caption: panel.caption || null,
+    cycleArrows,
     nodes: renderNodes,
     edges: renderEdges,
   };

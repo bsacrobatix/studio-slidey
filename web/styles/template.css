@@ -842,6 +842,27 @@ body.instant .reveal { transition: none !important; }
   fill: none;
 }
 .dsvg-arrow path { fill: #58a6ff; stroke: none; }
+.dsvg-cycle-arrow path {
+  stroke: transparent;
+  stroke-width: 2;
+  stroke-linecap: round;
+  fill: none;
+}
+.dsvg-cycle-guide {
+  stroke: rgba(88, 166, 255, 0.22);
+  stroke-width: 6;
+  fill: none;
+}
+.dsvg-arrow-cycle path {
+  fill: rgba(88, 166, 255, 0.5);
+  stroke: none;
+}
+.dsvg-cycle-label {
+  fill: #8b949e;
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 .dsvg-edge-label {
   font-family: 'JetBrains Mono', 'Courier New', monospace;
   font-size: 20px;
