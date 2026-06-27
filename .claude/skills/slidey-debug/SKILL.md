@@ -1,85 +1,84 @@
 ---
 name: slidey-debug
-description: [TODO: Complete and informative explanation of what the skill does and when to use it. Include WHEN to use this skill - specific scenarios, file types, or tasks that trigger it.]
+description: Debug Slidey render, layout, CLI, MCP, browser, rrweb/video, PDF/PNG/MP4, and deck-output failures. Use when Codex needs to diagnose a broken or ugly Slidey deck, bad scene layout, render/audit/check failure, stale render bundle, Puppeteer/browser issue, MCP slidey tool problem, timing/narration overrun, or mismatch between viewer and exported output.
 ---
 
 # Slidey Debug
 
-## Overview
+Use this skill to debug existing Slidey behavior. For creating or substantially rewriting a deck, use `slidey-authoring` first; return here when the question is why a deck, render, CLI command, viewer, or MCP tool behaves badly.
 
-[TODO: 1-2 sentences explaining what this skill enables]
+## Ground rules
 
-## Structuring This Skill
+- Do not render a full MP4 just to debug. Use `--list`, `--estimate`, `--check`, `--audit`, PNG scene renders, or PDF exports first.
+- Do not run concurrent Slidey renders. Puppeteer and output-file writes can interfere with each other.
+- Put transient outputs under `.artifacts/slidey-debug/<short-name>/` unless the user asks for a committed artifact.
+- Preserve unrelated deck/source edits. Slidey decks are often being edited in parallel.
+- Treat `dist-render/render.html` as generated. Rebuild it with `npm run build:render`; do not hand-edit it.
+- Keep tests and demos no-LLM. Slidey rendering is deterministic and should not require live model calls.
 
-[TODO: Choose the structure that best fits this skill's purpose. Common patterns:
+## First diagnostic choice
 
-**1. Workflow-Based** (best for sequential processes)
-- Works well when there are clear step-by-step procedures
-- Example: DOCX skill with "Workflow Decision Tree" -> "Reading" -> "Creating" -> "Editing"
-- Structure: ## Overview -> ## Workflow Decision Tree -> ## Step 1 -> ## Step 2...
+Pick the cheapest command that answers the failure mode:
 
-**2. Task-Based** (best for tool collections)
-- Works well when the skill offers different operations/capabilities
-- Example: PDF skill with "Quick Start" -> "Merge PDFs" -> "Split PDFs" -> "Extract Text"
-- Structure: ## Overview -> ## Quick Start -> ## Task Category 1 -> ## Task Category 2...
+| Symptom | First command | What it tells you |
+|---|---|---|
+| Need scene number or duration | `node src/index.js spec.slidey.json --list` | Scene indices, types, start times, durations. |
+| Narration may overrun | `node src/index.js spec.slidey.json --estimate` | Audio budget warnings without rendering. |
+| `diagram-svg` node sizing/overlap | `node src/index.js spec.slidey.json out.mp4 --check` | Static geometry violations, no Chrome. |
+| Visual/layout issue | `node src/index.js spec.slidey.json .artifacts/slidey-debug/<name> --scenes N` | PNG frames for direct visual inspection. |
+| Real browser layout issue | `node src/index.js spec.slidey.json out.mp4 --scenes N --audit .artifacts/slidey-debug/<name>/audit.json` | Rendered geometry, overflow, tiny text, template leaks. |
+| Blank/stale/broken export | `npm run build:render` then rerun the scoped PNG/PDF | Rebuilds the Vue render bundle. |
+| Chrome/Puppeteer failure | `node src/index.js doctor` | Browser launch and screenshot health. |
+| Schema uncertainty | `node src/index.js --schema` | Current spec schema. |
 
-**3. Reference/Guidelines** (best for standards or specifications)
-- Works well for brand guidelines, coding standards, or requirements
-- Example: Brand styling with "Brand Guidelines" -> "Colors" -> "Typography" -> "Features"
-- Structure: ## Overview -> ## Guidelines -> ## Specifications -> ## Usage...
+Use an output directory for PNG spot checks. Use PDF for sequence review. Use MP4 only for final timing/video/audio issues after layout is already understood.
 
-**4. Capabilities-Based** (best for integrated systems)
-- Works well when the skill provides multiple interrelated features
-- Example: Product Management with "Core Capabilities" -> numbered capability list
-- Structure: ## Overview -> ## Core Capabilities -> ### 1. Feature -> ### 2. Feature...
+## Source routing
 
-Patterns can be mixed and matched as needed. Most skills combine patterns (e.g., start with task-based, add workflow for complex operations).
+Read only the files tied to the observed symptom:
 
-Delete this entire "Structuring This Skill" section when done - it's just guidance.]
+- CLI argument parsing, install commands, output-mode selection: `src/index.js`.
+- Render orchestration, scene dispatch, frame generation: `src/renderer.js` and the matching `src/scenes/<type>.js`.
+- Timing, reveal counts, `--list`, `--estimate`: `src/timing.js`.
+- Static spec/schema validation: `src/schema.js` and `src/validate.js`.
+- Diagram static checks: `src/check.js`.
+- Browser audit findings: `src/audit.js` plus the rendered Vue component.
+- Viewer/render visual mismatch: `web/components/DeckHost.vue`, `web/sceneSteps.mjs`, `web/store.js`, and `web/components/<Name>Scene.vue`.
+- HTML/PDF/PNG/MP4 media path issues: `src/video.js`, `src/overlay-render.js`, `src/rrweb-render.js`, or `src/tour/` depending on the source type.
+- MCP tool failures: `src/mcp.js` and the exact tool handler branch.
+- VS Code preview issues: `tools/vscode-slidey/` after confirming the CLI viewer path works.
 
-## [TODO: Replace with the first main section based on chosen structure]
+If the deck itself is the likely bug, inspect only the affected scene and nearby `meta` fields. Common deck-level causes include missing `meta.mode: "pitch"`, wrong relative asset paths, overpacked diagram coordinates, long unwrapped node labels, and narration longer than scene duration.
 
-[TODO: Add content here. See examples in existing skills:
-- Code samples for technical skills
-- Decision trees for complex workflows
-- Concrete examples with realistic user requests
-- References to scripts/templates/references as needed]
+## Debugging workflow
 
-## Resources (optional)
+1. Capture the exact command, deck path, scene index, error text, and output format.
+2. Run the cheapest diagnostic from the table. Prefer no-render commands before Chrome.
+3. If visual, render only the affected scene to PNG and inspect the last reveal frame first.
+4. Map the symptom to the smallest source surface using Source routing.
+5. Make the smallest fix in source or deck JSON. Avoid changing generated assets by hand.
+6. Re-run only the diagnostic that failed or the scoped PNG/audit needed to inspect the fix.
+7. If the fix changes `web/`, rebuild the render bundle before export-oriented checks.
 
-Create only the resource directories this skill actually needs. Delete this section if no resources are required.
+## Layout triage notes
 
-### scripts/
-Executable code (Python/Bash/etc.) that can be run directly to perform specific operations.
+- `diagram-svg` auto-layout is the default safe path. Hand-authored `x/y/w/h` coordinates require `--check` and a PNG review because boxes can grow without moving neighbors.
+- A title pushed to the top or clipped caption usually means the scene content exceeds the available stage height.
+- Edge labels clip at the SVG viewBox boundary. Shorten labels or move explanatory text into the caption.
+- For bad cycle/process diagrams, first reduce node count or spread the viewBox before tweaking fonts.
+- For tables and cards, prefer fewer rows per scene over shrinking text until it becomes unreadable.
 
-**Examples from other skills:**
-- PDF skill: `fill_fillable_fields.py`, `extract_form_field_info.py` - utilities for PDF manipulation
-- DOCX skill: `document.py`, `utilities.py` - Python modules for document processing
+## MCP-specific checks
 
-**Appropriate for:** Python scripts, shell scripts, or any executable code that performs automation, data processing, or specific operations.
+- Prefer reproducing with `node src/index.js ...` first. If the CLI fails, MCP is not the root cause.
+- If only MCP fails, inspect the relevant `src/mcp.js` handler and compare its args with the CLI command that works.
+- For `slidey_docs`, remember the content comes from `.claude/skills/slidey-authoring/SKILL.md`, with YAML frontmatter stripped.
 
-**Note:** Scripts may be executed without loading into context, but can still be read by Codex for patching or environment adjustments.
+## Reporting
 
-### references/
-Documentation and reference material intended to be loaded into context to inform Codex's process and thinking.
+When handing back a diagnosis, include:
 
-**Examples from other skills:**
-- Product management: `communication.md`, `context_building.md` - detailed workflow guides
-- BigQuery: API reference documentation and query examples
-- Finance: Schema documentation, company policies
-
-**Appropriate for:** In-depth documentation, API references, database schemas, comprehensive guides, or any detailed information that Codex should reference while working.
-
-### assets/
-Files not intended to be loaded into context, but rather used within the output Codex produces.
-
-**Examples from other skills:**
-- Brand styling: PowerPoint template files (.pptx), logo files
-- Frontend builder: HTML/React boilerplate project directories
-- Typography: Font files (.ttf, .woff2)
-
-**Appropriate for:** Templates, boilerplate code, document templates, images, icons, fonts, or any files meant to be copied or used in the final output.
-
----
-
-**Not every skill requires all three types of resources.**
+- The failing command or scene index.
+- The root cause in deck/source terms.
+- The file(s) changed or recommended.
+- The cheapest successful check or remaining check to run.

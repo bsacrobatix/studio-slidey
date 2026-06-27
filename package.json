@@ -38,7 +38,7 @@
     "dist-render",
     "tools/vscode-slidey",
     "docs",
-    ".claude/skills/slidey-authoring",
+    ".claude/skills",
     "examples",
     "index.html",
     "render.html",

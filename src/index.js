@@ -57,10 +57,22 @@ if (wantsSchema) {
   process.exit(0);
 }
 
-// The authoring skill is the single source of truth for both `slidey docs`
-// (printed to stdout for an LLM/agent) and `slidey skill install` (copied into
-// a .claude/skills/ dir). Keeping one file behind both means they never drift.
-const SKILL_DIR = path.join(__dirname, '..', '.claude', 'skills', 'slidey-authoring');
+// Bundled skills are copied by `slidey skill install`. The authoring skill is
+// also the single source of truth for `slidey docs` so docs and skill guidance
+// do not drift.
+const SKILLS_ROOT = path.join(__dirname, '..', '.claude', 'skills');
+const AUTHORING_SKILL_DIR = path.join(SKILLS_ROOT, 'slidey-authoring');
+function bundledSkillDir(name) {
+  if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`invalid skill name: ${name}`);
+  return path.join(SKILLS_ROOT, name);
+}
+function bundledSkillNames() {
+  return fs.readdirSync(SKILLS_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => fs.existsSync(path.join(SKILLS_ROOT, name, 'SKILL.md')))
+    .sort();
+}
 
 // ── `slidey docs` — print the LLM-facing authoring guide to stdout ──────────
 // Everything an agent needs to author a deck (iteration loop, scene-type
@@ -69,7 +81,7 @@ const SKILL_DIR = path.join(__dirname, '..', '.claude', 'skills', 'slidey-author
 //   slidey docs | head     # or pipe it anywhere
 if (args[0] === 'docs') {
   try {
-    let body = fs.readFileSync(path.join(SKILL_DIR, 'SKILL.md'), 'utf-8');
+    let body = fs.readFileSync(path.join(AUTHORING_SKILL_DIR, 'SKILL.md'), 'utf-8');
     // Strip the YAML frontmatter — that's skill-loader metadata, not content.
     body = body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n+/, '');
     process.stdout.write(body.endsWith('\n') ? body : body + '\n');
@@ -97,26 +109,36 @@ if (args[0] === 'doctor') {
   return;
 }
 
-// ── `slidey skill install [--user|--project]` — install the authoring skill ──
-// Copies the bundled slidey-authoring skill into a .claude/skills/ directory so
-// Claude Code (or any agent that reads that convention) loads it automatically.
-//   slidey skill install              # into ./.claude/skills (this project)
-//   slidey skill install --user       # into ~/.claude/skills (all projects)
+// ── `slidey skill install [skill-name|all] [--user|--project]` ─────────────
+// Copies bundled Slidey skills into a .claude/skills/ directory so Claude Code
+// (or any agent that reads that convention) loads them automatically.
+//   slidey skill install                  # install slidey-authoring here
+//   slidey skill install slidey-debug     # install a specific bundled skill
+//   slidey skill install all --user       # install every bundled skill globally
 if (args[0] === 'skill') {
   if (args[1] !== 'install') {
-    console.error('[slidey] usage: slidey skill install [--user|--project]');
+    console.error('[slidey] usage: slidey skill install [skill-name|all] [--user|--project]');
     process.exit(1);
   }
   const toUser  = args.includes('--user');
+  const flags = new Set(['--user', '--project']);
+  const requested = args.slice(2).filter((arg) => !flags.has(arg));
+  const skillNames = requested.length === 0
+    ? ['slidey-authoring']
+    : requested.flatMap((name) => name === 'all' ? bundledSkillNames() : [name]);
   const baseDir = toUser ? path.join(os.homedir(), '.claude') : path.join(process.cwd(), '.claude');
-  const destDir = path.join(baseDir, 'skills', 'slidey-authoring');
+  const destRoot = path.join(baseDir, 'skills');
   try {
-    if (!fs.existsSync(path.join(SKILL_DIR, 'SKILL.md'))) {
-      throw new Error(`bundled skill not found at ${SKILL_DIR}`);
+    fs.mkdirSync(destRoot, { recursive: true });
+    for (const name of [...new Set(skillNames)]) {
+      const srcDir = bundledSkillDir(name);
+      if (!fs.existsSync(path.join(srcDir, 'SKILL.md'))) {
+        throw new Error(`bundled skill not found: ${name}`);
+      }
+      const destDir = path.join(destRoot, name);
+      fs.cpSync(srcDir, destDir, { recursive: true, force: true });
+      console.log(`[slidey] Installed ${name} skill → ${destDir}`);
     }
-    fs.mkdirSync(path.dirname(destDir), { recursive: true });
-    fs.cpSync(SKILL_DIR, destDir, { recursive: true });
-    console.log(`[slidey] Installed slidey-authoring skill → ${destDir}`);
     console.log(`[slidey] ${toUser ? 'Available in every project' : 'Available in this project'}. Restart your agent / Claude Code to load it.`);
     process.exit(0);
   } catch (err) {
@@ -422,7 +444,7 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '    node index.js capture <tour.json> <out.mp4>         record a demo MP4 + chapter sidecar from a tour',
     '    node index.js doctor                                verify headless Chrome launch + screenshot',
     '    slidey docs                                          print the authoring guide (for LLMs/agents)',
-    '    slidey skill install [--user|--project]             install the slidey-authoring agent skill',
+    '    slidey skill install [skill-name|all] [--user|--project]  install bundled Slidey agent skills',
     '',
     '  Viewer options:',
     '    --port <n>                 Viewer port (default: 4321; auto-increments if taken)',
