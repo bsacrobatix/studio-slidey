@@ -86,7 +86,7 @@ delete or copy as templates.
 
 ```sh
 npm run build:web          # build the viewer bundle once (auto-built on first open if missing)
-npm link                   # or: npm install -g .   → puts `slidey` on your PATH
+npm link                   # or: make install   → runs `npm install -g .`, puts `slidey` on your PATH
 
 slidey ./examples          # open a folder → VS-Code-style file-tree sidebar + click-through deck
 slidey examples/hello.slidey.json # open a single deck (sidebar rooted at its folder, file pre-selected)

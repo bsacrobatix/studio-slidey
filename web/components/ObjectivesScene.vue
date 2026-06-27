@@ -31,6 +31,7 @@ function statusMeta(status) {
       v-if="store.scene.title"
       id="objectives-title"
       class="reveal"
+      data-edit-path='["title"]'
       :class="{ shown: store.isRevealed('objectives-title') }"
     >{{ store.scene.title }}</div>
 
@@ -45,10 +46,10 @@ function statusMeta(status) {
         <div class="objective-glyph" aria-hidden="true">{{ statusMeta(item.status).glyph }}</div>
         <div class="objective-copy">
           <div class="objective-head">
-            <span class="objective-label">{{ item.label }}</span>
+            <span class="objective-label" :data-edit-path="JSON.stringify(['items', i, 'label'])">{{ item.label }}</span>
             <span class="objective-status">{{ statusMeta(item.status).label }}</span>
           </div>
-          <div class="objective-detail">{{ item.detail }}</div>
+          <div class="objective-detail" :data-edit-path="JSON.stringify(['items', i, 'detail'])" data-edit-multiline>{{ item.detail }}</div>
         </div>
       </article>
     </div>
@@ -57,6 +58,8 @@ function statusMeta(status) {
       v-if="store.scene.caption"
       id="objectives-caption"
       class="reveal"
+      data-edit-path='["caption"]'
+      data-edit-multiline
       :class="{ shown: store.isRevealed('objectives-caption') }"
     >{{ store.scene.caption }}</div>
   </div>

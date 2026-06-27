@@ -389,6 +389,7 @@ const LEGEND = computed(() => {
       id="chart-title"
       class="reveal"
       :class="{ shown: store.isRevealed('chart-title') }"
+      data-edit-path='["title"]'
     >{{ title }}</div>
 
     <div id="chart-frame" class="reveal" :class="{ shown: frameShown }">
@@ -425,12 +426,14 @@ const LEGEND = computed(() => {
             :x="28" :y="40 + (620 - 40 - 92) / 2"
             text-anchor="middle"
             :transform="`rotate(-90 28 ${40 + (620 - 40 - 92) / 2})`"
+            data-edit-path='["axes","y"]'
           >{{ model.axes.y }}</text>
           <text
             v-if="model.axes && model.axes.x"
             class="chart-axis-title"
             :x="96 + (1000 - 96 - 48) / 2" :y="600"
             text-anchor="middle"
+            data-edit-path='["axes","x"]'
           >{{ model.axes.x }}</text>
         </template>
 
@@ -521,12 +524,13 @@ const LEGEND = computed(() => {
             <line class="chart-quad-div" :x1="model.quadrant.midX" :y1="40" :x2="model.quadrant.midX" :y2="40 + (620 - 40 - 92)" />
             <line class="chart-quad-div" :x1="96" :y1="model.quadrant.midY" :x2="96 + (1000 - 96 - 48)" :y2="model.quadrant.midY" />
             <!-- axis titles: x along bottom, y up the left -->
-            <text v-if="model.axes && model.axes.x" class="chart-axis-title" :x="96 + (1000 - 96 - 48) / 2" :y="600" text-anchor="middle">{{ model.axes.x }}</text>
+            <text v-if="model.axes && model.axes.x" class="chart-axis-title" :x="96 + (1000 - 96 - 48) / 2" :y="600" text-anchor="middle" data-edit-path='["axes","x"]'>{{ model.axes.x }}</text>
             <text
               v-if="model.axes && model.axes.y"
               class="chart-axis-title"
               :x="40" :y="40 + (620 - 40 - 92) / 2" text-anchor="middle"
               :transform="`rotate(-90 40 ${40 + (620 - 40 - 92) / 2})`"
+              data-edit-path='["axes","y"]'
             >{{ model.axes.y }}</text>
           </g>
           <g
@@ -563,6 +567,8 @@ const LEGEND = computed(() => {
       id="chart-caption"
       class="reveal"
       :class="{ shown: store.isRevealed('chart-caption') }"
+      data-edit-path='["caption"]'
+      data-edit-multiline
     >{{ caption }}</div>
   </div>
 </template>

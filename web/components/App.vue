@@ -333,7 +333,12 @@ onMounted(async () => {
       workspace.value = true;
       embedded.value = !!cfg.embedded;
       document.body.classList.add('slidey-workspace');
-      if (embedded.value) document.body.classList.add('slidey-embedded');
+      if (embedded.value) {
+        document.body.classList.add('slidey-embedded');
+        // The embedded preview offers only Edit / Present (no Browse — there is no
+        // file tree to browse). Coerce any persisted 'browse' state to 'present'.
+        if (viewerMode.value === 'browse') setViewerMode('present');
+      }
       fitScale();
       // The file tree and scene editor only exist outside the embedded preview.
       if (!embedded.value) {
@@ -424,18 +429,18 @@ onUnmounted(() => {
     <div class="slidey-embedded-toggle" role="group" aria-label="Viewer mode">
       <button
         type="button"
-        :class="{ active: viewerMode === 'browse' }"
-        :aria-pressed="viewerMode === 'browse'"
-        title="Browse mode"
-        @click.stop="setViewerMode('browse')"
-      >Browse</button>
-      <button
-        type="button"
         :class="{ active: viewerMode === 'edit' }"
         :aria-pressed="viewerMode === 'edit'"
         title="Edit mode — click any text on the slide to edit it"
         @click.stop="setViewerMode('edit')"
       >Edit</button>
+      <button
+        type="button"
+        :class="{ active: viewerMode === 'present' }"
+        :aria-pressed="viewerMode === 'present'"
+        title="Present mode — clean full-screen view for showing the deck"
+        @click.stop="setViewerMode('present')"
+      >Present</button>
     </div>
     <button
       v-if="isEditMode"
@@ -446,6 +451,14 @@ onUnmounted(() => {
       :title="saveError || 'Save edits back to the file'"
       @click.stop="saveActive"
     >{{ saving ? 'Saving…' : (dirty ? 'Save' : 'Saved') }}</button>
+    <button
+      v-if="isEditMode"
+      type="button"
+      class="slidey-embedded-revert"
+      :disabled="!dirty || saving"
+      title="Discard edits and revert to the last saved version"
+      @click.stop="revertActive"
+    >Revert</button>
     <span v-if="isEditMode && saveError" class="slidey-embedded-saveerr" :title="saveError">⚠ save failed</span>
   </div>
 
@@ -618,6 +631,18 @@ onUnmounted(() => {
 }
 .slidey-embedded-save.dirty { background: #238636; border-color: #238636; color: #fff; cursor: pointer; }
 .slidey-embedded-save:disabled { cursor: default; }
+.slidey-embedded-revert {
+  border: 1px solid #30363d;
+  border-radius: 7px;
+  background: #161b22cc;
+  color: #c9d1d9;
+  padding: 5px 14px; font-size: 12px; font-weight: bold;
+  font-family: inherit; cursor: pointer;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.slidey-embedded-revert:hover:not(:disabled) { border-color: #f85149; color: #f85149; }
+.slidey-embedded-revert:disabled { color: #6e7681; cursor: default; }
 .slidey-embedded-saveerr { color: #f85149; font-size: 12px; }
 
 /* Embedded preview reload button — floats over the deck, upper-right. */

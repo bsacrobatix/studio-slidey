@@ -144,9 +144,9 @@ const titleSubtitleHTML = computed(() =>
       id="title-card"
       :class="[{ hidden: hidden('title-card') }, title.theme === 'markdown' ? 'title-card-markdown' : '']"
     >
-      <div id="title-card-eyebrow" data-embed-field="eyebrow" data-embed-label="eyebrow">{{ title.eyebrow || '' }}</div>
+      <div id="title-card-eyebrow" data-embed-field="eyebrow" data-embed-label="eyebrow" data-edit-path='["eyebrow"]'>{{ title.eyebrow || '' }}</div>
       <div id="title-card-rule"></div>
-      <div id="title-card-title" data-embed-field="title" data-embed-label="title">{{ title.title || '' }}</div>
+      <div id="title-card-title" data-embed-field="title" data-embed-label="title" data-edit-path='["title"]'>{{ title.title || '' }}</div>
       <div id="title-card-subtitle" data-embed-field="subtitle" data-embed-label="subtitle" v-html="titleSubtitleHTML"></div>
     </div>
 
@@ -163,11 +163,11 @@ const titleSubtitleHTML = computed(() =>
     <div id="scene-header" :class="{ hidden: hidden('scene-header') }">
       <div style="flex:1; min-width:0;">
         <div style="display:flex; align-items:center; gap:0;">
-          <div id="scene-title-text">{{ sc.title || '' }}</div>
+          <div id="scene-title-text" data-edit-path='["title"]'>{{ sc.title || '' }}</div>
           <span id="mock-badge" :class="{ hidden: hidden('mock-badge') }">MOCK</span>
           <span id="playback-badge" :class="{ hidden: hidden('playback-badge') }">PLAYBACK</span>
         </div>
-        <div id="scene-annotation-text">{{ sc.annotation || '' }}</div>
+        <div id="scene-annotation-text" data-edit-path='["annotation"]'>{{ sc.annotation || '' }}</div>
       </div>
     </div>
 
@@ -178,7 +178,7 @@ const titleSubtitleHTML = computed(() =>
         <div class="panel-body">
           <div id="url-bar" :class="{ hidden: hidden('url-bar') }">
             <span id="method-badge" :class="`method-badge method-${method}`">{{ method }}</span>
-            <span id="url-text">{{ req.url || '' }}</span>
+            <span id="url-text" data-edit-path='["request","url"]'>{{ req.url || '' }}</span>
             <button id="send-btn" :class="{ sending: store.sendBtnSending }">{{ store.sendBtnSending ? 'Sending…' : 'Send' }}</button>
           </div>
           <div id="req-headers-section" class="section" :class="{ hidden: hidden('req-headers-section') }">
@@ -220,7 +220,7 @@ const titleSubtitleHTML = computed(() =>
       <!-- ANNOTATION OVERLAY -->
       <div id="footer-annotation" :class="[`type-${annotType}`, { hidden: hidden('footer-annotation') }]">
         <span id="annotation-icon">{{ annotIcon }}</span>
-        <span id="annotation-text">{{ res.annotation || '' }}</span>
+        <span id="annotation-text" data-edit-path='["response","annotation"]'>{{ res.annotation || '' }}</span>
       </div>
     </div>
 

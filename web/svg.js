@@ -275,7 +275,7 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
     ? applyCycleLayout(panel, nodeMap).map(a => ({ ...a, markerId: a.markerId || cycleMarkerId }))
     : [];
 
-  const renderNodes = nodes.map(n => {
+  const renderNodes = nodes.map((n, nodeIdx) => {
     const nd = nodeMap[n.id] || (needsAutoLayout && layoutMap?.[n.id]
       ? { ...n, ...layoutMap[n.id] }
       : n);
@@ -283,15 +283,18 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
     const cx = nd.x + nd.w / 2;
     const cy = nd.y + nd.h / 2;
 
+    // editPath: scene-relative JSON path to the spec field each text renders, so
+    // the in-place editor (inline-edit.js) can write the edit back.
+    const base = ['panels', idx, 'nodes', nodeIdx];
     const stack = [];
-    if (nd.label) stack.push({ text: nd.label, cls: 'dsvg-label', lh: 50 });
-    if (nd.sub)   stack.push({ text: nd.sub,   cls: 'dsvg-sub',   lh: 34 });
-    (nd.lines || []).forEach(t => stack.push({ text: t, cls: 'dsvg-line', lh: 32 }));
+    if (nd.label) stack.push({ text: nd.label, cls: 'dsvg-label', lh: 50, editPath: [...base, 'label'] });
+    if (nd.sub)   stack.push({ text: nd.sub,   cls: 'dsvg-sub',   lh: 34, editPath: [...base, 'sub'] });
+    (nd.lines || []).forEach((t, li) => stack.push({ text: t, cls: 'dsvg-line', lh: 32, editPath: [...base, 'lines', li] }));
 
     const totalH = stack.reduce((s, l) => s + l.lh, 0);
     let y = cy - totalH / 2 + (stack[0] ? stack[0].lh / 2 : 0);
     const texts = stack.map(l => {
-      const el = { cls: l.cls, x: cx, y, text: l.text };
+      const el = { cls: l.cls, x: cx, y, text: l.text, editPath: l.editPath };
       y += l.lh;
       return el;
     });
@@ -325,9 +328,11 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
     return busX;
   };
 
-  const renderEdges = (panel.edges || []).map(e => {
+  const renderEdges = (panel.edges || []).map((e, edgeIdx) => {
     const from = nodeMap[e.from], to = nodeMap[e.to];
     if (!from || !to) return null;
+    // Scene-relative JSON path to this edge's label field, for in-place editing.
+    const labelPath = ['panels', idx, 'edges', edgeIdx, 'label'];
 
     const fromCx = from.x + from.w / 2, fromCy = from.y + from.h / 2;
     const toCx   = to.x   + to.w   / 2, toCy   = to.y   + to.h   / 2;
@@ -376,6 +381,7 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
         bar1: { x1: labelX - gateBarReach - gateGap, y1: labelY, x2: labelX - gateGap, y2: labelY },
         bar2: { x1: labelX + gateGap, y1: labelY, x2: labelX + gateBarReach + gateGap, y2: labelY },
         text: gateText, labelX, labelY,
+        editPath: ['panels', idx, 'edges', edgeIdx, 'gate'],
         dim: !!e.dim,
       };
     }
@@ -407,6 +413,7 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
         markerId: isBack ? `arrow-back-${idx}` : isRecycle ? `arrow-recycle-${idx}` : markerId,
         groupClass,
         label: e.label || null,
+        editPath: labelPath,
         labelX: edgeLabelX(busX + 14),
         labelY: edgeLabelY((sy + ty) / 2),
         labelAnchor: e.labelAnchor || 'start',
@@ -458,6 +465,7 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
         markerId,
         groupClass: 'dsvg-edge' + (e.highlighted ? ' dsvg-highlighted' : ''),
         label: e.label || null,
+        editPath: labelPath,
         labelX: edgeLabelX(lx), labelY: edgeLabelY(ly),
         labelAnchor: e.labelAnchor || 'middle',
         dim: !!e.dim,
@@ -473,6 +481,7 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
       markerId,
       groupClass: 'dsvg-edge' + (e.highlighted ? ' dsvg-highlighted' : ''),
       label: e.label || null,
+      editPath: labelPath,
       labelX: edgeLabelX(labelX), labelY: edgeLabelY(labelY), anchor: e.labelAnchor || anchor,
       dim: !!e.dim,
     };

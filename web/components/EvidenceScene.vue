@@ -38,6 +38,7 @@ function refLabel(item) {
       v-if="store.scene.title"
       id="evidence-title"
       class="reveal"
+      data-edit-path='["title"]'
       :class="{ shown: store.isRevealed('evidence-title') }"
     >{{ store.scene.title }}</div>
 
@@ -55,10 +56,10 @@ function refLabel(item) {
         </div>
         <div class="evidence-copy">
           <div class="evidence-head">
-            <span class="evidence-label">{{ item.label }}</span>
-            <span v-if="item.note" class="evidence-note">{{ item.note }}</span>
+            <span class="evidence-label" :data-edit-path="JSON.stringify(['items', i, 'label'])">{{ item.label }}</span>
+            <span v-if="item.note" class="evidence-note" :data-edit-path="JSON.stringify(['items', i, 'note'])">{{ item.note }}</span>
           </div>
-          <div class="evidence-detail">{{ item.detail }}</div>
+          <div class="evidence-detail" :data-edit-path="JSON.stringify(['items', i, 'detail'])" data-edit-multiline>{{ item.detail }}</div>
           <div v-if="item.ref" class="evidence-ref">
             <span class="evidence-ref-type">{{ refLabel(item) }}</span>
             <code>{{ item.ref }}</code>
@@ -71,6 +72,8 @@ function refLabel(item) {
       v-if="store.scene.caption"
       id="evidence-caption"
       class="reveal"
+      data-edit-path='["caption"]'
+      data-edit-multiline
       :class="{ shown: store.isRevealed('evidence-caption') }"
     >{{ store.scene.caption }}</div>
   </div>

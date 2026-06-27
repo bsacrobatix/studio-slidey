@@ -13,6 +13,9 @@ const layoutGen     = ref(0);
 const panels = computed(() => buildPanels(store.scene, sizeOverrides.value));
 const single = computed(() => (store.scene.panels || []).length === 1);
 
+// Serialize a scene-relative JSON path for the in-place text editor (inline-edit.js).
+const ep = (arr) => (arr ? JSON.stringify(arr) : null);
+
 // Reset overrides whenever the scene changes so each new scene starts fresh.
 watch(() => store.scene, () => {
   sizeOverrides.value = {};
@@ -110,7 +113,7 @@ onUpdated(async () => { await nextTick(); autoSizeNodes(); });
 
 <template>
   <div id="diagramsvg-region" class="scene-region active">
-    <div id="diagramsvg-title" class="reveal" :class="{ shown: store.isRevealed('diagramsvg-title') || store.scene?.skipTitle }">{{ store.scene.title || '' }}</div>
+    <div id="diagramsvg-title" class="reveal" :class="{ shown: store.isRevealed('diagramsvg-title') || store.scene?.skipTitle }" data-edit-path='["title"]'>{{ store.scene.title || '' }}</div>
     <div id="diagramsvg-panels" :class="{ 'diagramsvg-panels-single': single }">
       <div
         v-for="(p, i) in panels"
@@ -120,7 +123,7 @@ onUpdated(async () => { await nextTick(); autoSizeNodes(); });
         :class="{ shown: store.isRevealed(`diagramsvg-panel-${i}`) }"
         :ref="el => { svgRoots[i] = el }"
       >
-        <div v-if="p.label" class="diagramsvg-panel-label">{{ p.label }}</div>
+        <div v-if="p.label" class="diagramsvg-panel-label" :data-edit-path="ep(['panels', i, 'label'])">{{ p.label }}</div>
         <svg :viewBox="p.viewBox" xmlns="http://www.w3.org/2000/svg" class="diagramsvg-svg">
           <defs>
             <marker :id="p.markerId" class="dsvg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -147,26 +150,26 @@ onUpdated(async () => { await nextTick(); autoSizeNodes(); });
             <g v-if="e.type === 'gate'" class="dsvg-edge dsvg-edge-gate-edge">
               <line :x1="e.bar1.x1" :y1="e.bar1.y1" :x2="e.bar1.x2" :y2="e.bar1.y2" :class="e.barClass" />
               <line :x1="e.bar2.x1" :y1="e.bar2.y1" :x2="e.bar2.x2" :y2="e.bar2.y2" :class="e.barClass" />
-              <text :class="e.textClass" :x="e.labelX" :y="e.labelY" text-anchor="middle" dominant-baseline="middle">{{ e.text }}</text>
+              <text :class="e.textClass" :x="e.labelX" :y="e.labelY" text-anchor="middle" dominant-baseline="middle" :data-edit-path="ep(e.editPath)">{{ e.text }}</text>
             </g>
             <g v-else-if="e.type === 'elbow'" :class="e.groupClass || 'dsvg-edge'">
               <path :d="e.d" :marker-end="`url(#${e.markerId})`" />
-              <text v-if="e.label" class="dsvg-edge-label" :x="e.labelX" :y="e.labelY" :text-anchor="e.labelAnchor || 'middle'" dominant-baseline="middle">{{ e.label }}</text>
+              <text v-if="e.label" class="dsvg-edge-label" :x="e.labelX" :y="e.labelY" :text-anchor="e.labelAnchor || 'middle'" dominant-baseline="middle" :data-edit-path="ep(e.editPath)">{{ e.label }}</text>
             </g>
             <g v-else class="dsvg-edge">
               <line :x1="e.line.x1" :y1="e.line.y1" :x2="e.line.x2" :y2="e.line.y2" :marker-end="`url(#${e.markerId})`" />
-              <text v-if="e.label" class="dsvg-edge-label" :x="e.labelX" :y="e.labelY" :text-anchor="e.anchor" dominant-baseline="middle">{{ e.label }}</text>
+              <text v-if="e.label" class="dsvg-edge-label" :x="e.labelX" :y="e.labelY" :text-anchor="e.anchor" dominant-baseline="middle" :data-edit-path="ep(e.editPath)">{{ e.label }}</text>
             </g>
           </template>
           <!-- data-node-id is read by autoSizeNodes to key size measurements -->
           <g v-for="(n, k) in p.nodes" :key="`n${k}`" :class="n.groupClass" :data-node-id="n.id">
             <rect :x="n.rect.x" :y="n.rect.y" :width="n.rect.w" :height="n.rect.h" rx="14" ry="14" />
-            <text v-for="(t, m) in n.texts" :key="m" :class="t.cls" :x="t.x" :y="t.y" text-anchor="middle" dominant-baseline="middle">{{ t.text }}</text>
+            <text v-for="(t, m) in n.texts" :key="m" :class="t.cls" :x="t.x" :y="t.y" text-anchor="middle" dominant-baseline="middle" :data-edit-path="ep(t.editPath)">{{ t.text }}</text>
           </g>
         </svg>
-        <div v-if="p.caption" class="diagramsvg-panel-caption">{{ p.caption }}</div>
+        <div v-if="p.caption" class="diagramsvg-panel-caption" :data-edit-path="ep(['panels', i, 'caption'])">{{ p.caption }}</div>
       </div>
     </div>
-    <div id="diagramsvg-caption" class="reveal" :class="{ shown: store.isRevealed('diagramsvg-caption') }">{{ store.scene.caption || '' }}</div>
+    <div id="diagramsvg-caption" class="reveal" :class="{ shown: store.isRevealed('diagramsvg-caption') }" data-edit-path='["caption"]'>{{ store.scene.caption || '' }}</div>
   </div>
 </template>

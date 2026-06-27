@@ -9,10 +9,10 @@ import { store } from '../store.js';
         <span class="termgif-dot r"></span>
         <span class="termgif-dot y"></span>
         <span class="termgif-dot g"></span>
-        <span class="termgif-titlebar-title" id="termgif-titlebar-title">{{ store.scene.title || '' }}</span>
+        <span class="termgif-titlebar-title" id="termgif-titlebar-title" data-edit-path='["title"]'>{{ store.scene.title || '' }}</span>
       </div>
       <img id="termgif-img" alt="" :src="store.gifDataUri || undefined">
     </div>
-    <div id="termgif-caption" class="reveal" :class="{ shown: store.isRevealed('termgif-caption') }">{{ store.scene.caption || '' }}</div>
+    <div id="termgif-caption" class="reveal" :class="{ shown: store.isRevealed('termgif-caption') }" data-edit-path='["caption"]' data-edit-multiline>{{ store.scene.caption || '' }}</div>
   </div>
 </template>

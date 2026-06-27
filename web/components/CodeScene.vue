@@ -101,7 +101,7 @@ const logLines = computed(() => {
       </template>
       <template v-else>
         <span class="code-chrome-dots"><i></i><i></i><i></i></span>
-        <span class="code-filename">{{ scene.title || '' }}</span>
+        <span class="code-filename" data-edit-path='["title"]'>{{ scene.title || '' }}</span>
         <span v-if="scene.lang" class="code-lang">{{ scene.lang }}</span>
       </template>
     </div>
@@ -136,11 +136,11 @@ const logLines = computed(() => {
             class="code-line"
           ><span class="code-text">{{ l.text || ' ' }}</span></div></pre>
         <div class="code-io-arrow"><span class="code-io-arrow-line"></span><span class="code-io-arrow-label">returns</span></div>
-        <pre class="code-pre code-io-returns"><code>{{ scene.returns || '' }}</code></pre>
+        <pre class="code-pre code-io-returns"><code data-edit-path='["returns"]' data-edit-multiline>{{ scene.returns || '' }}</code></pre>
       </div>
 
       <!-- tree -->
-      <pre v-else-if="variant === 'tree'" class="code-pre code-tree"><code>{{ scene.tree || '' }}</code></pre>
+      <pre v-else-if="variant === 'tree'" class="code-pre code-tree"><code data-edit-path='["tree"]' data-edit-multiline>{{ scene.tree || '' }}</code></pre>
 
       <!-- config -->
       <pre v-else-if="variant === 'config'" class="code-pre"><code v-html="configHtml"></code></pre>
@@ -154,7 +154,7 @@ const logLines = computed(() => {
         ><span v-if="l.ts" class="code-log-ts">{{ l.ts }}</span><span class="code-log-msg">{{ l.rest }}</span></div></pre>
 
       <!-- fallback: raw code -->
-      <pre v-else class="code-pre"><code>{{ scene.code || '' }}</code></pre>
+      <pre v-else class="code-pre"><code data-edit-path='["code"]' data-edit-multiline>{{ scene.code || '' }}</code></pre>
     </div>
 
     <!-- Annotations (footnotes) -->
@@ -166,7 +166,7 @@ const logLines = computed(() => {
     >
       <div v-for="(a, i) in annotations" :key="i" class="code-note">
         <span class="code-note-mark">L{{ a.line }}</span>
-        <span class="code-note-text">{{ a.text }}</span>
+        <span class="code-note-text" :data-edit-path="JSON.stringify(['annotations', i, 'text'])" data-edit-multiline>{{ a.text }}</span>
       </div>
     </div>
 
@@ -175,6 +175,8 @@ const logLines = computed(() => {
       v-if="scene.caption"
       class="code-caption reveal"
       :class="{ shown: store.isRevealed('code-body') }"
+      data-edit-path='["caption"]'
+      data-edit-multiline
     >{{ scene.caption }}</div>
   </div>
 </template>

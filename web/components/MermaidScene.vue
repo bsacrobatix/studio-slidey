@@ -86,6 +86,7 @@ watch(source, renderDiagram, { immediate: true });
       id="mermaid-title"
       class="mermaid-title reveal"
       :class="{ shown: store.isRevealed('mermaid-title') }"
+      data-edit-path='["title"]'
     >{{ scene.title }}</div>
     <div
       id="mermaid-frame"
@@ -105,6 +106,8 @@ watch(source, renderDiagram, { immediate: true });
       id="mermaid-caption"
       class="mermaid-caption reveal"
       :class="{ shown: store.isRevealed('mermaid-caption') }"
+      data-edit-path='["caption"]'
+      data-edit-multiline
     >{{ scene.caption }}</div>
   </div>
 </template>

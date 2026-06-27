@@ -109,6 +109,7 @@ const gridStyle = computed(() => ({
       id="personas-title"
       class="personas-title reveal"
       :class="{ shown: shown('personas-title') }"
+      data-edit-path='["title"]'
     >{{ sc.title }}</div>
 
     <!-- CAST: avatar + name + role + intro -->
@@ -149,8 +150,8 @@ const gridStyle = computed(() => ({
           <div class="usecase-actor-name" :style="{ color: c.persona.color }">{{ c.persona.name }}</div>
         </div>
         <div class="usecase-text">
-          <div class="usecase-action">{{ c.action }}</div>
-          <div v-if="c.detail" class="usecase-detail">{{ c.detail }}</div>
+          <div class="usecase-action" :data-edit-path="JSON.stringify(['cases', i, 'action'])">{{ c.action }}</div>
+          <div v-if="c.detail" class="usecase-detail" :data-edit-path="JSON.stringify(['cases', i, 'detail'])">{{ c.detail }}</div>
         </div>
       </div>
     </div>
@@ -160,6 +161,7 @@ const gridStyle = computed(() => ({
       id="personas-caption"
       class="personas-caption reveal"
       :class="{ shown: shown('personas-caption') }"
+      data-edit-path='["caption"]'
     >{{ sc.caption }}</div>
   </div>
 </template>

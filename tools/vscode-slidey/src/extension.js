@@ -125,8 +125,11 @@ function handleApiRequest({ root, openFile, webview, vscode }, request) {
     }
   }
 
+  // POST /api/spec is handled out-of-band in the webview message handler
+  // (handleSpecWrite) because writing through the editor model is async; this
+  // synchronous path only ever sees it if that interception is bypassed.
   if (pathname === '/api/spec' && request.method === 'POST') {
-    return response(405, { error: 'Slidey VS Code previews are read-only' });
+    return response(405, { error: 'spec writes are handled asynchronously' });
   }
 
   if (pathname === '/api/stat') {
@@ -141,6 +144,63 @@ function handleApiRequest({ root, openFile, webview, vscode }, request) {
   }
 
   return response(404, { error: `unknown Slidey preview route: ${pathname}` });
+}
+
+// Validate + persist an edited spec posted from the webview. Async because we
+// write through the editor's document model (so the change joins VS Code's undo
+// history and dirty/save lifecycle) rather than mutating the file on disk
+// behind the editor's back. Mirrors the CLI viewer's POST /api/spec contract.
+async function handleSpecWrite({ root, vscode }, request) {
+  const workspaceRoot = path.resolve(root);
+  const url = new URL(request.url, 'https://slidey.local');
+  const rel = url.searchParams.get('path') || '';
+  const abs = safeResolve(workspaceRoot, rel);
+  if (!abs || !fs.existsSync(abs)) return response(404, { error: `not found: ${rel}` });
+  if (!/\.json$/i.test(abs)) return response(400, { error: 'only .json specs can be edited in the preview' });
+
+  let payload;
+  try {
+    payload = JSON.parse(request.body || '{}');
+  } catch (err) {
+    return response(400, { error: `invalid JSON body: ${err.message}` });
+  }
+  if (!payload || typeof payload.spec !== 'object' || Array.isArray(payload.spec)) {
+    return response(400, { error: 'expected { spec } JSON body' });
+  }
+  if (!Array.isArray(payload.spec.scenes) || !payload.spec.scenes.length) {
+    return response(400, { error: 'spec must have a non-empty "scenes" array' });
+  }
+
+  try {
+    const mtimeMs = await writeSpecDocument(vscode, abs, payload.spec);
+    return response(200, { ok: true, mtimeMs });
+  } catch (err) {
+    return response(400, { error: String(err.message || err) });
+  }
+}
+
+// Replace the file's contents with the pretty-printed spec. When the real
+// `vscode` API is present we route through a WorkspaceEdit + document.save() so
+// the write is a normal editor edit (undoable, integrated with the dirty flag).
+// In tests / non-VS Code hosts (no WorkspaceEdit) we fall back to a plain disk
+// write. Either way we return the resulting mtime for the viewer's reload watch.
+async function writeSpecDocument(vscode, abs, spec) {
+  const text = JSON.stringify(spec, null, 2) + '\n';
+  if (vscode && vscode.workspace && typeof vscode.WorkspaceEdit === 'function') {
+    const uri = vscode.Uri.file(abs);
+    let doc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === abs);
+    if (!doc) doc = await vscode.workspace.openTextDocument(uri);
+    const edit = new vscode.WorkspaceEdit();
+    const lastLine = doc.lineCount > 0 ? doc.lineCount - 1 : 0;
+    const fullRange = new vscode.Range(new vscode.Position(0, 0), doc.lineAt(lastLine).range.end);
+    edit.replace(uri, fullRange, text);
+    const applied = await vscode.workspace.applyEdit(edit);
+    if (!applied) throw new Error('VS Code rejected the spec edit');
+    await doc.save();
+  } else {
+    fs.writeFileSync(abs, text, 'utf8');
+  }
+  return fs.statSync(abs).mtimeMs;
 }
 
 function webviewBridgeScript() {
@@ -183,7 +243,6 @@ function webviewBridgeScript() {
     }
     return nativeFetch(input, init);
   };
-  try { localStorage.setItem('slidey.editMode', '0'); } catch (_) {}
 })();
 </script>`;
 }
@@ -236,18 +295,17 @@ async function openPreview(vscode, context, uri) {
   }
 
   panel.webview.html = rewriteViewerHtml(fs.readFileSync(index, 'utf8'), panel.webview, vscode);
-  panel.webview.onDidReceiveMessage((msg) => {
+  panel.webview.onDidReceiveMessage(async (msg) => {
     if (!msg || msg.type !== 'slidey.fetch') return;
-    const result = handleApiRequest({
-      root,
-      openFile,
-      webview: panel.webview,
-      vscode,
-    }, {
-      url: msg.url,
-      method: msg.method || 'GET',
-      body: msg.body,
-    });
+    const request = { url: msg.url, method: msg.method || 'GET', body: msg.body };
+    let result;
+    const isSpecWrite = request.method === 'POST'
+      && new URL(request.url, 'https://slidey.local').pathname === '/api/spec';
+    if (isSpecWrite) {
+      result = await handleSpecWrite({ root, vscode }, request);
+    } else {
+      result = handleApiRequest({ root, openFile, webview: panel.webview, vscode }, request);
+    }
     panel.webview.postMessage({ type: 'slidey.response', id: msg.id, status: result.status, body: result.body });
   }, null, context.subscriptions);
 }
@@ -264,6 +322,8 @@ module.exports = {
   deactivate,
   buildTree,
   handleApiRequest,
+  handleSpecWrite,
+  writeSpecDocument,
   previewTitle,
   readSpec,
   rewriteViewerHtml,

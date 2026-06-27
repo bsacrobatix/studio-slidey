@@ -30,13 +30,13 @@ function callStatus(c) {
         <div class="mcpdrive-topbar">
           <span class="mcpdrive-dots"><i></i><i></i><i></i></span>
           <span class="mcpdrive-app">Claude Code</span>
-          <span v-if="scene.title" class="mcpdrive-mode">{{ scene.title }}</span>
-          <span class="mcpdrive-agent">{{ scene.agent || 'kitsoki-mcp-drive' }}</span>
-          <span v-if="scene.story" class="mcpdrive-story">{{ scene.story }}</span>
+          <span v-if="scene.title" class="mcpdrive-mode" data-edit-path='["title"]'>{{ scene.title }}</span>
+          <span class="mcpdrive-agent" data-edit-path='["agent"]'>{{ scene.agent || 'kitsoki-mcp-drive' }}</span>
+          <span v-if="scene.story" class="mcpdrive-story" data-edit-path='["story"]'>{{ scene.story }}</span>
         </div>
         <div class="mcpdrive-input">
           <span class="mcpdrive-caret">&gt;</span>
-          <span class="mcpdrive-text">{{ scene.prompt || '' }}</span>
+          <span class="mcpdrive-text" data-edit-path='["prompt"]' data-edit-multiline>{{ scene.prompt || '' }}</span>
         </div>
       </div>
 
@@ -49,11 +49,11 @@ function callStatus(c) {
         <div v-for="(c, i) in calls" :key="i" class="mcpdrive-call" :class="`mcpdrive-call-${callStatus(c)}`">
           <div class="mcpdrive-call-head">
             <span class="mcpdrive-call-index">{{ String(i + 1).padStart(2, '0') }}</span>
-            <span class="mcpdrive-tool">{{ c.tool }}</span>
+            <span class="mcpdrive-tool" :data-edit-path="JSON.stringify(['calls', i, 'tool'])">{{ c.tool }}</span>
             <span class="mcpdrive-status">{{ callStatus(c).toUpperCase() }}</span>
           </div>
-          <div v-if="c.args" class="mcpdrive-args">{{ c.args }}</div>
-          <div v-if="c.result" class="mcpdrive-result">{{ c.result }}</div>
+          <div v-if="c.args" class="mcpdrive-args" :data-edit-path="JSON.stringify(['calls', i, 'args'])" data-edit-multiline>{{ c.args }}</div>
+          <div v-if="c.result" class="mcpdrive-result" :data-edit-path="JSON.stringify(['calls', i, 'result'])" data-edit-multiline>{{ c.result }}</div>
         </div>
       </div>
 
@@ -65,10 +65,10 @@ function callStatus(c) {
       >
         <div class="mcpdrive-section-label">Outcome</div>
         <div class="mcpdrive-outcome-main">
-          <span class="mcpdrive-outcome-status">{{ outcome.status || 'done' }}</span>
-          <span v-if="outcome.ref" class="mcpdrive-outcome-ref">{{ outcome.ref }}</span>
+          <span class="mcpdrive-outcome-status" data-edit-path='["outcome","status"]'>{{ outcome.status || 'done' }}</span>
+          <span v-if="outcome.ref" class="mcpdrive-outcome-ref" data-edit-path='["outcome","ref"]'>{{ outcome.ref }}</span>
         </div>
-        <div v-for="(line, i) in outcomeLines" :key="i" class="mcpdrive-outcome-line">{{ line }}</div>
+        <div v-for="(line, i) in outcomeLines" :key="i" class="mcpdrive-outcome-line" :data-edit-path="JSON.stringify(['outcome', 'lines', i])">{{ line }}</div>
       </div>
     </div>
 
@@ -77,6 +77,8 @@ function callStatus(c) {
       id="mcpdrive-caption"
       class="mcpdrive-caption reveal"
       :class="{ shown: store.isRevealed('mcpdrive-caption') }"
+      data-edit-path='["caption"]'
+      data-edit-multiline
     >{{ scene.caption }}</div>
   </div>
 </template>
