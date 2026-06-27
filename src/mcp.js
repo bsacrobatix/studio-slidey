@@ -13,6 +13,7 @@ const { sceneShowOpts } = require('./assets');
 const { auditSpec } = require('./audit');
 const { runCheck } = require('./check');
 const { estimateBoundaries } = require('./timing');
+const { tempRoot } = require('./temp-path');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const RENDER_BUNDLE = path.join(ROOT_DIR, 'dist-render', 'render.html');
@@ -71,6 +72,13 @@ function errorResult(message, details = null) {
 
 function safeResolve(rel = '') {
   if (typeof rel !== 'string') throw new Error('path must be a string');
+  // An ABSOLUTE input path is an explicit, intentional choice by the caller —
+  // honor it verbatim (e.g. validating/rendering a deck that lives outside the
+  // MCP workspace root, like a deck in another repo). The workspace-escape
+  // guard below exists to stop RELATIVE inputs from traversing out via `../`;
+  // it must not mangle an absolute path. (Previously `path.resolve(root, './' +
+  // absPath)` rewrote `/abs/x` into `<root>/abs/x` → "spec not found".)
+  if (path.isAbsolute(rel)) return path.resolve(rel);
   const abs = path.resolve(CONFIG.root, '.' + path.sep + rel);
   const rootWithSep = CONFIG.root.endsWith(path.sep) ? CONFIG.root : CONFIG.root + path.sep;
   if (abs !== CONFIG.root && !abs.startsWith(rootWithSep)) {
@@ -291,7 +299,7 @@ async function renderVideoPoster(args, spec, specPath, sceneIndex, scene) {
   const executableError = browserExecutableError();
   if (executableError) throw new Error(executableError);
   const { width = 1920, height = 1080 } = (spec.meta && spec.meta.resolution) || {};
-  const tmpPng = path.join(os.tmpdir(), `slidey-mcp-poster-${process.pid}-${sceneIndex}.png`);
+  const tmpPng = path.join(tempRoot(), `slidey-mcp-poster-${process.pid}-${sceneIndex}.png`);
   const specDir = path.dirname(specPath || '.');
   try {
     if (scene.rrweb) {

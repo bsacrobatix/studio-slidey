@@ -23,6 +23,7 @@ const { writeChapters } = require('./chapters');
 const { buildEnvelope, writeEnvelope } = require('../rrweb-format');
 const { framesToVideo } = require('../assembler');
 const { registerAdapter, resolveAdapter } = require('./adapters');
+const { mkdtemp } = require('../temp-path');
 
 /**
  * Capture a tour spec to an MP4 + chapter sidecar.
@@ -39,7 +40,7 @@ async function captureToVideo(tour, outMp4, opts = {}) {
   const ownFrames = !opts.framesDir;
   const framesDir = opts.framesDir
     ? path.resolve(opts.framesDir)
-    : fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-tour-'));
+    : mkdtemp('slidey-tour-');
 
   try {
     const { frameCount, chapters } = await captureTour(tour, framesDir, {

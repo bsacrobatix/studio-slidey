@@ -8,7 +8,7 @@ const test = require('node:test');
 const puppeteer = require('puppeteer');
 
 const { launchOptions } = require('../../../src/browser');
-const os = require('node:os');
+const { mkdtemp } = require('../../../src/temp-path');
 const {
   handleApiRequest,
   handleSpecWrite,
@@ -108,7 +108,7 @@ window.__slideyAcquireVsCodeApi = () => ({
 }
 
 test('handleSpecWrite persists edited specs and rejects invalid payloads', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-vscode-write-'));
+  const dir = mkdtemp('slidey-vscode-write-');
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const rel = 'deck.slidey.json';
   const abs = path.join(dir, rel);
@@ -135,7 +135,7 @@ test('handleSpecWrite persists edited specs and rejects invalid payloads', async
 });
 
 test('writeSpecDocument routes through the VS Code editor model when available', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-vscode-doc-'));
+  const dir = mkdtemp('slidey-vscode-doc-');
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const abs = path.join(dir, 'deck.slidey.json');
   fs.writeFileSync(abs, 'STALE');

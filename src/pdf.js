@@ -25,6 +25,7 @@ const { execFileSync, spawnSync } = require('child_process');
 const { PDFDocument } = require('pdf-lib');
 const { launchOptions } = require('./browser');
 const { sceneShowOpts } = require('./assets');
+const { tempRoot } = require('./temp-path');
 
 const RENDER_BUNDLE = path.resolve(__dirname, '..', 'dist-render', 'render.html');
 
@@ -127,9 +128,11 @@ function resolveBin(name, probeArgs) {
  * `src` or an rrweb log. Returns the path, or null if the source is missing.
  */
 async function videoPosterPng(scene, specPath, width, height) {
-  const os = require('os');
   const specDir = path.dirname(specPath || '.');
-  const out = path.join(os.tmpdir(), `slidey-pdf-poster-${process.pid}-${Math.round(width)}x${Math.round(height)}-${scene.src ? 'src' : 'rrweb'}-${Date.now()}.png`);
+  const out = path.join(
+    tempRoot(),
+    `slidey-pdf-poster-${process.pid}-${Math.round(width)}x${Math.round(height)}-${scene.src ? 'src' : 'rrweb'}-${Date.now()}.png`,
+  );
   if (scene.src) {
     const src = path.resolve(specDir, scene.src);
     if (!fs.existsSync(src)) return null;

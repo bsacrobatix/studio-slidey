@@ -22,8 +22,6 @@ audio/
 *.swp
 *~
 
-# Temporary Slidey debug helpers
-.tmp-slidey-*.cjs
 # Kitsoki local runtime
 .kitsoki.local.yaml
 .kitsoki/sessions/

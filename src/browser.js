@@ -3,6 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { mkdtemp } = require('./temp-path');
 
 const DEFAULT_LAUNCH_TIMEOUT_MS = 10000;
 const DEFAULT_CLOSE_TIMEOUT_MS = 3000;
@@ -100,8 +101,8 @@ function browserExecutableError(executablePath = defaultChromePath()) {
 }
 
 function chromeArgs(width, height, extra = []) {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-chrome-profile-'));
-  const crash = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-chrome-crash-'));
+  const profile = mkdtemp('slidey-chrome-profile-');
+  const crash = mkdtemp('slidey-chrome-crash-');
   return [
     '--no-sandbox',
     '--disable-setuid-sandbox',

@@ -21,6 +21,7 @@
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
+const { mkdtemp } = require('./temp-path');
 
 const { generateFrames }    = require('./renderer');
 const { framesToVideo }     = require('./assembler');
@@ -906,7 +907,7 @@ async function main() {
     framesDir = path.resolve(framesDirOpt);
     fs.mkdirSync(framesDir, { recursive: true });
   } else {
-    framesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-'));
+    framesDir = mkdtemp('slidey-');
     ownFramesDir = true;
   }
 

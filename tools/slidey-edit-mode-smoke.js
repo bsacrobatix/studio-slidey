@@ -2,10 +2,10 @@
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const puppeteer = require('puppeteer');
+const { mkdtemp } = require('../src/temp-path');
 
 const CHROME_DEFAULT = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const DEFAULT_MARKER = ' [chrome inline smoke]';
@@ -214,7 +214,7 @@ async function run() {
   const workSpec = opts.inPlace
     ? specInput
     : (() => {
-        const copyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-edit-mode-smoke-'));
+        const copyDir = mkdtemp('slidey-edit-mode-smoke-');
         const copyName = opts.copySpecName || 'slidey-edit-mode-smoke-copy.slidey.json';
         const copied = path.join(copyDir, copyName);
         fs.copyFileSync(specInput, copied);
