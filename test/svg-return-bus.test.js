@@ -17,7 +17,7 @@ test('return bus lanes near the left edge are pushed into an outside gutter', as
     ],
   }, 0);
 
-  assert.equal(panel.edges[0].d, 'M 840 580 H 30 V 220 H 840');
+  assert.equal(panel.edges[0].d, 'M 840 580 H 30 V 220 H 500');
   assert.equal(panel.edges[0].labelX, 44);
 });
 
@@ -34,4 +34,21 @@ test('return bus lanes already farther outside keep the authored coordinate', as
   }, 0);
 
   assert.match(panel.edges[0].d, / H -20 V /);
+});
+
+test('diagram edges can pin labels at authored coordinates', async () => {
+  const { buildPanel } = await import('../web/svg.js');
+  const panel = buildPanel({
+    nodes: [
+      { id: 'a', label: 'A', x: 100, y: 40, w: 300, h: 110 },
+      { id: 'b', label: 'B', x: 100, y: 300, w: 300, h: 110 },
+    ],
+    edges: [
+      { from: 'a', to: 'b', label: 'pinned', labelX: 275, labelY: 215, labelAnchor: 'start' },
+    ],
+  }, 0);
+
+  assert.equal(panel.edges[0].labelX, 275);
+  assert.equal(panel.edges[0].labelY, 215);
+  assert.equal(panel.edges[0].anchor, 'start');
 });

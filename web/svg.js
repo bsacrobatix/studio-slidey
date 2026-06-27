@@ -244,6 +244,11 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
     const anchor = (!horizontal && e.side === 'left')  ? 'end'
                  : (!horizontal && e.side === 'right') ? 'start'
                  : 'middle';
+    const edgeLabelX = fallback => Number.isFinite(e.labelX) ? e.labelX : fallback;
+    const edgeLabelY = fallback => Number.isFinite(e.labelY) ? e.labelY : fallback;
+    // Pull heads back from target boxes; nodes render above edges, so markers
+    // placed exactly on the box edge can be hidden by the node fill.
+    const END_GAP = 10;
 
     if (e.gate) {
       const gateText = e.gate;
@@ -269,7 +274,7 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
     // Return bus — a loop-back / recycle arrow that must NOT overlap the
     // forward column. It exits the source's RIGHT edge, runs out to a
     // dedicated vertical lane (`e.bus` = lane x), travels along it, then
-    // re-enters the TARGET's right edge — two right-angle elbows. Several
+    // re-enters the TARGET edge nearest that lane — two right-angle elbows. Several
     // buses fan off the same source: give each a distinct `e.bus` lane and an
     // `e.lift` (vertical offset on the source exit) so their exit runs don't
     // stack. `style:"back"` gives it the cross-phase rework styling (violet) +
@@ -279,7 +284,8 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
     if (e.bus !== undefined) {
       const busX = normalizeOutsideBus(e.bus);
       const sx = from.x + from.w, sy = fromCy + (e.lift || 0);
-      const tx = to.x + to.w,     ty = toCy + (e.land || 0);
+      const tx = busX < to.x ? to.x : to.x + to.w;
+      const ty = toCy + (e.land || 0);
       const isBack = e.style === 'back';
       const isRecycle = e.style === 'recycle';
       const groupClass = 'dsvg-edge' +
@@ -292,9 +298,9 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
         markerId: isBack ? `arrow-back-${idx}` : isRecycle ? `arrow-recycle-${idx}` : markerId,
         groupClass,
         label: e.label || null,
-        labelX: busX + 14,
-        labelY: (sy + ty) / 2,
-        labelAnchor: 'start',
+        labelX: edgeLabelX(busX + 14),
+        labelY: edgeLabelY((sy + ty) / 2),
+        labelAnchor: e.labelAnchor || 'start',
         dim: !!e.dim,
       };
     }
@@ -321,7 +327,8 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
           // a shared vertical line. Activated automatically; no spec flag needed.
           const isBus = e.bus || (elbowOutCount[e.from] || 0) > 1;
           const midx = isBus ? ex1 + 50 : (ex1 + ex2) / 2;
-          d = `M ${ex1} ${ey1} H ${midx} V ${ey2} H ${ex2}`;
+          const endX = dx > 0 ? ex2 - END_GAP : ex2 + END_GAP;
+          d = `M ${ex1} ${ey1} H ${midx} V ${ey2} H ${endX}`;
           lx = midx;
           ly = (ey1 + ey2) / 2 - 14;
         } else {
@@ -330,7 +337,8 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
           ex1 = fromCx + offset;
           ex2 = toCx   + offset;
           const midy = (ey1 + ey2) / 2;
-          d = `M ${ex1} ${ey1} V ${midy} H ${ex2} V ${ey2}`;
+          const endY = dy > 0 ? ey2 - END_GAP : ey2 + END_GAP;
+          d = `M ${ex1} ${ey1} V ${midy} H ${ex2} V ${endY}`;
           lx = (ex1 + ex2) / 2;
           ly = midy - 14;
         }
@@ -339,16 +347,14 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
         type: 'elbow',
         d,
         markerId,
+        groupClass: 'dsvg-edge' + (e.highlighted ? ' dsvg-highlighted' : ''),
         label: e.label || null,
-        labelX: lx, labelY: ly,
+        labelX: edgeLabelX(lx), labelY: edgeLabelY(ly),
+        labelAnchor: e.labelAnchor || 'middle',
         dim: !!e.dim,
       };
     }
 
-    // Pull the head back from the target box: nodes are drawn over edges, and
-    // the arrowhead marker tip lands on the box edge, so without a gap the box
-    // fill clips the arrowhead (it reads as "not connected / cut off").
-    const END_GAP = 10;
     let ax2 = x2, ay2 = y2;
     if (horizontal) ax2 = dx > 0 ? x2 - END_GAP : x2 + END_GAP;
     else            ay2 = dy > 0 ? y2 - END_GAP : y2 + END_GAP;
@@ -356,8 +362,9 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
       type: 'arrow',
       line: { x1, y1, x2: ax2, y2: ay2 },
       markerId,
+      groupClass: 'dsvg-edge' + (e.highlighted ? ' dsvg-highlighted' : ''),
       label: e.label || null,
-      labelX, labelY, anchor,
+      labelX: edgeLabelX(labelX), labelY: edgeLabelY(labelY), anchor: e.labelAnchor || anchor,
       dim: !!e.dim,
     };
   }).filter(Boolean);
