@@ -65,22 +65,21 @@ function defaultCloneTarget(sourceRel) {
   return dir === '.' ? candidate : path.posix.join(dir, candidate);
 }
 
-function uniqueRel(baseRel) {
+function uniqueRel(root, baseRel) {
   if (!baseRel) return baseRel;
   const normalized = baseRel.replace(/\\/g, '/');
-  const abs = path.resolve(normalized);
-  const parsed = path.parse(abs);
+  const parsed = path.posix.parse(normalized);
   let i = 0;
   let current = normalized;
-  let currentAbs = abs;
-  while (fs.existsSync(currentAbs)) {
+  let currentAbs = safeResolve(root, current);
+  while (currentAbs && fs.existsSync(currentAbs)) {
     i += 1;
     const suffix = `-${i}`;
     current = path.posix.join(
       path.posix.dirname(normalized),
       `${parsed.name}${suffix}${parsed.ext}`,
     );
-    currentAbs = path.resolve(current);
+    currentAbs = safeResolve(root, current);
   }
   return current;
 }
@@ -333,7 +332,7 @@ function startViewer({ root, openFile = null, port = 4321, open = true, _tries =
       const target = safeResolve(workspaceRoot, targetRel);
       if (!target) return sendJSON(res, 400, { error: 'invalid clone target path' });
       if (target === source) return sendJSON(res, 400, { error: 'clone target must differ from source' });
-      const finalRel = uniqueRel(path.relative(workspaceRoot, target).replace(/\\/g, '/'));
+      const finalRel = uniqueRel(workspaceRoot, path.relative(workspaceRoot, target).replace(/\\/g, '/'));
       const finalAbs = safeResolve(workspaceRoot, finalRel);
       fs.writeFileSync(finalAbs, fs.readFileSync(source, 'utf8'), 'utf8');
       return sendJSON(res, 200, { source: rel, path: relPath(finalAbs), mtimeMs: fs.statSync(finalAbs).mtimeMs, editable: isEditableSpec(finalAbs) });
