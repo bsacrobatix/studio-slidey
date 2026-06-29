@@ -28,3 +28,6 @@ audio/
 .artifacts/
 .context
 .worktrees
+
+# Local npm registry config (do not commit — breaks CI / off-VPN installs)
+.npmrc
