@@ -112,7 +112,11 @@ function buildLayoutGalleryFromGuide(scenes) {
       continue;
     }
     const variant = typeof scene.variant === 'string' ? scene.variant.trim() : '';
-    const id = layoutGalleryId(type, variant);
+    // Meme scenes share type "meme" and carry no variant, so they would all
+    // collapse to a single gallery id. Discriminate them by their template id
+    // (a valid scene field) so each template shows as its own gallery entry.
+    const discriminator = variant || (type === 'meme' && typeof scene.template === 'string' ? scene.template.trim() : '');
+    const id = layoutGalleryId(type, discriminator);
     if (seen.has(id)) continue;
 
     layouts.push({
@@ -613,6 +617,29 @@ const TOOLS = [
     }, ['path', 'layout']),
   },
   {
+    name: 'slidey_meme_search',
+    description: 'Search the meme-template registry (200+ templates). Each result lists the template id, orientation, and its semantic caption fields with example hints. Use the id with slidey_add_meme.',
+    inputSchema: toolInputSchema({
+      query: { type: 'string', description: 'Free-text query matched against template name, id, keywords, and example captions. Empty returns a sample.' },
+      orientation: { type: 'string', enum: ['landscape', 'portrait', 'square'], description: 'Optional filter to fit a particular slot.' },
+      limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Max results (default 20).' },
+    }),
+  },
+  {
+    name: 'slidey_add_meme',
+    description: 'Add a meme slide built from a registry template (find ids with slidey_meme_search). Fill captions via `text` (positional, by box order) or `fields` (keyed by field name); omit both to seed the template\'s example captions.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      template: { type: 'string', description: 'Meme template id from slidey_meme_search, e.g. "db", "drake".' },
+      text: { type: 'array', items: { type: 'string' }, description: 'Captions in box order.' },
+      fields: { type: 'object', additionalProperties: { type: 'string' }, description: 'Captions keyed by the template field names.' },
+      title: { type: 'string', description: 'Optional eyebrow header.' },
+      caption: { type: 'string', description: 'Optional footer line.' },
+      narration: { type: 'string', description: 'Optional narration for the slide.' },
+      insertIndex: { type: 'integer', minimum: 0, description: 'Insert position. Defaults to append.' },
+    }, ['path', 'template']),
+  },
+  {
     name: 'slidey_duplicate_slide',
     description: 'Duplicate a slide and insert it after the original by default.',
     inputSchema: toolInputSchema({
@@ -757,6 +784,50 @@ async function callTool(name, args = {}) {
       const written = writeSpecFile(args.path, updated);
       const validation = validateSpec(updated, { specPath: abs });
       return okResult({ ok: validation.valid, written, validation, sceneIndex: insertIndex, scene, spec: updated });
+    }
+
+    case 'slidey_meme_search': {
+      const memes = require('./memes/registry');
+      const matches = memes.search(args.query || '', {
+        orientation: args.orientation || null,
+        limit: Number.isInteger(args.limit) ? args.limit : 20,
+      });
+      return okResult({ count: matches.length, matches });
+    }
+
+    case 'slidey_add_meme': {
+      const memes = require('./memes/registry');
+      const template = memes.get(args.template);
+      if (!template) {
+        const hits = memes.search(args.template || '', { limit: 8 })
+          .map((m) => `${m.id} (${m.name})`).join(', ');
+        throw new Error(`unknown meme template "${args.template}". search with slidey_meme_search.${hits ? ` did you mean: ${hits}` : ''}`);
+      }
+      const { abs, spec } = readSpecFile(args.path);
+      ensureEditable(abs);
+      const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
+      const insertIndex = clampIndexForInsert(args.insertIndex, scenes.length);
+      const scene = { type: 'meme', template: template.id };
+      if (args.title) scene.title = String(args.title);
+      if (args.fields && typeof args.fields === 'object') scene.fields = { ...args.fields };
+      if (Array.isArray(args.text)) scene.text = args.text.map((t) => String(t ?? ''));
+      // No captions supplied → seed the template's example captions so the slide
+      // renders something meaningful out of the box.
+      if (!scene.fields && !scene.text) {
+        scene.text = (template.example || template.boxes.map((b) => b.hint || '')).map((t) => String(t ?? ''));
+      }
+      if (args.caption) scene.caption = String(args.caption);
+      if (args.narration) scene.narration = String(args.narration);
+      scenes.splice(insertIndex, 0, scene);
+      const updated = { ...spec, scenes };
+      const written = writeSpecFile(args.path, updated);
+      const validation = validateSpec(updated, { specPath: abs });
+      return okResult({
+        ok: validation.valid, written, validation,
+        sceneIndex: insertIndex, scene,
+        template: memes.summary(template),
+        spec: updated,
+      });
     }
 
     case 'slidey_duplicate_slide': {

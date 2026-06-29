@@ -53,7 +53,11 @@ function buildLayoutGalleryFromGuide(scenes) {
       continue;
     }
     const variant = typeof scene.variant === 'string' ? scene.variant.trim() : '';
-    const id = layoutGalleryId(type, variant);
+    // Meme scenes share type "meme" and carry no variant, so they would all
+    // collapse to a single gallery id. Discriminate them by their template id
+    // (a valid scene field) so each template shows as its own gallery entry.
+    const discriminator = variant || (type === 'meme' && typeof scene.template === 'string' ? scene.template.trim() : '');
+    const id = layoutGalleryId(type, discriminator);
     if (seen.has(id)) {
       issues.push(`duplicate layout id "${id}" in guide deck`);
       continue;
