@@ -16,8 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Brackets the supported range (package.json engines: node >=18).
-        node: ['18', '22']
+        # Brackets the supported range (package.json engines: node >=20.19).
+        node: ['20', '22']
 
     steps:
       - uses: actions/checkout@v4
