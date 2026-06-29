@@ -81,7 +81,7 @@ function makeWinAndDoc() {
   return { doc, win, listeners };
 }
 
-test('inline edit outside click requests deck-nav suppression', async () => {
+test('inline edit outside click requests deck-nav suppression', async (t) => {
   const { installInlineEdit } = await import('../web/inline-edit.js');
   const { doc, win, listeners } = makeWinAndDoc();
   const deckHost = makeEl({ dataEditPath: '["title"]', initialText: 'Intro' });
@@ -109,7 +109,7 @@ test('inline edit outside click requests deck-nav suppression', async () => {
   assert.equal(calls.length, 1, 'outside click requested deck-nav suppression');
 });
 
-test('inline edit does not suppress deck-nav for a click inside the same field', async () => {
+test('inline edit does not suppress deck-nav for a click inside the same field', async (t) => {
   const { installInlineEdit } = await import('../web/inline-edit.js');
   const { doc, win, listeners } = makeWinAndDoc();
   const deckHost = makeEl({ dataEditPath: '["title"]', initialText: 'Intro' });

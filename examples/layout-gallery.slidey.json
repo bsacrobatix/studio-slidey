@@ -8,7 +8,6 @@
   "scenes": [
     {
       "type": "title",
-      "variant": "cards-overview",
       "title": "Cards layouts"
     },
     {
@@ -265,7 +264,6 @@
     },
     {
       "type": "title",
-      "variant": "code-overview",
       "title": "Code layouts"
     },
     {
@@ -329,7 +327,6 @@
     },
     {
       "type": "title",
-      "variant": "table-overview",
       "title": "Table layouts"
     },
     {
@@ -481,7 +478,6 @@
     },
     {
       "type": "title",
-      "variant": "chart-overview",
       "title": "Chart layouts"
     },
     {
