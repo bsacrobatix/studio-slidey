@@ -115,6 +115,7 @@ All are declared in JSON; render handlers live in `src/scenes/`:
 | `image` | Static screenshot / imported SVG / generated visual | `src`, `fit`, `caption` | 6–10s |
 | `image-compare` | Before/after screenshot comparison | `left`, `right`, `fit`, `variant` | 8–12s |
 | `book` | Book-cover bibliography / recommended reading | `books[]` with `title`, `authors`, `cover`, `takeaway` | 8–12s |
+| `meme` | Meme-template slide (200+ templates, each knows its caption boxes) | `template`, `text[]` or `fields{}`, `style`, `caption` | 6–10s |
 
 ### Choosing a layout — semantic taxonomy
 
@@ -503,6 +504,35 @@ Use `book` for recommended reading or bibliography slides. Keep it to one to
 three books. Each book needs `title`, `authors`, `cover`, and `takeaway`;
 `subtitle`, `publisher`, `year`, `isbn`, and `alt` are optional. Covers are
 resolved relative to the spec and validated for useful resolution.
+
+### Meme templates
+
+```json
+{ "type": "meme",
+  "template": "db",
+  "title": "Multi-box · landscape",
+  "text": ["Old slide types", "Authors", "Meme layouts"],
+  "caption": "Distracted Boyfriend" }
+```
+
+`meme` turns a common meme template into a slide layout. There are 200+ templates
+(sourced from the open memegen.link catalog); each template knows its own caption
+**boxes**, their semantic **fields**, and its **orientation** (tall / wide /
+square all letterbox cleanly onto the stage). Discover templates and build slides
+through MCP:
+
+- **`slidey_meme_search`** — search by name / keyword / example caption, optionally
+  filter by `orientation`. Returns each template's id plus its fields and example
+  hints. The id is what you pass as `template`.
+- **`slidey_add_meme`** — insert a meme slide. Fill captions with `text` (positional,
+  in box order) or `fields` (keyed by the template's field names). Omit both to seed
+  the template's example captions.
+
+Captions match the deck theme by default with a legibility outline; auto-fit sizes
+each caption to its box. For the classic look, set `"style": { "impact": true }`
+(bold uppercase white with a heavy black outline). Other `style` overrides:
+`color`, `stroke`, `font`, `uppercase`. Blank template images are fetched from
+memegen.link and cached locally on first render (`~/.cache/slidey/memes`).
 
 ## Narration
 
