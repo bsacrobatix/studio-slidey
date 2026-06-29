@@ -57,6 +57,38 @@ test('audit flags the known defects in the broken fixture', { skip: !haveBundle 
   }
 });
 
+test('audit catches clipped report tables in inferred pitch mode', { skip: !haveBundle && 'run npm run build:render first' }, async (t) => {
+  if (!await requireBrowser(t)) return;
+  const spec = {
+    meta: {
+      title: 'Overflow regression',
+      resolution: { width: 1920, height: 1080 },
+    },
+    scenes: [{
+      type: 'table',
+      variant: 'data',
+      title: 'Objective status',
+      columns: ['Area', 'Status', 'Detail'],
+      rows: [
+        { cells: ['Harness objective', 'DONE', 'tools/product-journey/run.py gives one local entrypoint and project catalog.'] },
+        { cells: ['Project lanes', 'DONE', 'gears-rust, PostgreSQL, and Kubernetes each have deterministic local oracles.'] },
+        { cells: ['Automation readiness', 'DONE', 'Checks are no-LLM by default and rerunnable from a local checkout.'] },
+        { cells: ['HTML preview', 'ISSUE', 'Source validates; bundle render was blocked here by sandbox write permissions in the Slidey checkout.'] },
+        { cells: ['Product-site journey', 'NEXT', 'Run production web build and use it for A/B skeptical-operator walkthroughs.'] },
+      ],
+      caption: 'Objective state: core eval harness complete; remaining work is preview/runtime exercise, not oracle construction.',
+    }],
+  };
+
+  const { frames, summary } = await auditSpec(spec, { specPath: path.join(ROOT, 'inline-overflow.slidey.json') });
+
+  assert.ok(summary.errors > 0, 'clipped report table must produce error-severity findings');
+  assert.ok(
+    frames.some(f => f.findings.some(x => x.check === 'box-overflow' && /table-frame/.test(x.node + x.detail))),
+    'should flag the clipped table frame or cells',
+  );
+});
+
 test('audit stays clean on a polished deck (no false positives)', { skip: !haveBundle && 'run npm run build:render first' }, async (t) => {
   if (!await requireBrowser(t)) return;
   const spec = load('examples/hello.slidey.json');

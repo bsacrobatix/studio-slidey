@@ -65,6 +65,7 @@ function headerAlignClass(colIndex) {
       id="table-title"
       class="reveal"
       :class="{ shown: store.isRevealed('table-title') }"
+      data-edit-path='["title"]'
     >{{ store.scene.title || '' }}</div>
 
     <div class="table-frame">
@@ -107,6 +108,7 @@ function headerAlignClass(colIndex) {
                   'table-criterion': ci === 0 && variant !== 'data'
                 }
               ]"
+              :data-edit-path="JSON.stringify(['rows', ri, 'cells', ci])"
             >{{ cell }}</td>
           </tr>
         </tbody>
@@ -117,6 +119,7 @@ function headerAlignClass(colIndex) {
       id="table-caption"
       class="reveal"
       :class="{ shown: store.isRevealed('table-caption') }"
+      data-edit-path='["caption"]'
     >{{ store.scene.caption || '' }}</div>
   </div>
 </template>

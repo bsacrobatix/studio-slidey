@@ -43,13 +43,17 @@ const SCENE_MODULES = {
   stat:           require('./scenes/stat'),
   cta:            require('./scenes/cta'),
   cards:          require('./scenes/cards'),
+  objectives:     require('./scenes/objectives'),
+  evidence:       require('./scenes/evidence'),
   personas:       require('./scenes/personas'),
   code:           require('./scenes/code'),
+  'mcp-drive':    require('./scenes/mcp-drive'),
   table:          require('./scenes/table'),
   chart:          require('./scenes/chart'),
   image:          require('./scenes/image'),
   'image-compare': require('./scenes/image-compare'),
   book:           require('./scenes/book'),
+  meme:           require('./scenes/meme'),
   video:          require('./scenes/video'),
 };
 

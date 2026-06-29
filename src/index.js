@@ -21,6 +21,7 @@
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
+const { mkdtemp } = require('./temp-path');
 
 const { generateFrames }    = require('./renderer');
 const { framesToVideo }     = require('./assembler');
@@ -56,10 +57,22 @@ if (wantsSchema) {
   process.exit(0);
 }
 
-// The authoring skill is the single source of truth for both `slidey docs`
-// (printed to stdout for an LLM/agent) and `slidey skill install` (copied into
-// a .claude/skills/ dir). Keeping one file behind both means they never drift.
-const SKILL_DIR = path.join(__dirname, '..', '.claude', 'skills', 'slidey-authoring');
+// Bundled skills are copied by `slidey skill install`. The authoring skill is
+// also the single source of truth for `slidey docs` so docs and skill guidance
+// do not drift.
+const SKILLS_ROOT = path.join(__dirname, '..', '.claude', 'skills');
+const AUTHORING_SKILL_DIR = path.join(SKILLS_ROOT, 'slidey-authoring');
+function bundledSkillDir(name) {
+  if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`invalid skill name: ${name}`);
+  return path.join(SKILLS_ROOT, name);
+}
+function bundledSkillNames() {
+  return fs.readdirSync(SKILLS_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => fs.existsSync(path.join(SKILLS_ROOT, name, 'SKILL.md')))
+    .sort();
+}
 
 // ── `slidey docs` — print the LLM-facing authoring guide to stdout ──────────
 // Everything an agent needs to author a deck (iteration loop, scene-type
@@ -68,7 +81,7 @@ const SKILL_DIR = path.join(__dirname, '..', '.claude', 'skills', 'slidey-author
 //   slidey docs | head     # or pipe it anywhere
 if (args[0] === 'docs') {
   try {
-    let body = fs.readFileSync(path.join(SKILL_DIR, 'SKILL.md'), 'utf-8');
+    let body = fs.readFileSync(path.join(AUTHORING_SKILL_DIR, 'SKILL.md'), 'utf-8');
     // Strip the YAML frontmatter — that's skill-loader metadata, not content.
     body = body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n+/, '');
     process.stdout.write(body.endsWith('\n') ? body : body + '\n');
@@ -96,26 +109,36 @@ if (args[0] === 'doctor') {
   return;
 }
 
-// ── `slidey skill install [--user|--project]` — install the authoring skill ──
-// Copies the bundled slidey-authoring skill into a .claude/skills/ directory so
-// Claude Code (or any agent that reads that convention) loads it automatically.
-//   slidey skill install              # into ./.claude/skills (this project)
-//   slidey skill install --user       # into ~/.claude/skills (all projects)
+// ── `slidey skill install [skill-name|all] [--user|--project]` ─────────────
+// Copies bundled Slidey skills into a .claude/skills/ directory so Claude Code
+// (or any agent that reads that convention) loads them automatically.
+//   slidey skill install                  # install slidey-authoring here
+//   slidey skill install slidey-debug     # install a specific bundled skill
+//   slidey skill install all --user       # install every bundled skill globally
 if (args[0] === 'skill') {
   if (args[1] !== 'install') {
-    console.error('[slidey] usage: slidey skill install [--user|--project]');
+    console.error('[slidey] usage: slidey skill install [skill-name|all] [--user|--project]');
     process.exit(1);
   }
   const toUser  = args.includes('--user');
+  const flags = new Set(['--user', '--project']);
+  const requested = args.slice(2).filter((arg) => !flags.has(arg));
+  const skillNames = requested.length === 0
+    ? ['slidey-authoring']
+    : requested.flatMap((name) => name === 'all' ? bundledSkillNames() : [name]);
   const baseDir = toUser ? path.join(os.homedir(), '.claude') : path.join(process.cwd(), '.claude');
-  const destDir = path.join(baseDir, 'skills', 'slidey-authoring');
+  const destRoot = path.join(baseDir, 'skills');
   try {
-    if (!fs.existsSync(path.join(SKILL_DIR, 'SKILL.md'))) {
-      throw new Error(`bundled skill not found at ${SKILL_DIR}`);
+    fs.mkdirSync(destRoot, { recursive: true });
+    for (const name of [...new Set(skillNames)]) {
+      const srcDir = bundledSkillDir(name);
+      if (!fs.existsSync(path.join(srcDir, 'SKILL.md'))) {
+        throw new Error(`bundled skill not found: ${name}`);
+      }
+      const destDir = path.join(destRoot, name);
+      fs.cpSync(srcDir, destDir, { recursive: true, force: true });
+      console.log(`[slidey] Installed ${name} skill → ${destDir}`);
     }
-    fs.mkdirSync(path.dirname(destDir), { recursive: true });
-    fs.cpSync(SKILL_DIR, destDir, { recursive: true });
-    console.log(`[slidey] Installed slidey-authoring skill → ${destDir}`);
     console.log(`[slidey] ${toUser ? 'Available in every project' : 'Available in this project'}. Restart your agent / Claude Code to load it.`);
     process.exit(0);
   } catch (err) {
@@ -171,6 +194,39 @@ if (args[0] === 'convert') {
   }
 }
 
+// ── `slidey validate <spec.json>` — schema + semantic check, no render ────
+// Exits non-zero on any problem so it can gate CI / pre-bundle. Catches specs
+// that PARSE as JSON but won't RENDER (e.g. a table scene with raw-array rows
+// instead of {cells:[...]} objects, or a missing `variant`).
+if (args[0] === 'validate') {
+  const inPath = args[1];
+  if (!inPath) {
+    console.error('[slidey] usage: slidey validate <spec.json>');
+    process.exit(1);
+  }
+  const absIn = path.resolve(inPath);
+  if (!fs.existsSync(absIn)) {
+    console.error(`[slidey] ERROR: input file not found: ${absIn}`);
+    process.exit(1);
+  }
+  let spec;
+  try {
+    spec = JSON.parse(fs.readFileSync(absIn, 'utf8'));
+  } catch (err) {
+    console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
+    process.exit(1);
+  }
+  const { valid, errors, warnings, count } = validateSpec(spec, { specPath: absIn });
+  for (const line of warnings || []) console.warn(`[slidey] warning:${line}`);
+  if (!valid) {
+    console.error(`[slidey] INVALID: ${count} problem(s) in ${absIn}`);
+    for (const line of errors) console.error(line);
+    process.exit(1);
+  }
+  console.log(`[slidey] OK: ${absIn} (${(spec.scenes || []).length} scene(s))`);
+  process.exit(0);
+}
+
 // ── `slidey bundle <in.json> <out.html>` — single-file interactive deck ────
 if (args[0] === 'bundle') {
   const inPath = args[1];
@@ -178,6 +234,31 @@ if (args[0] === 'bundle') {
   if (!inPath || !outPath) {
     console.error('[slidey] usage: slidey bundle <input.json> <output.html>');
     process.exit(1);
+  }
+  const absIn = path.resolve(inPath);
+  if (!fs.existsSync(absIn)) {
+    console.error(`[slidey] ERROR: input file not found: ${absIn}`);
+    process.exit(1);
+  }
+  // Validate BEFORE bundling: a spec can parse as JSON yet contain scenes that
+  // silently fail to render (the classic case: a table with raw-array rows and
+  // no `variant`, which the viewer skips). Catch it here instead of shipping an
+  // HTML deck with blank slides. Pass --skip-validate to bypass intentionally.
+  if (!args.includes('--skip-validate')) {
+    let spec;
+    try {
+      spec = JSON.parse(fs.readFileSync(absIn, 'utf8'));
+    } catch (err) {
+      console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
+      process.exit(1);
+    }
+    const { valid, errors, warnings, count } = validateSpec(spec, { specPath: absIn });
+    for (const line of warnings || []) console.warn(`[slidey] warning:${line}`);
+    if (!valid) {
+      console.error(`[slidey] ERROR: ${absIn} is invalid (${count} problem(s)) — refusing to bundle a deck that won't render correctly. Fix these or pass --skip-validate:`);
+      for (const line of errors) console.error(line);
+      process.exit(1);
+    }
   }
   const script = path.join(__dirname, '..', 'web', 'build-single.mjs');
   try {
@@ -215,6 +296,39 @@ if (args[0] === 'rrweb-repace') {
   const t0 = events[0].timestamp, before = (events[events.length - 1].timestamp - t0) / 1000;
   const after = (out[out.length - 1].timestamp - t0) / 1000;
   console.error(`[slidey] re-paced ${inPath}: ${before.toFixed(1)}s -> ${after.toFixed(1)}s (${out.length} events) -> ${outPath}`);
+  process.exit(0);
+}
+
+// ── `slidey rrweb-reveal <in.rrweb.json> <out.rrweb.json>` — followable scroll ─
+// Replace a conversation clip's snap-to-bottom auto-scroll with an eased reveal
+// track (hold + ease through each message), so the viewer can follow it. Fixes
+// the "jumpy / can't see the user inputs" defect that a time-only re-pace can't.
+if (args[0] === 'rrweb-reveal') {
+  const inPath = args[1];
+  const outPath = args[2];
+  if (!inPath || !outPath) {
+    console.error('[slidey] usage: slidey rrweb-reveal <in.rrweb.json> <out.rrweb.json> [--scroll-id N] [--hold ms] [--ease-min ms] [--ease-max ms] [--per-px ms] [--steps N] [--tail-hold ms]');
+    process.exit(1);
+  }
+  const numOpt = (flag) => { const i = args.indexOf(flag); return i >= 0 ? Number(args[i + 1]) : undefined; };
+  const { reveal } = require('./rrweb-reveal');
+  const fs = require('fs');
+  const raw = JSON.parse(fs.readFileSync(inPath, 'utf8'));
+  const events = Array.isArray(raw) ? raw : (raw.events || []);
+  const out = reveal(events, {
+    scrollId: numOpt('--scroll-id'),
+    holdMs: numOpt('--hold'),
+    easeMinMs: numOpt('--ease-min'),
+    easeMaxMs: numOpt('--ease-max'),
+    msPerPx: numOpt('--per-px'),
+    steps: numOpt('--steps'),
+    tailHoldMs: numOpt('--tail-hold'),
+  });
+  const result = Array.isArray(raw) ? out : { ...raw, events: out };
+  fs.writeFileSync(outPath, JSON.stringify(result));
+  const t0 = events[0].timestamp, before = (events[events.length - 1].timestamp - t0) / 1000;
+  const after = (out[out.length - 1].timestamp - t0) / 1000;
+  console.error(`[slidey] reveal-track ${inPath}: ${before.toFixed(1)}s -> ${after.toFixed(1)}s (${events.length} -> ${out.length} events) -> ${outPath}`);
   process.exit(0);
 }
 
@@ -269,7 +383,7 @@ if (args[0] === 'drawio') {
 const VALUE_FLAGS = new Set([
   '--fps', '--frames-dir', '--capture-log', '--scenes', '--context',
   '--pdf-raster-quality', '--pdf-raster-scale', '--port', '--pace', '--format',
-  '--out-dir', '--extract-dir', '--theme', '--label',
+  '--out-dir', '--extract-dir', '--theme', '--label', '--adapter',
 ]);
 function positionalArgs(argv) {
   const out = [];
@@ -330,7 +444,7 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '    node index.js capture <tour.json> <out.mp4>         record a demo MP4 + chapter sidecar from a tour',
     '    node index.js doctor                                verify headless Chrome launch + screenshot',
     '    slidey docs                                          print the authoring guide (for LLMs/agents)',
-    '    slidey skill install [--user|--project]             install the slidey-authoring agent skill',
+    '    slidey skill install [skill-name|all] [--user|--project]  install bundled Slidey agent skills',
     '',
     '  Viewer options:',
     '    --port <n>                 Viewer port (default: 4321; auto-increments if taken)',
@@ -418,6 +532,8 @@ const paceIdx       = args.indexOf('--pace');
 const paceOpt       = paceIdx !== -1 ? parseFloat(args[paceIdx + 1]) : null;
 const formatIdx     = args.indexOf('--format');
 const formatOpt     = formatIdx !== -1 ? args[formatIdx + 1] : null;
+const adapterIdx    = args.indexOf('--adapter');
+const adapterOpt    = adapterIdx !== -1 ? args[adapterIdx + 1] : null;
 const scenesIdx     = args.indexOf('--scenes');
 const scenesOpt     = scenesIdx !== -1 ? args[scenesIdx + 1] : null;
 const noCompress    = args.includes('--no-compress');
@@ -547,7 +663,7 @@ async function runCapture() {
   const tourPath = args[1];
   const outPath  = args[2];
   if (!tourPath || !outPath) {
-    console.error('[slidey] usage: slidey capture <tour.json> <out.mp4|out.rrweb.json> [--format rrweb] [--fps n] [--pace n] [--keep-frames]');
+    console.error('[slidey] usage: slidey capture <tour.json> <out.mp4|out.rrweb.json> [--format rrweb] [--fps n] [--pace n] [--keep-frames] [--adapter <name|module.cjs>]');
     process.exit(1);
   }
   const absTour = path.resolve(tourPath);
@@ -564,6 +680,14 @@ async function runCapture() {
   }
   // Record the spec path into chapter source_refs (relative to cwd if possible).
   if (!tour.specPath) tour.specPath = path.relative(process.cwd(), absTour);
+
+  // --adapter overrides tour.adapter. A registered name passes through; a path is
+  // resolved against CWD here (CLI ergonomics) so the spec-relative resolver in
+  // resolveAdapter receives an absolute, already-correct path.
+  if (adapterOpt) {
+    const pathish = adapterOpt.includes('/') || adapterOpt.endsWith('.js') || adapterOpt.endsWith('.cjs');
+    tour.adapter = pathish ? path.resolve(adapterOpt) : adapterOpt;
+  }
 
   // Format: explicit --format wins, else inferred from the output extension.
   const isRrweb = formatOpt === 'rrweb' || /\.rrweb\.json$/i.test(outPath);
@@ -805,7 +929,7 @@ async function main() {
     framesDir = path.resolve(framesDirOpt);
     fs.mkdirSync(framesDir, { recursive: true });
   } else {
-    framesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-'));
+    framesDir = mkdtemp('slidey-');
     ownFramesDir = true;
   }
 

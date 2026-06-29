@@ -13,6 +13,8 @@
     "./rrweb-player": "./web/rrweb/RrwebPlayer.vue",
     "./rrweb-chapters": "./web/rrweb/chapters.js",
     "./rrweb-format": "./src/rrweb-format.js",
+    "./tour": "./src/tour/index.js",
+    "./tour-adapter": "./src/tour/tour-adapter.js",
     "./drawio": "./src/drawio.js",
     "./package.json": "./package.json"
   },
@@ -25,17 +27,19 @@
     "build:single": "node web/build-single.mjs",
     "build": "npm run build:render && npm run build:web",
     "dev": "SLIDEY_TARGET=web vite",
+    "edit-mode-smoke": "node tools/slidey-edit-mode-smoke.js",
     "test:vscode": "npm run build:web && node --test tools/vscode-slidey/e2e/*.e2e.js",
     "prepublishOnly": "npm run build:web"
   },
   "files": [
     "src",
     "web",
+    "data",
     "dist",
     "dist-render",
     "tools/vscode-slidey",
     "docs",
-    ".claude/skills/slidey-authoring",
+    ".claude/skills",
     "examples",
     "index.html",
     "render.html",
@@ -55,7 +59,7 @@
     "stylis": "4.3.6"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.19.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.4",

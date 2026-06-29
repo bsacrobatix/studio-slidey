@@ -21,9 +21,16 @@ audio/
 .DS_Store
 *.swp
 *~
+
 # Kitsoki local runtime
 .kitsoki.local.yaml
 .kitsoki/sessions/
 .artifacts/
 .context
 .worktrees
+
+# Local npm registry config (do not commit — breaks CI / off-VPN installs)
+.npmrc
+
+# Local Codex MCP config (machine-specific cwd — do not commit, breaks CI)
+.codex/

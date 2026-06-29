@@ -3,7 +3,12 @@ VSCODE_DIST    := $(VSCODE_DIR)/.slidey-dist
 VSCODE_RUNTIME := $(VSCODE_DIR)/.slidey-runtime/src
 
 .PHONY: test test-render test-vscode test-all ci \
-        build-web vscode-stage vscode-package vscode-install-local vscode-clean
+        build-web vscode-stage vscode-package vscode-install-local vscode-clean \
+        install
+
+# ── Installation ─────────────────────────────────────────────────────────────
+install:
+	npm install -g .
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 # `make test` is the everyday target: the fast Node unit suite (no browser, no

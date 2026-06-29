@@ -165,7 +165,7 @@ kitsoki:
   story: dev-story
   instance:
     id: slidey-dev
-    path: "stories/slidey-dev/app.yaml"
+    path: ".kitsoki/stories/slidey-dev/app.yaml"
     bindings:
       ticket: host.local_files.ticket
       vcs: host.git
@@ -175,6 +175,18 @@ kitsoki:
   harness_profile: ""
   judge_mode: human
   autonomy: supervised
+
+dev_story_profile:
+  docs:
+    publish_durable_path: docs/prd
+    prd_doc_filename: ""
+    design_durable_path: docs/proposals
+    design_doc_filename: ""
+    design_template_dir: docs/proposals/templates
+    design_ticket_dir: ""
+  bugfix:
+    build_cmd: "npm run build"
+    test_cmd: "npm test"
 
 mining:
   job: ""
@@ -187,12 +199,12 @@ setup_plan:
     - path: ".kitsoki/project-profile.yaml"
       action: create
       summary: "Declarative onboarding profile for Slidey."
-    - path: "stories/slidey-dev/app.yaml"
+    - path: ".kitsoki/stories/slidey-dev/app.yaml"
       action: create
       summary: "Materialized dev-story instance for Slidey."
     - path: ".kitsoki.yaml"
       action: create
-      summary: "Discover project-local stories under ./stories."
+      summary: "Discover project-local stories under ./.kitsoki/stories."
     - path: ".gitignore"
       action: merge
       summary: "Ignore local Kitsoki runtime/session artifacts."
@@ -206,7 +218,7 @@ setup_plan:
   verifications:
     - id: story-load
       kind: story
-      command: "kitsoki run stories/slidey-dev/app.yaml"
+      command: "kitsoki run .kitsoki/stories/slidey-dev/app.yaml"
       gate: required
     - id: unit-tests
       kind: tests
@@ -228,6 +240,12 @@ setup_plan:
       kind: ui
       command: "node src/index.js examples/hello.slidey.json --port 5000 --no-open"
       gate: recommended
+
+onboarding:
+  baseline_commit: 1a018e5939ee662d37c392067ce496d9c94d1b68
+  first_onboarding_commit: 9a8ef20
+  deterministic_flow: stories/dev-story/flows/init_slidey_dogfood.yaml
+  recording_policy: gated-live-allowed
 
 readiness:
   status: not-run

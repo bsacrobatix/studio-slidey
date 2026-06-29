@@ -5,7 +5,7 @@ Kitsoki dev-story instance for the Slidey checkout.
 Run from the Slidey repo root:
 
 ```sh
-kitsoki run stories/slidey-dev/app.yaml
+kitsoki run .kitsoki/stories/slidey-dev/app.yaml
 ```
 
 This instance imports `@kitsoki/dev-story`, starts in the workbench, and seeds

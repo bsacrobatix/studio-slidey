@@ -40,10 +40,36 @@ function sceneShowOpts(scene, specPath) {
     opts.leftImageDataUri = assetDataUri(specPath, scene.left && scene.left.src);
     opts.rightImageDataUri = assetDataUri(specPath, scene.right && scene.right.src);
   }
+  if (scene.type === 'meme' && scene.template) {
+    // Best-effort sync cache read for the PDF/PNG export path; the MP4 render
+    // path resolves (and warms the cache) asynchronously in scenes/meme.js.
+    try {
+      const tpl = require('./memes/registry').get(scene.template);
+      if (tpl) opts.memeDataUri = require('./memes/cache').memeImageDataUriSync(tpl);
+    } catch (_) { /* registry/cache best-effort */ }
+  }
   if (scene.type === 'book' && Array.isArray(scene.books)) {
     opts.bookCoverDataUris = scene.books
       .slice(0, 3)
       .map(book => assetDataUri(specPath, book && book.cover));
+  }
+  // video (rrweb source): load the session log + derived chapters so the live
+  // RrwebPlayer can mount and paint a poster frame in still renders (PNG/HTML
+  // export + the MCP render tools). Without this the player shows its "No
+  // session replay or video source loaded" placeholder and the scene can't be
+  // visually QA'd. Best-effort: a missing/unreadable log just falls back to the
+  // placeholder rather than failing the render. (MP4 `src` videos have no
+  // headless poster path and are left to the placeholder.)
+  if (scene.type === 'video' && scene.rrweb) {
+    try {
+      const rrwebAbs = resolveAsset(specPath, scene.rrweb);
+      if (rrwebAbs && !/^(data:|https?:)/i.test(rrwebAbs) && fs.existsSync(rrwebAbs)) {
+        const { loadRrweb, chaptersFromEvents } = require('./rrweb-format');
+        const { events } = loadRrweb(rrwebAbs);
+        const chapters = chaptersFromEvents(events, { specPath: rrwebAbs });
+        opts.rrweb = { events, chapters };
+      }
+    } catch (_) { /* poster is best-effort; fall back to placeholder */ }
   }
   return opts;
 }

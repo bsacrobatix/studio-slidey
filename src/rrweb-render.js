@@ -22,6 +22,7 @@ const { loadRrweb } = require('./rrweb-format');
 const { rrwebBundlePath } = require('./tour/rrweb-capture');
 const { framesToVideo } = require('./assembler');
 const { launchOptions } = require('./browser');
+const { mkdtemp } = require('./temp-path');
 
 /** Locate rrweb's replay stylesheet (sits alongside the UMD bundle). */
 function rrwebStylePath() {
@@ -124,7 +125,7 @@ async function rasterizeRrwebToVideo(rrwebPath, outMp4, opts = {}) {
   const fps = opts.fps || 30;
   const framesDir = opts.framesDir
     ? path.resolve(opts.framesDir)
-    : fs.mkdtempSync(path.join(require('os').tmpdir(), 'slidey-rrweb-ras-'));
+    : mkdtemp('slidey-rrweb-ras-');
   const ownFrames = !opts.framesDir;
   try {
     const { frameCount, durationMs, viewport } = await rasterizeRrweb(rrwebPath, framesDir, {

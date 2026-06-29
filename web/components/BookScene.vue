@@ -17,6 +17,7 @@ const publisherLine = book => [book.publisher, book.isbn ? `ISBN ${book.isbn}` :
       id="book-title"
       class="book-title reveal"
       :class="{ shown: shown('book-title') }"
+      data-edit-path='["title"]'
     >{{ sc.title }}</div>
 
     <div class="book-grid" :class="`book-count-${books.length}`">
@@ -35,17 +36,17 @@ const publisherLine = book => [book.publisher, book.isbn ? `ISBN ${book.isbn}` :
             :alt="book.alt || book.title || ''"
           />
           <div v-else class="book-cover-fallback">
-            <span>{{ book.title }}</span>
-            <small>{{ book.authors }}</small>
+            <span :data-edit-path="JSON.stringify(['books', i, 'title'])">{{ book.title }}</span>
+            <small :data-edit-path="JSON.stringify(['books', i, 'authors'])">{{ book.authors }}</small>
           </div>
         </div>
 
         <div class="book-info">
-          <div class="book-name">{{ book.title }}</div>
-          <div v-if="book.subtitle" class="book-subtitle">{{ book.subtitle }}</div>
+          <div class="book-name" :data-edit-path="JSON.stringify(['books', i, 'title'])">{{ book.title }}</div>
+          <div v-if="book.subtitle" class="book-subtitle" :data-edit-path="JSON.stringify(['books', i, 'subtitle'])">{{ book.subtitle }}</div>
           <div v-if="metaLine(book)" class="book-meta">{{ metaLine(book) }}</div>
           <div v-if="publisherLine(book)" class="book-publisher">{{ publisherLine(book) }}</div>
-          <div v-if="book.takeaway" class="book-takeaway">{{ book.takeaway }}</div>
+          <div v-if="book.takeaway" class="book-takeaway" :data-edit-path="JSON.stringify(['books', i, 'takeaway'])" data-edit-multiline>{{ book.takeaway }}</div>
         </div>
       </article>
     </div>
@@ -55,6 +56,8 @@ const publisherLine = book => [book.publisher, book.isbn ? `ISBN ${book.isbn}` :
       id="book-caption"
       class="book-caption reveal"
       :class="{ shown: shown('book-caption') }"
+      data-edit-path='["caption"]'
+      data-edit-multiline
     >{{ sc.caption }}</div>
   </div>
 </template>

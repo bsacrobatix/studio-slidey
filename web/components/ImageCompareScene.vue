@@ -23,6 +23,7 @@ const variant = computed(() => sc.value.variant === 'qa' ? 'qa' : 'default');
       id="imagecompare-title"
       class="imagecompare-title reveal"
       :class="{ shown: shown('imagecompare-title') }"
+      data-edit-path='["title"]'
     >{{ sc.title }}</div>
 
     <div
@@ -31,7 +32,7 @@ const variant = computed(() => sc.value.variant === 'qa' ? 'qa' : 'default');
       :class="{ shown: shown('imagecompare-frame') }"
     >
       <figure class="imagecompare-panel">
-        <figcaption>{{ left.label || 'Old' }}</figcaption>
+        <figcaption data-edit-path='["left","label"]'>{{ left.label || 'Old' }}</figcaption>
         <img
           v-if="leftSrc"
           class="imagecompare-media"
@@ -42,7 +43,7 @@ const variant = computed(() => sc.value.variant === 'qa' ? 'qa' : 'default');
         <div v-else class="imagecompare-missing">Missing image source</div>
       </figure>
       <figure class="imagecompare-panel">
-        <figcaption>{{ right.label || 'New' }}</figcaption>
+        <figcaption data-edit-path='["right","label"]'>{{ right.label || 'New' }}</figcaption>
         <img
           v-if="rightSrc"
           class="imagecompare-media"
@@ -59,6 +60,8 @@ const variant = computed(() => sc.value.variant === 'qa' ? 'qa' : 'default');
       id="imagecompare-caption"
       class="imagecompare-caption reveal"
       :class="{ shown: shown('imagecompare-caption') }"
+      data-edit-path='["caption"]'
+      data-edit-multiline
     >{{ sc.caption }}</div>
   </div>
 </template>

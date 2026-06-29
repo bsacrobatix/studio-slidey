@@ -77,7 +77,9 @@ npm run build:single -- examples/hello.slidey.json hello.html   # one self-conta
 ```
 
 Slidey specs use the `.slidey.json` extension (this is what the file-tree sidebar
-and the VS Code extension auto-discover). `examples/hello.slidey.json` is the
+and the VS Code extension auto-discover), and `.readonly.slidey.json` is the
+authoritative, non-editable variant for reports/artifacts.
+`examples/hello.slidey.json` is the
 smallest starting point; `examples/kitsoki-pitch.slidey.json` and
 `examples/layout-gallery.slidey.json` exercise every scene type. All are safe to
 delete or copy as templates.
@@ -86,7 +88,7 @@ delete or copy as templates.
 
 ```sh
 npm run build:web          # build the viewer bundle once (auto-built on first open if missing)
-npm link                   # or: npm install -g .   → puts `slidey` on your PATH
+npm link                   # or: make install   → runs `npm install -g .`, puts `slidey` on your PATH
 
 slidey ./examples          # open a folder → VS-Code-style file-tree sidebar + click-through deck
 slidey examples/hello.slidey.json # open a single deck (sidebar rooted at its folder, file pre-selected)
@@ -278,10 +280,11 @@ slidey-mcp --root /path/to/presentation-workspace
 The server keeps all file access inside `--root` and exposes tools for the full
 authoring loop:
 
-- `slidey_workspace_tree`, `slidey_read_spec` — discover and read `.json` decks
-  and generated `.jsonl` trace decks.
+- `slidey_workspace_tree`, `slidey_read_spec` — discover/read `.slidey.json`,
+  `.readonly.slidey.json`, and generated `.jsonl` trace decks.
 - `slidey_write_spec`, `slidey_patch_spec` — edit `.json` specs directly;
-  `.jsonl` traces stay read-only because their specs are generated.
+  `.jsonl` and `.readonly.slidey.json` are read-only because their specs are
+  generated or authoritative.
 - `slidey_validate`, `slidey_check`, `slidey_audit` — schema/semantic
   validation, static `diagram-svg` geometry checks, and rendered browser
   geometry debugging.
@@ -330,8 +333,9 @@ sampling (≈8/658 on the sample deck — on par with the legacy renderer).
 
 Internally, scene types fall into two families the template toggles between: a
 *slides* family (`title`, `narrative`, `diagram`, `diagram-svg`, `mermaid`,
-`trace`, `transcript`, `thread`, `stat`, `cta`, `terminal-gif`, `cards`, `code`,
-`table`, `chart`, `image`, `image-compare`, `book`, `video`, `personas`) and an
+`trace`, `transcript`, `thread`, `stat`, `cta`, `terminal-gif`, `cards`,
+`objectives`, `evidence`, `code`, `table`, `chart`, `image`, `image-compare`,
+`book`, `video`, `personas`) and an
 *api* family (`request`). The
 spec's optional `meta.mode` selects the default; you rarely set it by hand. (In
 the code this distinction still carries its original `pitch`/`api` names — e.g.
@@ -395,6 +399,8 @@ Each scene is an object with a `type` discriminator. Render handlers live in
 | Cast of roles, stakeholders, or user journeys | `personas` |
 | Book recommendations / bibliography | `book` |
 | Lists, comparisons, and Q&A | `cards` |
+| Objective status / done vs issue vs next | `objectives` |
+| Evidence, checks, commands, paths, and logs | `evidence` |
 | Source, diff, logs, config, function I/O | `code` |
 | Tables and scorecards | `table` |
 | Quantitative charts | `chart` |
@@ -716,6 +722,57 @@ One scene type, many shapes selected by `variant`:
   use `left` and `right` card objects instead of the `cards` array.
 - **Q&A** — `qa`: a `question` string and an `answer` (string or array of
   bullet lines).
+
+#### `objectives` — objective status with visual feedback
+
+Use `objectives` for eval/report decks where the viewer needs to know whether
+the work is done, in progress, blocked, or has issues. Do not use a generic
+`table` for this; status needs a large glyph and color, not just text in a cell.
+
+```json
+{ "type": "objectives", "title": "Objective status",
+  "items": [
+    { "label": "Harness objective", "status": "done",
+      "detail": "One local entrypoint and project catalog are in place." },
+    { "label": "HTML preview", "status": "issue",
+      "detail": "Bundle render is blocked by sandbox write permissions." },
+    { "label": "Product-site journey", "status": "next",
+      "detail": "Run production web build for A/B walkthroughs." }
+  ],
+  "caption": "Core harness complete; runtime preview still needs a clean environment." }
+```
+
+Statuses: `done` renders a large green checkmark; `issue` and `blocked` render a
+large red exclamation mark; `next`, `progress`, `pending`, and `skipped` are
+visually distinct but less final. Keep to six items or fewer.
+
+#### `evidence` — checks, artifacts, commands, and paths
+
+Use `evidence` for report decks where each row answers "what proof exists, what
+state is it in, and where do I rerun or inspect it?" Do not use a wide `table`
+for commands or artifact paths; the evidence layout gives each row a status
+glyph and keeps the command/path in a monospace chip.
+
+```json
+{ "type": "evidence", "title": "Latest check state",
+  "items": [
+    { "label": "PostgreSQL", "status": "validated",
+      "detail": "ALTER DOMAIN oracle proves baseline red and fix green.",
+      "refType": "command",
+      "ref": "bash tools/product-journey/checks/postgresql-oracle.sh" },
+    { "label": "Run log", "status": "implemented",
+      "detail": "Chronological job state and lane validation record.",
+      "refType": "log",
+      "ref": ".context/product-journey-runlog.md" }
+  ],
+  "caption": "Each evidence row has a visible state plus a concrete reference." }
+```
+
+Statuses: `done`, `validated`, and `implemented` render green checkmarks;
+`issue` and `blocked` render red exclamation marks; `next`, `progress`,
+`pending`, and `skipped` are visually distinct but less final. `refType` may be
+`command`, `artifact`, `path`, `log`, `doc`, or `test`. Keep to six rows or
+fewer.
 
 #### `personas` — reusable cast and use-case rows
 

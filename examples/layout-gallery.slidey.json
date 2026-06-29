@@ -767,6 +767,43 @@
       ],
       "caption": "Top-left wins first: high impact, low effort.",
       "hold": 220
+    },
+    {
+      "type": "meme",
+      "template": "db",
+      "title": "Meme layout",
+      "text": [
+        "Generic slides",
+        "Your audience",
+        "Meme templates"
+      ],
+      "caption": "200+ meme templates — search with slidey_meme_search, add with slidey_add_meme",
+      "narration": "Meme layouts turn common meme templates into slide types that know their caption boxes."
+    },
+    {
+      "type": "meme",
+      "template": "drake",
+      "title": "Meme layout · portrait",
+      "text": [
+        "Hand-placing text on screenshots",
+        "A layout that knows the template"
+      ],
+      "caption": "Drakeposting — portrait templates letterbox cleanly",
+      "narration": "Portrait meme templates fit the stage without distortion."
+    },
+    {
+      "type": "meme",
+      "template": "fine",
+      "title": "Meme layout · classic Impact",
+      "text": [
+        "",
+        "This is fine"
+      ],
+      "style": {
+        "impact": true
+      },
+      "caption": "Opt into the classic Impact look with style.impact",
+      "narration": "Set style impact for the classic white outlined meme text."
     }
   ]
 }

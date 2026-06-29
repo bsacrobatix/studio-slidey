@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "title": "Meme layouts demo",
+    "mode": "pitch"
+  },
+  "scenes": [
+    {
+      "type": "meme",
+      "template": "db",
+      "title": "Multi-box · landscape",
+      "text": ["Old slide types", "Authors", "Meme layouts"],
+      "caption": "Distracted Boyfriend — three positioned caption boxes",
+      "narration": "Meme layouts know each template's caption boxes and what they mean."
+    },
+    {
+      "type": "meme",
+      "template": "drake",
+      "title": "Stacked · portrait",
+      "text": ["Hand-placing text on screenshots", "A meme slide type that knows the layout"],
+      "narration": "Portrait templates letterbox cleanly onto the stage."
+    },
+    {
+      "type": "meme",
+      "template": "fine",
+      "title": "Square · classic Impact",
+      "text": ["", "This is fine"],
+      "style": { "impact": true },
+      "narration": "Opt into the classic Impact look per slide."
+    }
+  ]
+}

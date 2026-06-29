@@ -31,10 +31,10 @@
 
 const path = require('path');
 const fs   = require('fs');
-const os   = require('os');
 
 const video = require('../video');
 const { renderOverlays } = require('../overlay-render');
+const { tempRoot } = require('../temp-path');
 
 /** Resolve the demo MP4 (capturing a tour first if `capture` is set) + chapters. */
 async function resolveSource(scene, ctx) {
@@ -55,7 +55,7 @@ async function resolveSource(scene, ctx) {
     const { rasterizeRrwebToVideo } = require('../rrweb-render');
     const { events } = loadRrweb(rrwebPath);
     const chapters = chaptersFromEvents(events, { specPath: path.relative(process.cwd(), rrwebPath) });
-    const outMp4 = path.join(os.tmpdir(), `slidey-rrweb-${ctx.sceneIndex}-${process.pid}.mp4`);
+    const outMp4 = path.join(tempRoot(), `slidey-rrweb-${ctx.sceneIndex}-${process.pid}.mp4`);
     const res = await rasterizeRrwebToVideo(rrwebPath, outMp4, { fps: ctx.fps });
     return { src: res.mp4, captured: false, chapters };
   }
@@ -65,7 +65,7 @@ async function resolveSource(scene, ctx) {
     const tour = JSON.parse(fs.readFileSync(tourPath, 'utf-8'));
     if (!tour.specPath) tour.specPath = path.relative(process.cwd(), tourPath);
     const { captureToVideo } = require('../tour');
-    const outMp4 = path.join(os.tmpdir(), `slidey-cap-${ctx.sceneIndex}-${process.pid}.mp4`);
+    const outMp4 = path.join(tempRoot(), `slidey-cap-${ctx.sceneIndex}-${process.pid}.mp4`);
     const res = await captureToVideo(tour, outMp4, { fps: ctx.fps });
     return { src: res.mp4, captured: true, chapters: res.chapters };
   }

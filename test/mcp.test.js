@@ -105,6 +105,11 @@ test('MCP server exposes spec editing and validation over stdio', async (t) => {
   const names = tools.result.tools.map((tool) => tool.name);
   assert.ok(names.includes('slidey_patch_spec'));
   assert.ok(names.includes('slidey_render_png'));
+  assert.ok(names.includes('slidey_layout_gallery'));
+  assert.ok(names.includes('slidey_add_slide'));
+  assert.ok(names.includes('slidey_duplicate_slide'));
+  assert.ok(names.includes('slidey_remove_slide'));
+  assert.ok(names.includes('slidey_reorder_slide'));
 
   const patch = await server.send('tools/call', {
     name: 'slidey_patch_spec',
@@ -128,6 +133,15 @@ test('MCP server exposes spec editing and validation over stdio', async (t) => {
   const validation = JSON.parse(validate.result.content[0].text);
   assert.equal(validation.valid, true);
 
+  const gallery = await server.send('tools/call', {
+    name: 'slidey_layout_gallery',
+    arguments: {},
+  });
+  assert.ifError(gallery.error);
+  const galleryPayload = JSON.parse(gallery.result.content[0].text);
+  assert.ok(Array.isArray(galleryPayload.layouts));
+  assert.ok(galleryPayload.layouts.some((entry) => entry.id === 'title'));
+
   const escape = await server.send('tools/call', {
     name: 'slidey_read_spec',
     arguments: { path: '../deck.json' },
@@ -135,6 +149,100 @@ test('MCP server exposes spec editing and validation over stdio', async (t) => {
   assert.ifError(escape.error);
   assert.equal(escape.result.isError, true);
   assert.match(escape.result.content[0].text, /escapes workspace root/);
+});
+
+test('MCP slide-management tools add, duplicate, reorder, and remove', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-slide-tools-'));
+  const specPath = path.join(root, 'deck.json');
+  fs.writeFileSync(specPath, JSON.stringify({
+    scenes: [
+      { type: 'title', title: 'A', subtitle: 'first' },
+      { type: 'narrative', body: 'second' },
+    ],
+  }, null, 2) + '\n');
+
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+
+  const init = await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+  assert.ifError(init.error);
+
+  const add = await server.send('tools/call', {
+    name: 'slidey_add_slide',
+    arguments: {
+      path: 'deck.json',
+      layout: 'code-source',
+      insertIndex: 1,
+    },
+  });
+  assert.ifError(add.error);
+  const addPayload = JSON.parse(add.result.content[0].text);
+  assert.equal(addPayload.sceneIndex, 1);
+  assert.equal(addPayload.spec.scenes.length, 3);
+
+  const duplicate = await server.send('tools/call', {
+    name: 'slidey_duplicate_slide',
+    arguments: {
+      path: 'deck.json',
+      sourceIndex: 0,
+    },
+  });
+  assert.ifError(duplicate.error);
+  const duplicatePayload = JSON.parse(duplicate.result.content[0].text);
+  assert.equal(duplicatePayload.sceneIndex, 1);
+  assert.equal(duplicatePayload.spec.scenes.length, 4);
+
+  const reorder = await server.send('tools/call', {
+    name: 'slidey_reorder_slide',
+    arguments: {
+      path: 'deck.json',
+      fromIndex: 2,
+      toIndex: 0,
+    },
+  });
+  assert.ifError(reorder.error);
+  const reorderPayload = JSON.parse(reorder.result.content[0].text);
+  assert.equal(reorderPayload.targetIndex, 0);
+  assert.equal(reorderPayload.spec.scenes[0].type, 'code');
+  assert.equal(reorderPayload.spec.scenes.length, 4);
+
+  const remove = await server.send('tools/call', {
+    name: 'slidey_remove_slide',
+    arguments: {
+      path: 'deck.json',
+      sceneIndex: 1,
+    },
+  });
+  assert.ifError(remove.error);
+  const removePayload = JSON.parse(remove.result.content[0].text);
+  assert.equal(removePayload.sceneCount, 3);
+});
+
+test('MCP validates an ABSOLUTE spec path outside the workspace root', async (t) => {
+  // Regression: safeResolve() previously did path.resolve(root, './' + input),
+  // which mangled an absolute path into `<root>/abs/...` → "spec not found".
+  // An explicit absolute path (e.g. a deck in another repo) must validate.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-root-'));
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-elsewhere-'));
+  const absSpec = path.join(elsewhere, 'outside.slidey.json');
+  fs.writeFileSync(absSpec, JSON.stringify({
+    scenes: [{ type: 'title', title: 'Outside', subtitle: 'absolute path' }],
+  }, null, 2) + '\n');
+
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+
+  const init = await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+  assert.ifError(init.error);
+
+  const validate = await server.send('tools/call', {
+    name: 'slidey_validate',
+    arguments: { path: absSpec },
+  });
+  assert.ifError(validate.error);
+  assert.notEqual(validate.result.isError, true, validate.result.content && validate.result.content[0] && validate.result.content[0].text);
+  const validation = JSON.parse(validate.result.content[0].text);
+  assert.equal(validation.valid, true);
 });
 
 test('MCP browser diagnostics return instead of hanging when Chrome cannot launch', async (t) => {

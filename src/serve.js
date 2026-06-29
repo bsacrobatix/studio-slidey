@@ -12,10 +12,11 @@
  *
  * Routes:
  *   GET /api/config            → { root, openFile }  (App.vue → workspace mode)
- *   GET /api/tree              → nested tree of *.slidey.json / *.jsonl under root
+ *   GET /api/tree              → nested tree of *.slidey.json / *.readonly.slidey.json / *.jsonl under root
  *   GET /api/schema            → Slidey JSON Schema for editor metadata
- *   GET /api/spec?path=<rel>   → { spec, dir, mtimeMs }  (.jsonl built via src/trace.js)
+ *   GET /api/spec?path=<rel>   → { spec, dir, mtimeMs, editable }  (.jsonl built via src/trace.js)
  *   POST /api/spec?path=<rel>  → save a JSON spec back to disk
+ *   POST /api/clone-spec?path=<rel> → copy a read-only report deck into editable form
  *   GET /api/stat?path=<rel>   → { mtimeMs }  (poll target for live on-disk reload)
  *   GET /workspace/<rel>       → raw workspace file (spec-relative gif/img assets)
  *   *                          → static from dist/ with index.html SPA fallback
@@ -33,12 +34,54 @@ const DIST_DIR = path.join(ROOT_DIR, 'dist');         // `npm run build:web` out
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-render', 'dist-web-single', '.git']);
 
 const SPEC_EXT = new Set(['.json', '.jsonl']);
+const READONLY_SUFFIX = '.readonly.slidey.json';
 
-// Specs are auto-discovered in the sidebar tree only when they use the
-// `.slidey.json` convention (or are generated `.jsonl` traces). Plain `.json`
-// files are still readable when opened explicitly, just not listed.
+// Specs are auto-discovered in the sidebar tree when they are normal `.slidey.json`
+// specs, read-only report `.readonly.slidey.json` specs, or generated `.jsonl`
+// traces. Plain `.json` files are still readable when opened explicitly, just
+// not listed.
 function isDiscoverableSpec(name) {
-  return /\.slidey\.json$/i.test(name) || /\.jsonl$/i.test(name);
+  return /\.(?:readonly\.)?slidey\.json$/i.test(name) || /\.jsonl$/i.test(name);
+}
+
+function isReadOnlySlideySpec(filePath) {
+  return new RegExp(`${READONLY_SUFFIX.replace('.', '\\.')}$`, 'i').test(filePath);
+}
+
+function isEditableSpec(filePath) {
+  return /\.json$/i.test(filePath) && !isReadOnlySlideySpec(filePath);
+}
+
+function defaultCloneTarget(sourceRel) {
+  const normalized = sourceRel.replace(/\\/g, '/');
+  const dir = path.posix.dirname(normalized);
+  const base = path.posix.basename(normalized);
+  const editableBase = base
+    .replace(/\.readonly\.slidey\.json$/i, '.slidey.json')
+    .replace(/\.jsonl$/i, '.slidey.json');
+  const candidate = /\.slidey\.json$/i.test(editableBase)
+    ? editableBase
+    : `${editableBase.replace(/\.json$/i, '')}.slidey.json`;
+  return dir === '.' ? candidate : path.posix.join(dir, candidate);
+}
+
+function uniqueRel(root, baseRel) {
+  if (!baseRel) return baseRel;
+  const normalized = baseRel.replace(/\\/g, '/');
+  const parsed = path.posix.parse(normalized);
+  let i = 0;
+  let current = normalized;
+  let currentAbs = safeResolve(root, current);
+  while (currentAbs && fs.existsSync(currentAbs)) {
+    i += 1;
+    const suffix = `-${i}`;
+    current = path.posix.join(
+      path.posix.dirname(normalized),
+      `${parsed.name}${suffix}${parsed.ext}`,
+    );
+    currentAbs = safeResolve(root, current);
+  }
+  return current;
 }
 
 const MIME = {
@@ -106,7 +149,7 @@ function buildTree(absDir, root, relDir = '') {
       if (children.length) dirs.push({ name: e.name, type: 'dir', path: childRel, children });
     } else if (e.isFile() && isDiscoverableSpec(e.name)) {
       const rel = relDir ? `${relDir}/${e.name}` : e.name;
-      files.push({ name: e.name, type: 'file', path: rel });
+      files.push({ name: e.name, type: 'file', path: rel, editable: isEditableSpec(e.name) });
     }
   }
   const byName = (a, b) => a.name.localeCompare(b.name);
@@ -231,7 +274,13 @@ function startViewer({ root, openFile = null, port = 4321, open = true, _tries =
           ? require('./trace').buildSpecFromFile(abs)
           : JSON.parse(fs.readFileSync(abs, 'utf8'));
         const dir = path.dirname(rel).replace(/\\/g, '/');
-        return sendJSON(res, 200, { spec, dir: dir === '.' ? '' : dir, mtimeMs });
+        const editable = isEditableSpec(abs);
+        return sendJSON(res, 200, {
+          spec,
+          dir: dir === '.' ? '' : dir,
+          mtimeMs,
+          editable,
+        });
       } catch (err) {
         return sendJSON(res, 400, { error: String(err.message || err) });
       }
@@ -241,7 +290,11 @@ function startViewer({ root, openFile = null, port = 4321, open = true, _tries =
       const rel = url.searchParams.get('path') || '';
       const abs = safeResolve(workspaceRoot, rel);
       if (!abs || !fs.existsSync(abs)) return sendJSON(res, 404, { error: `not found: ${rel}` });
-      if (!/\.json$/i.test(abs)) return sendJSON(res, 400, { error: 'only .json specs can be edited in the viewer' });
+      if (!isEditableSpec(abs)) {
+        return sendJSON(res, 400, {
+          error: 'only editable .json specs can be saved; .readonly.slidey.json is read-only',
+        });
+      }
       try {
         const raw = await readBody(req);
         const payload = JSON.parse(raw || '{}');
@@ -257,6 +310,32 @@ function startViewer({ root, openFile = null, port = 4321, open = true, _tries =
       } catch (err) {
         return sendJSON(res, 400, { error: String(err.message || err) });
       }
+    }
+
+    if (pathname === '/api/clone-spec' && req.method === 'POST') {
+      const rel = url.searchParams.get('path') || '';
+      const source = safeResolve(workspaceRoot, rel);
+      if (!source || !fs.existsSync(source)) return sendJSON(res, 404, { error: `not found: ${rel}` });
+      if (!/\.json$/i.test(source) && !/\.jsonl$/i.test(source)) {
+        return sendJSON(res, 400, { error: `only JSON specs can be cloned: ${rel}` });
+      }
+      let payload = {};
+      try {
+        payload = JSON.parse(await readBody(req) || '{}');
+      } catch (err) {
+        return sendJSON(res, 400, { error: `invalid JSON body: ${err.message}` });
+      }
+      const requestedTarget = typeof payload.target === 'string' ? payload.target.trim() : '';
+      const targetRel = requestedTarget
+        ? requestedTarget
+        : defaultCloneTarget(rel);
+      const target = safeResolve(workspaceRoot, targetRel);
+      if (!target) return sendJSON(res, 400, { error: 'invalid clone target path' });
+      if (target === source) return sendJSON(res, 400, { error: 'clone target must differ from source' });
+      const finalRel = uniqueRel(workspaceRoot, path.relative(workspaceRoot, target).replace(/\\/g, '/'));
+      const finalAbs = safeResolve(workspaceRoot, finalRel);
+      fs.writeFileSync(finalAbs, fs.readFileSync(source, 'utf8'), 'utf8');
+      return sendJSON(res, 200, { source: rel, path: relPath(finalAbs), mtimeMs: fs.statSync(finalAbs).mtimeMs, editable: isEditableSpec(finalAbs) });
     }
 
     // Lightweight mtime probe so the viewer can detect on-disk edits without

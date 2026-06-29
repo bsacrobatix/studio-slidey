@@ -14,6 +14,7 @@
 
 import { nextTick } from 'vue';
 import { store } from './store.js';
+import { getMemeTemplate } from './memeGeometry.mjs';
 
 export function installAdapter() {
   window.__slideyPendingRenders = new Set();
@@ -67,11 +68,20 @@ export function installAdapter() {
     showCards(scene) { store.showScene('cards', scene); },
     hideCards() { store.hidePitch(); },
 
+    showObjectives(scene) { store.showScene('objectives', scene); },
+    hideObjectives() { store.hidePitch(); },
+
+    showEvidence(scene) { store.showScene('evidence', scene); },
+    hideEvidence() { store.hidePitch(); },
+
     showPersonas(scene) { store.showScene('personas', scene); },
     hidePersonas() { store.hidePitch(); },
 
     showCode(scene) { store.showScene('code', scene); },
     hideCode() { store.hidePitch(); },
+
+    showMcpDrive(scene) { store.showScene('mcp-drive', scene); },
+    hideMcpDrive() { store.hidePitch(); },
 
     showTable(scene) { store.showScene('table', scene); },
     hideTable() { store.hidePitch(); },
@@ -95,6 +105,13 @@ export function installAdapter() {
       store.leftImageDataUri = '';
       store.rightImageDataUri = '';
     },
+
+    showMeme(scene, dataUri) {
+      store.showScene('meme', scene);
+      store.memeTemplate = getMemeTemplate(scene && scene.template);
+      store.memeDataUri = dataUri || '';
+    },
+    hideMeme() { store.hidePitch(); store.memeTemplate = null; store.memeDataUri = ''; },
 
     showBook(scene, coverDataUris) {
       store.showScene('book', scene);

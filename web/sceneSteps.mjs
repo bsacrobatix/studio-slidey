@@ -7,8 +7,21 @@
 // (gaps/holds excluded — only the meaningful, content-adding reveals). If a
 // scene module changes its reveal order, update the matching branch here.
 
+import { getMemeTemplate } from './memeGeometry.mjs';
+
 function range(n, prefix) {
   return Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+}
+
+// Number of filled caption boxes for a meme scene (mirrors scenes/meme.js).
+function memeFilledBoxCount(s) {
+  const tpl = getMemeTemplate(s.template);
+  const boxes = (tpl && tpl.boxes) || [];
+  return boxes.filter((b, i) => {
+    if (s.fields && b.field in s.fields) return String(s.fields[b.field] ?? '') !== '';
+    if (Array.isArray(s.text) && s.text[i] != null) return String(s.text[i]) !== '';
+    return false;
+  }).length;
 }
 
 // Ordered reveal step names for a scene. Each becomes one PDF page / nav step.
@@ -64,6 +77,22 @@ export function stepsForScene(scene) {
         ...(s.caption ? ['cards_caption'] : []),
       ];
     }
+    case 'objectives': {
+      const MAX_ITEMS = 6;
+      return [
+        ...(s.title ? ['objectives_title'] : []),
+        ...range((s.items || []).slice(0, MAX_ITEMS).length, 'objectives_item_'),
+        ...(s.caption ? ['objectives_caption'] : []),
+      ];
+    }
+    case 'evidence': {
+      const MAX_ITEMS = 6;
+      return [
+        ...(s.title ? ['evidence_title'] : []),
+        ...range((s.items || []).slice(0, MAX_ITEMS).length, 'evidence_item_'),
+        ...(s.caption ? ['evidence_caption'] : []),
+      ];
+    }
     case 'personas': {
       const n = (s.variant === 'use-cases' ? (s.cases || []) : (s.personas || [])).length;
       return [
@@ -75,6 +104,12 @@ export function stepsForScene(scene) {
     case 'code': {
       return ['code_header', 'code_body',
         ...(Array.isArray(s.annotations) && s.annotations.length ? ['code_notes'] : [])];
+    }
+    case 'mcp-drive': {
+      return ['mcpdrive_prompt',
+        ...((s.calls || []).length ? ['mcpdrive_calls'] : []),
+        ...(s.outcome ? ['mcpdrive_outcome'] : []),
+        ...(s.caption ? ['mcpdrive_caption'] : [])];
     }
     case 'table': {
       const MAX_ROWS = 8;
@@ -99,6 +134,13 @@ export function stepsForScene(scene) {
       if (s.variant === 'qa') return ['reveal_all'];
       return [...(s.title ? ['imagecompare_title'] : []), 'imagecompare_frame',
         ...(s.caption ? ['imagecompare_caption'] : [])];
+    case 'meme':
+      return [
+        ...(s.title ? ['meme_title'] : []),
+        'meme_frame',
+        ...range(memeFilledBoxCount(s), 'meme_box_'),
+        ...(s.caption ? ['meme_caption'] : []),
+      ];
     case 'book':
       return [
         ...(s.title ? ['book_title'] : []),
@@ -143,13 +185,17 @@ export function applyShow(scene, opts) {
     case 'transcript':   slidey.showTranscript(scene); break;
     case 'thread':       slidey.showThread(scene); break;
     case 'cards':        slidey.showCards(scene); break;
+    case 'objectives':   slidey.showObjectives(scene); break;
+    case 'evidence':     slidey.showEvidence(scene); break;
     case 'personas':     slidey.showPersonas(scene); break;
     case 'code':         slidey.showCode(scene); break;
+    case 'mcp-drive':    slidey.showMcpDrive(scene); break;
     case 'table':        slidey.showTable(scene); break;
     case 'chart':        slidey.showChart(scene); break;
     case 'image':        slidey.showImage(scene, o.imageDataUri || ''); break;
     case 'image-compare': slidey.showImageCompare(scene, o.leftImageDataUri || '', o.rightImageDataUri || ''); break;
     case 'book':         slidey.showBook(scene, o.bookCoverDataUris || []); break;
+    case 'meme':         slidey.showMeme(scene, o.memeDataUri || ''); break;
     // video: only the interactive viewer renders it live (the headless render +
     // PDF/PNG export handle video scenes natively). Guard so render adapters
     // without showVideo (export contexts) don't throw.

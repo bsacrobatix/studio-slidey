@@ -22,12 +22,15 @@ const mediaStyle = computed(() => ({
       id="image-title"
       class="image-title reveal"
       :class="{ shown: shown('image-title') }"
+      data-edit-path='["title"]'
     >{{ sc.title }}</div>
 
     <div
       id="image-frame"
       class="image-frame reveal"
       :class="{ shown: shown('image-frame') }"
+      data-embed-field="src"
+      data-embed-label="image"
       :style="frameStyle"
     >
       <img
@@ -46,6 +49,8 @@ const mediaStyle = computed(() => ({
       id="image-caption"
       class="image-caption reveal"
       :class="{ shown: shown('image-caption') }"
+      data-edit-path='["caption"]'
+      data-edit-multiline
     >{{ sc.caption }}</div>
   </div>
 </template>

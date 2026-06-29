@@ -129,6 +129,7 @@ function lineHTML(card, i) {
       class="cards-title reveal"
       :class="{ shown: shown('cards-title') }"
       v-if="sc.title"
+      data-edit-path='["title"]'
     >{{ sc.title }}</div>
 
     <div
@@ -158,19 +159,19 @@ function lineHTML(card, i) {
               class="cards-label"
               v-html="inlineHTML(c.labelHtml, c.label)"
             ></div>
-            <div v-else class="cards-label">{{ c.label || '' }}</div>
+            <div v-else class="cards-label" :data-edit-path="JSON.stringify(['cards', i, 'label'])">{{ c.label || '' }}</div>
             <div
               v-if="isMarkdown && c.sub"
               class="cards-sub"
               v-html="inlineHTML(c.subHtml, c.sub)"
             ></div>
-            <div v-else-if="c.sub" class="cards-sub">{{ c.sub }}</div>
+            <div v-else-if="c.sub" class="cards-sub" :data-edit-path="JSON.stringify(['cards', i, 'sub'])">{{ c.sub }}</div>
           </div>
         </div>
         <ul v-if="(c.lines || []).length" class="cards-lines">
           <li v-for="(ln, j) in c.lines" :key="j">
             <span v-if="isMarkdown" v-html="lineHTML(c, j)"></span>
-            <template v-else>{{ ln }}</template>
+            <span v-else :data-edit-path="JSON.stringify(['cards', i, 'lines', j])">{{ ln }}</span>
           </li>
         </ul>
       </div>
@@ -192,7 +193,7 @@ function lineHTML(card, i) {
         class="cards-col reveal"
         :class="[sideAccent(i), { shown: shown(`cards-item-${i}`) }]"
       >
-        <div class="cards-col-head">{{ side.label || '' }}</div>
+        <div class="cards-col-head" :data-edit-path="JSON.stringify([i === 0 ? 'left' : 'right', 'label'])">{{ side.label || '' }}</div>
         <ul class="cards-lines">
           <li v-for="(ln, j) in sideLines(side)" :key="j">
             <span v-if="sideGlyph(i)" class="cards-glyph">{{ sideGlyph(i) }}</span>
@@ -211,7 +212,7 @@ function lineHTML(card, i) {
         :class="{ shown: shown('cards-item-0') }"
       >
         <span class="cards-qa-glyph">Q</span>
-        <span class="cards-qa-text">{{ sc.question || '' }}</span>
+        <span class="cards-qa-text" data-edit-path='["question"]'>{{ sc.question || '' }}</span>
       </div>
       <div
         id="cards-item-1"
@@ -230,6 +231,8 @@ function lineHTML(card, i) {
       class="cards-caption reveal"
       :class="{ shown: shown('cards-caption') }"
       v-if="sc.caption"
+      data-edit-path='["caption"]'
+      data-edit-multiline
     >{{ sc.caption }}</div>
   </div>
 </template>

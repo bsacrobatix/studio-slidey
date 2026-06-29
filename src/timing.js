@@ -100,11 +100,40 @@ const TIMING = {
   cards_caption:       30,
   cards_hold:         220,  // ~7.3 s
 
+  // ── Objectives scene ─────────────────────────────────────────────
+  objectives_title:    20,
+  objectives_item_0:   24,
+  objectives_item_1:   24,
+  objectives_item_2:   24,
+  objectives_item_3:   24,
+  objectives_item_4:   24,
+  objectives_item_5:   24,
+  objectives_caption:  30,
+  objectives_hold:    220,
+
+  // ── Evidence scene ───────────────────────────────────────────────
+  evidence_title:      20,
+  evidence_item_0:     24,
+  evidence_item_1:     24,
+  evidence_item_2:     24,
+  evidence_item_3:     24,
+  evidence_item_4:     24,
+  evidence_item_5:     24,
+  evidence_caption:    30,
+  evidence_hold:      220,
+
   // ── Code scene ──────────────────────────────────────────────────
   code_header:         20,
   code_body:           40,
   code_notes:          30,
   code_hold:          180,  // 6.0 s
+
+  // ── MCP drive scene ─────────────────────────────────────────────
+  mcpdrive_prompt:     20,
+  mcpdrive_calls:      34,
+  mcpdrive_outcome:    28,
+  mcpdrive_caption:    24,
+  mcpdrive_hold:      210,
 
   // ── Table scene ─────────────────────────────────────────────────
   table_title:         20,
@@ -143,6 +172,18 @@ const TIMING = {
   imagecompare_frame:   30,
   imagecompare_caption: 25,
   imagecompare_hold:   210,  // 7.0 s
+
+  // ── Meme scene ──────────────────────────────────────────────────
+  meme_title:         20,
+  meme_frame:         30,
+  meme_box_0:         24,
+  meme_box_1:         24,
+  meme_box_2:         24,
+  meme_box_3:         24,
+  meme_box_4:         24,
+  meme_box_5:         24,
+  meme_caption:       25,
+  meme_hold:         210,  // 7.0 s default dwell
 
   // ── Book scene ─────────────────────────────────────────────────
   book_title:         20,
@@ -199,6 +240,23 @@ function videoSceneFrames(scene, opts = {}) {
 }
 
 /**
+ * Count how many of a meme template's caption boxes are actually filled, so the
+ * estimate matches scenes/meme.js reveal sequence. Best-effort: an unknown
+ * template (missing registry) falls back to 0 reveal boxes (frame only).
+ */
+function memeFilledBoxCount(scene) {
+  try {
+    const tpl = require('./memes/registry').get(scene.template);
+    const boxes = (tpl && tpl.boxes) || [];
+    return boxes.filter((b, i) => {
+      if (scene.fields && b.field in scene.fields) return String(scene.fields[b.field] ?? '') !== '';
+      if (Array.isArray(scene.text) && scene.text[i] != null) return String(scene.text[i]) !== '';
+      return false;
+    }).length;
+  } catch (_) { return 0; }
+}
+
+/**
  * Estimate the total frame count a scene will produce when rendered.
  * Mirrors the actual reveal/hold sequence in scenes/*.js. Used by
  * --list/--estimate (no rendering) and by --skip-render (to compute
@@ -233,12 +291,15 @@ function estimateScene(scene, opts = {}) {
       }
       case 'thread':       return hold('thread_hold',      scene.hold);
       case 'cards':        return scene.hold ?? T.cards_hold ?? T.thread_hold;
+      case 'objectives':   return scene.hold ?? T.objectives_hold ?? T.cards_hold;
+      case 'evidence':     return scene.hold ?? T.evidence_hold ?? T.cards_hold;
       case 'code':         return scene.hold ?? T.code_hold ?? T.narrative_hold;
       case 'table':        return scene.hold ?? T.table_hold ?? T.trace_hold;
       case 'chart':        return scene.hold ?? T.chart_hold ?? T.diagramsvg_hold;
       case 'image':        return scene.hold ?? T.image_hold ?? T.diagramsvg_hold;
       case 'image-compare': return scene.hold ?? T.imagecompare_hold ?? T.image_hold ?? T.diagramsvg_hold;
       case 'book':         return scene.hold ?? T.book_hold ?? T.cards_hold;
+      case 'meme':         return scene.hold ?? T.meme_hold ?? T.image_hold;
       case 'stat':         return hold('stat_hold',        scene.hold);
       case 'cta':          return hold('cta_hold',         scene.hold);
       case 'request':      return T.sending_ticks * T.sending_per_tick
@@ -338,10 +399,44 @@ function estimateScene(scene, opts = {}) {
       return f;
     }
 
+    case 'objectives': {
+      const MAX_ITEMS = 6;
+      const n = Math.min(MAX_ITEMS, (scene.items || []).length);
+      let f = 0;
+      if (scene.title) f += T.objectives_title;
+      for (let i = 0; i < n; i++) f += T[`objectives_item_${i}`] ?? 24;
+      if (scene.caption) f += T.objectives_caption;
+      f += scene.hold ?? T.objectives_hold ?? T.cards_hold;
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'evidence': {
+      const MAX_ITEMS = 6;
+      const n = Math.min(MAX_ITEMS, (scene.items || []).length);
+      let f = 0;
+      if (scene.title) f += T.evidence_title;
+      for (let i = 0; i < n; i++) f += T[`evidence_item_${i}`] ?? 24;
+      if (scene.caption) f += T.evidence_caption;
+      f += scene.hold ?? T.evidence_hold ?? T.cards_hold;
+      f += T.inter_scene;
+      return f;
+    }
+
     case 'code': {
       let f = T.code_header + T.code_body;
       if (Array.isArray(scene.annotations) && scene.annotations.length) f += T.code_notes;
       f += scene.hold ?? T.code_hold ?? T.narrative_hold;
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'mcp-drive': {
+      let f = T.mcpdrive_prompt;
+      if ((scene.calls || []).length) f += T.mcpdrive_calls;
+      if (scene.outcome) f += T.mcpdrive_outcome;
+      if (scene.caption) f += T.mcpdrive_caption;
+      f += scene.hold ?? T.mcpdrive_hold ?? T.code_hold;
       f += T.inter_scene;
       return f;
     }
@@ -397,6 +492,17 @@ function estimateScene(scene, opts = {}) {
       for (let i = 0; i < n; i++) f += T[`book_item_${i}`] ?? 30;
       if (scene.caption) f += T.book_caption;
       f += scene.hold ?? T.book_hold ?? T.cards_hold;
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'meme': {
+      let f = 0;
+      if (scene.title) f += T.meme_title;
+      f += T.meme_frame;
+      for (let i = 0; i < memeFilledBoxCount(scene); i++) f += T[`meme_box_${i}`] ?? 24;
+      if (scene.caption) f += T.meme_caption;
+      f += scene.hold ?? T.meme_hold ?? T.image_hold;
       f += T.inter_scene;
       return f;
     }

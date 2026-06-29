@@ -106,6 +106,8 @@ All are declared in JSON; render handlers live in `src/scenes/`:
 | `request` | API request/response card (live/mock/playback) | see `src/scenes/request.js` | varies |
 | `transcript` | Full agent/chat session as per-turn cards | `turns: [...]` | varies |
 | `cards` | Peer items OR side-by-side contrast | `variant`, `cards[]` \| `left`/`right` \| `question`/`answer` | 8–14s |
+| `objectives` | Objective/status report with large visual status glyphs | `items: [{label, status, detail}]` | 8–12s |
+| `evidence` | Status-forward checks, artifacts, commands, paths, and logs | `items: [{label, status, detail, refType, ref}]` | 8–12s |
 | `personas` | Reusable cast intro or persona-attributed use-case rows | `meta.personas`, `variant`, `personas[]`, `cases[]` | 8–12s |
 | `code` | Real text artifacts (source, diff, function I/O, tree, config, log) | `variant`, `lang`, `code`, `highlight[]`, `annotations[]` | 8–12s |
 | `table` | Data / comparison / scorecard tables | `variant`, `columns[]`, `rows: [{cells[], highlight}]`, `winner` | 8–12s |
@@ -113,6 +115,7 @@ All are declared in JSON; render handlers live in `src/scenes/`:
 | `image` | Static screenshot / imported SVG / generated visual | `src`, `fit`, `caption` | 6–10s |
 | `image-compare` | Before/after screenshot comparison | `left`, `right`, `fit`, `variant` | 8–12s |
 | `book` | Book-cover bibliography / recommended reading | `books[]` with `title`, `authors`, `cover`, `takeaway` | 8–12s |
+| `meme` | Meme-template slide (200+ templates, each knows its caption boxes) | `template`, `text[]` or `fields{}`, `style`, `caption` | 6–10s |
 
 ### Choosing a layout — semantic taxonomy
 
@@ -123,6 +126,8 @@ The full catalogue (45 layouts across 9 communicative families) and the design r
 | list N peer items (no flow) | `cards` | `grid` · `list` · `numbered` · `icon-row` · `agenda` |
 | weigh X against Y / before↔after / claim↔rebuttal | `cards` | `before-after` · `versus` · `point-counterpoint` · `pros-cons` |
 | stage a question + its answer | `cards` | `qa` |
+| show objective state / done vs issue vs next | `objectives` | `done` · `issue` · `blocked` · `next` · `progress` |
+| show evidence state plus rerun/inspect command or path | `evidence` | `command` · `artifact` · `path` · `log` · `doc` · `test` |
 | show the literal text of an artifact | `code` | `source` · `diff` · `function-io` · `tree` · `config` · `log` |
 | compare named options across criteria / show exact values | `table` | `comparison` · `scorecard` · `data` |
 | show what the numbers say | `chart` | `bar` (compare) · `line`/`area` (trend) · `pie` (composition) · `scatter`/`quadrant` (relate) |
@@ -144,6 +149,63 @@ maintained artifact or when a standard sequence/state/flow diagram is enough; us
 - **Two-column variants** (`before-after`/`versus`/`point-counterpoint`/`pros-cons`): `left: {label, lines:[]}` and `right: {label, lines:[]}` — contrasting accents, centre divider. `pros-cons` auto-glyphs ✓/✗.
 - **`qa`**: `question: "…"`, `answer: ["…","…"]` (string or array of lines).
 - Common: `title`, `caption`. Supersedes the legacy ASCII `diagram` comparison.
+
+#### `objectives` — objective status with visual feedback
+
+Use `objectives` for eval/report decks where the viewer needs to know whether
+the work is done, in progress, blocked, or has issues. Do not use a generic
+`table` for this; status needs a large glyph and color, not just text in a cell.
+
+```json
+{
+  "type": "objectives",
+  "title": "Objective status",
+  "items": [
+    { "label": "Harness objective", "status": "done",
+      "detail": "One local entrypoint and project catalog are in place." },
+    { "label": "HTML preview", "status": "issue",
+      "detail": "Bundle render is blocked by sandbox write permissions." },
+    { "label": "Product-site journey", "status": "next",
+      "detail": "Run production web build for A/B walkthroughs." }
+  ],
+  "caption": "Core harness complete; runtime preview still needs a clean environment."
+}
+```
+
+Statuses: `done` renders a large green checkmark; `issue` and `blocked` render a
+large red exclamation mark; `next`, `progress`, `pending`, and `skipped` are
+visually distinct but less final. Keep to six items or fewer.
+
+#### `evidence` — checks, artifacts, commands, and paths
+
+Use `evidence` for report decks where each row answers "what proof exists, what
+state is it in, and where do I rerun or inspect it?" Do not use a wide `table`
+for commands or artifact paths; the evidence layout gives each row a status
+glyph and keeps the command/path in a monospace chip.
+
+```json
+{
+  "type": "evidence",
+  "title": "Latest check state",
+  "items": [
+    { "label": "PostgreSQL", "status": "validated",
+      "detail": "ALTER DOMAIN oracle proves baseline red and fix green.",
+      "refType": "command",
+      "ref": "bash tools/product-journey/checks/postgresql-oracle.sh" },
+    { "label": "Run log", "status": "implemented",
+      "detail": "Chronological job state and lane validation record.",
+      "refType": "log",
+      "ref": ".context/product-journey-runlog.md" }
+  ],
+  "caption": "Each evidence row has a visible state plus a concrete reference."
+}
+```
+
+Statuses: `done`, `validated`, and `implemented` render green checkmarks;
+`issue` and `blocked` render red exclamation marks; `next`, `progress`,
+`pending`, and `skipped` are visually distinct but less final. `refType` may be
+`command`, `artifact`, `path`, `log`, `doc`, or `test`. Keep to six rows or
+fewer.
 
 #### `personas` — reusable cast and who-does-what rows
 
@@ -442,6 +504,35 @@ Use `book` for recommended reading or bibliography slides. Keep it to one to
 three books. Each book needs `title`, `authors`, `cover`, and `takeaway`;
 `subtitle`, `publisher`, `year`, `isbn`, and `alt` are optional. Covers are
 resolved relative to the spec and validated for useful resolution.
+
+### Meme templates
+
+```json
+{ "type": "meme",
+  "template": "db",
+  "title": "Multi-box · landscape",
+  "text": ["Old slide types", "Authors", "Meme layouts"],
+  "caption": "Distracted Boyfriend" }
+```
+
+`meme` turns a common meme template into a slide layout. There are 200+ templates
+(sourced from the open memegen.link catalog); each template knows its own caption
+**boxes**, their semantic **fields**, and its **orientation** (tall / wide /
+square all letterbox cleanly onto the stage). Discover templates and build slides
+through MCP:
+
+- **`slidey_meme_search`** — search by name / keyword / example caption, optionally
+  filter by `orientation`. Returns each template's id plus its fields and example
+  hints. The id is what you pass as `template`.
+- **`slidey_add_meme`** — insert a meme slide. Fill captions with `text` (positional,
+  in box order) or `fields` (keyed by the template's field names). Omit both to seed
+  the template's example captions.
+
+Captions match the deck theme by default with a legibility outline; auto-fit sizes
+each caption to its box. For the classic look, set `"style": { "impact": true }`
+(bold uppercase white with a heavy black outline). Other `style` overrides:
+`color`, `stroke`, `font`, `uppercase`. Blank template images are fetched from
+memegen.link and cached locally on first render (`~/.cache/slidey/memes`).
 
 ## Narration
 

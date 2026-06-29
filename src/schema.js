@@ -26,6 +26,61 @@ const CARDS_ITEM = {
   },
 };
 
+const OBJECTIVE_ITEM = {
+  type: 'object',
+  required: ['label', 'status', 'detail'],
+  properties: {
+    label: { type: 'string', description: 'Objective area or milestone label' },
+    status: {
+      type: 'string',
+      enum: ['done', 'issue', 'blocked', 'next', 'progress', 'pending', 'skipped'],
+      description: 'Visual status. done renders a large green checkmark; issue/blocked render a large red exclamation mark.',
+    },
+    detail: { type: 'string', description: 'Concrete evidence, blocker, or next condition' },
+  },
+};
+
+const EVIDENCE_ITEM = {
+  type: 'object',
+  required: ['label', 'status', 'detail'],
+  properties: {
+    label: { type: 'string', description: 'Evidence target, check name, or artifact surface' },
+    status: {
+      type: 'string',
+      enum: ['done', 'validated', 'implemented', 'issue', 'blocked', 'next', 'progress', 'pending', 'skipped'],
+      description: 'Visual status. validated/implemented/done render a green checkmark; issue/blocked render a red exclamation mark.',
+    },
+    detail: { type: 'string', description: 'Short evidence summary, result, or reason this item matters' },
+    refType: {
+      type: 'string',
+      enum: ['command', 'artifact', 'path', 'log', 'doc', 'test'],
+      description: 'Label for the monospace reference chip',
+    },
+    ref: { type: 'string', description: 'Command, file path, log path, or artifact reference shown as a monospace chip' },
+    note: { type: 'string', description: 'Small right-aligned qualifier, such as no-LLM or opt-in' },
+  },
+};
+
+const MCP_CALL = {
+  type: 'object',
+  required: ['tool'],
+  properties: {
+    tool: { type: 'string', description: 'MCP tool name, e.g. session.new' },
+    args: { type: 'string', description: 'Compact argument preview' },
+    result: { type: 'string', description: 'Compact result preview' },
+    status: { type: 'string', enum: ['ok', 'warn', 'issue', 'fail'], description: 'Visual status chip' },
+  },
+};
+
+const MCP_OUTCOME = {
+  type: 'object',
+  properties: {
+    status: { type: 'string', description: 'Large outcome label' },
+    ref: { type: 'string', description: 'Artifact, issue, or trace reference' },
+    lines: { type: 'array', items: { type: 'string' }, description: 'Short outcome bullets' },
+  },
+};
+
 const NODE = {
   type: 'object',
   required: ['id'],
@@ -38,6 +93,8 @@ const NODE = {
     y: { type: 'number', description: 'Top edge in SVG user units' },
     w: { type: 'number', description: 'Width in SVG user units' },
     h: { type: 'number', description: 'Height in SVG user units' },
+    slot: { type: 'string', enum: ['top', 'right', 'bottom', 'left', 'top-right', 'bottom-right', 'bottom-left', 'top-left'], description: 'Position around a diagram-svg panel with layout:"cycle"' },
+    cycle: { type: 'boolean', description: 'Set false to exclude this node from layout:"cycle" placement' },
     style: { type: 'string', enum: ['primary', 'secondary'], description: 'Node colour accent' },
   },
 };
@@ -49,10 +106,15 @@ const EDGE = {
     from: { type: 'string', description: 'Source node id' },
     to: { type: 'string', description: 'Target node id' },
     label: { type: 'string' },
+    labelX: { type: 'number', description: 'Optional absolute SVG x coordinate for the edge label' },
+    labelY: { type: 'number', description: 'Optional absolute SVG y coordinate for the edge label' },
+    labelAnchor: { type: 'string', enum: ['start', 'middle', 'end'], description: 'Optional SVG text-anchor for the edge label' },
     gate: { type: 'string', description: 'Dashed-line checkpoint condition label' },
     side: { type: 'string', enum: ['left', 'right'], description: 'Parallel arrow side' },
     style: { type: 'string', description: 'Renderer-specific edge routing/style hint such as "back" or "recycle"' },
-    bus: { type: 'number', description: 'SVG coordinate for routed/back-edge bus lines' },
+    elbow: { type: ['boolean', 'string'], description: 'Route the edge with right-angle elbows; use "H" or "V" to force the first segment orientation' },
+    arch: { type: 'number', description: 'SVG y coordinate for an arch-style routed edge' },
+    bus: { type: 'number', description: 'SVG coordinate for routed/back-edge bus lines; near-outside lanes are padded to a clear gutter' },
     lift: { type: 'number', description: 'SVG routing offset for edge departure' },
     land: { type: 'number', description: 'SVG routing offset for edge arrival' },
     highlighted: { type: 'boolean', description: 'Accent this edge in the rendered diagram' },
@@ -116,6 +178,7 @@ const SCHEMA = {
               intro: { type: 'string', description: 'One-line introduction shown on the cast card' },
               color: { type: 'string', description: 'Accent hex tinting the avatar ring and name, e.g. "#58a6ff"' },
               glyph: { type: 'string', description: 'Emoji or 1–2 initials shown in the avatar chip (defaults to name initials)' },
+              avatar: { type: 'string', description: 'Optional image avatar (URL or data-URI, e.g. a logo SVG) shown in the chip instead of the glyph' },
             },
           },
         },
@@ -217,6 +280,44 @@ const SCHEMA = {
                     label: { type: 'string', description: 'Panel heading' },
                     caption: { type: 'string', description: 'Panel-local caption' },
                     viewBox: { type: 'string', description: 'SVG viewBox, e.g. "0 0 800 600"' },
+                    auto_layout: { type: 'boolean', description: 'Force auto-layout even if nodes contain explicit x/y' },
+                    rankdir: { type: 'string', enum: ['TB', 'BT', 'LR', 'RL'], description: 'Dagre rank direction when auto-layout is used (TB: top-bottom, LR: left-right, etc.)', default: 'TB' },
+                    ranksep: { type: 'number', minimum: 0, description: 'Dagre rank separation (vertical/horizontal spacing between levels) used by auto-layout.' , default: 100 },
+                    nodesep: { type: 'number', minimum: 0, description: 'Dagre node separation used by auto-layout.' , default: 80 },
+                    marginx: { type: 'number', minimum: 0, description: 'X-margin around auto-layout graph in user units.', default: 50 },
+                    marginy: { type: 'number', minimum: 0, description: 'Y-margin around auto-layout graph in user units.', default: 50 },
+                    overlap_gap: { type: 'number', minimum: 0, description: 'Extra pixel gap used by the overlap-repair pass.' , default: 24 },
+                    overlap_iterations: { type: 'integer', minimum: 0, maximum: 24, description: 'How many overlap-repair passes to run after dagre layout.', default: 12 },
+                    resolve_overlaps: { type: 'boolean', description: 'Run the iterative overlap repair pass after dagre (set false to keep raw dagre positions).' },
+                    layout: { type: 'string', enum: ['cycle'], description: 'Optional panel layout template; cycle places nodes around an ellipse with a single background recycle arrow' },
+                    cycle: {
+                      type: 'object',
+                      description: 'Options for layout:"cycle"',
+                      properties: {
+                        center: {
+                          type: 'object',
+                          properties: {
+                            x: { type: 'number' },
+                            y: { type: 'number' },
+                          },
+                        },
+                        rx: { type: 'number', description: 'Horizontal radius of the cycle arrow and node slots' },
+                        ry: { type: 'number', description: 'Vertical radius of the cycle arrow and node slots' },
+                        arrowRx: { type: 'number', description: 'Optional horizontal radius for the background cycle arrow; defaults outside the node slots' },
+                        arrowRy: { type: 'number', description: 'Optional vertical radius for the background cycle arrow; defaults outside the node slots' },
+                        variant: { type: 'string', enum: ['recycle', 'recycle-logo'], description: 'Use a recycle treatment behind cycle nodes; recycle-logo draws a large watermark symbol' },
+                        glyph: { type: 'string', description: 'Optional symbol for variant:"recycle-logo"' },
+                        glyphX: { type: 'number', description: 'Optional x coordinate for variant:"recycle-logo"' },
+                        glyphY: { type: 'number', description: 'Optional y coordinate for variant:"recycle-logo"' },
+                        glyphSize: { type: 'number', description: 'Optional font size for variant:"recycle-logo"' },
+                        startAngle: { type: 'number', description: 'Cycle arrow start angle in degrees; 0 is right, 90 is down' },
+                        endAngle: { type: 'number', description: 'Cycle arrow end angle in degrees; 0 is right, 90 is down' },
+                        label: { type: 'string', description: 'Optional label drawn inside the cycle arrow' },
+                        labelX: { type: 'number' },
+                        labelY: { type: 'number' },
+                        arrow: { type: 'boolean', description: 'Set false to suppress the background cycle arrow' },
+                      },
+                    },
                     nodes: {
                       type: 'array',
                       items: NODE,
@@ -425,6 +526,44 @@ const SCHEMA = {
               ...COMMON,
             },
           },
+          // ── objectives ─────────────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type', 'items'],
+            description: 'Objective/status report layout with large status glyphs.',
+            properties: {
+              type: { const: 'objectives' },
+              title: { type: 'string', description: 'Optional eyebrow header' },
+              items: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 6,
+                items: OBJECTIVE_ITEM,
+                description: 'Objective rows. Keep to 6 or fewer so status feedback remains visual.',
+              },
+              caption: { type: 'string' },
+              ...COMMON,
+            },
+          },
+          // ── evidence ───────────────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type', 'items'],
+            description: 'Status-forward evidence ledger for commands, checks, paths, and proof artifacts.',
+            properties: {
+              type: { const: 'evidence' },
+              title: { type: 'string', description: 'Optional eyebrow header' },
+              items: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 6,
+                items: EVIDENCE_ITEM,
+                description: 'Evidence rows. Keep to 6 or fewer; put commands/paths in ref rather than prose.',
+              },
+              caption: { type: 'string' },
+              ...COMMON,
+            },
+          },
           // ── personas / use-cases ────────────────────────────────────────────
           {
             type: 'object',
@@ -454,6 +593,7 @@ const SCHEMA = {
                         intro: { type: 'string' },
                         color: { type: 'string' },
                         glyph: { type: 'string' },
+                        avatar: { type: 'string' },
                       },
                     },
                   ],
@@ -512,6 +652,28 @@ const SCHEMA = {
               call: { type: 'string', description: 'Function invocation expression (function-io variant)' },
               returns: { type: 'string', description: 'Return value display (function-io variant)' },
               tree: { type: 'string', description: 'Indented file tree text (tree variant)' },
+              caption: { type: 'string' },
+              ...COMMON,
+            },
+          },
+          // ── mcp-drive ─────────────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type', 'prompt'],
+            description: 'Claude Code-style prompt surface with MCP tool calls and outcome.',
+            properties: {
+              type: { const: 'mcp-drive' },
+              title: { type: 'string', description: 'Optional scene title or mode label' },
+              agent: { type: 'string', description: 'Agent/subagent name shown in the chrome' },
+              story: { type: 'string', description: 'Story path or workflow context shown in the chrome' },
+              prompt: { type: 'string', description: 'Operator prompt shown as terminal input' },
+              calls: {
+                type: 'array',
+                maxItems: 6,
+                items: MCP_CALL,
+                description: 'MCP tool calls. Keep to 6 or fewer for readability.',
+              },
+              outcome: MCP_OUTCOME,
               caption: { type: 'string' },
               ...COMMON,
             },
@@ -625,6 +787,42 @@ const SCHEMA = {
               mediaBackground: { type: 'string', description: 'Optional CSS background for the image media element; useful for transparent SVG diagrams' },
               mediaPadding: { type: 'string', description: 'Optional CSS padding for the image media element' },
               caption: { type: 'string' },
+              ...COMMON,
+            },
+          },
+          // ── meme ──────────────────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type', 'template'],
+            description: 'Meme-template slide. `template` is a registry id (see slidey_meme_search); each template knows its own caption boxes, semantic fields, and orientation. Captions are themed to match the deck by default. Use `text` (positional, by box order) or `fields` (keyed by field name) to fill the boxes.',
+            properties: {
+              type: { const: 'meme' },
+              template: { type: 'string', description: 'Meme template id from the registry, e.g. "db" (Distracted Boyfriend), "drake", "fine". Search with slidey_meme_search.' },
+              title: { type: 'string', description: 'Optional eyebrow header shown above the meme.' },
+              text: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Caption strings in box order (top-to-bottom / left-to-right as defined by the template). Empty strings skip a box.',
+              },
+              fields: {
+                type: 'object',
+                additionalProperties: { type: 'string' },
+                description: 'Captions keyed by the template\'s semantic field names (e.g. {"top":"...","bottom":"..."}). Takes precedence over `text` for any field it sets.',
+              },
+              fit: { type: 'string', enum: ['contain', 'cover'], description: 'How the template image fits the stage. contain (default) letterboxes tall/wide memes without distortion; cover fills the frame.' },
+              style: {
+                type: 'object',
+                additionalProperties: false,
+                description: 'Optional per-slide caption styling override. By default captions use the deck theme.',
+                properties: {
+                  impact: { type: 'boolean', description: 'Classic Impact meme look: bold uppercase white text with a heavy black outline.' },
+                  color: { type: 'string', description: 'Caption text color (CSS).' },
+                  stroke: { type: 'string', description: 'Caption outline/stroke color (CSS).' },
+                  font: { type: 'string', description: 'Caption font-family (CSS).' },
+                  uppercase: { type: 'boolean', description: 'Force uppercase captions.' },
+                },
+              },
+              caption: { type: 'string', description: 'Optional footer line below the meme.' },
               ...COMMON,
             },
           },

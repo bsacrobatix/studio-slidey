@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
@@ -12,15 +13,31 @@ const { sceneShowOpts } = require('./assets');
 const { auditSpec } = require('./audit');
 const { runCheck } = require('./check');
 const { estimateBoundaries } = require('./timing');
+const { tempRoot } = require('./temp-path');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const RENDER_BUNDLE = path.join(ROOT_DIR, 'dist-render', 'render.html');
 const SPEC_EXT = new Set(['.json', '.jsonl']);
+const READONLY_SUFFIX = '.readonly.slidey.json';
 
 // Auto-discovery (workspace_tree) lists specs that follow the `.slidey.json`
 // convention plus generated `.jsonl` traces. Explicit reads stay permissive.
 function isDiscoverableSpec(name) {
-  return /\.slidey\.json$/i.test(name) || /\.jsonl$/i.test(name);
+  return /\.(?:readonly\.)?slidey\.json$/i.test(name) || /\.jsonl$/i.test(name);
+}
+
+function isReadOnlySlideySpec(name) {
+  return new RegExp(`${READONLY_SUFFIX.replace('.', '\\.')}$`, 'i').test(name);
+}
+
+function isEditableSpec(name) {
+  return /\.json$/i.test(name) && !isReadOnlySlideySpec(name);
+}
+
+function ensureEditable(abs) {
+  if (!isEditableSpec(abs)) {
+    throw new Error('only editable .json specs can be edited; .readonly.slidey.json is read-only');
+  }
 }
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-render', 'dist-web-single', '.git', '.worktrees']);
 
@@ -54,6 +71,94 @@ function parseArgs(argv) {
 const CONFIG = parseArgs(process.argv.slice(2));
 const BROWSER_TOOL_TIMEOUT_MS = Number(process.env.SLIDEY_MCP_BROWSER_TIMEOUT_MS || 30000);
 const BROWSER_TOOLS = new Set(['slidey_render_png', 'slidey_render_html', 'slidey_audit', 'slidey_doctor']);
+const LAYOUT_GALLERY_PATH = path.join(ROOT_DIR, 'examples', 'layout-gallery.slidey.json');
+
+function loadLayoutGuideDeck() {
+  try {
+    const raw = fs.readFileSync(LAYOUT_GALLERY_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed.scenes) ? parsed.scenes : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function layoutGalleryId(type, variant = '') {
+  return variant ? `${type}-${variant}` : type;
+}
+
+function layoutGalleryLabel(scene, type, variant) {
+  if (typeof scene.title === 'string' && scene.title.trim()) return scene.title.trim();
+  if (typeof scene.eyebrow === 'string' && scene.eyebrow.trim()) return `${type}: ${scene.eyebrow.trim()}`;
+  if (typeof scene.question === 'string' && scene.question.trim()) return `${type}: ${scene.question.trim()}`;
+  if (typeof scene.lede === 'string' && scene.lede.trim()) return `${type}: ${scene.lede.trim()}`;
+  return variant ? `${type} (${variant})` : type;
+}
+
+function buildLayoutGalleryFromGuide(scenes) {
+  const sourceScenes = Array.isArray(scenes) ? scenes : [];
+  const seen = new Set();
+  const layouts = [];
+  const issues = [];
+
+  for (const scene of sourceScenes) {
+    if (!scene || typeof scene !== 'object') {
+      issues.push('layout guide contains a non-object scene entry');
+      continue;
+    }
+    const type = typeof scene.type === 'string' ? scene.type.trim() : '';
+    if (!type) {
+      issues.push('layout guide scene is missing required "type"');
+      continue;
+    }
+    const variant = typeof scene.variant === 'string' ? scene.variant.trim() : '';
+    // Meme scenes share type "meme" and carry no variant, so they would all
+    // collapse to a single gallery id. Discriminate them by their template id
+    // (a valid scene field) so each template shows as its own gallery entry.
+    const discriminator = variant || (type === 'meme' && typeof scene.template === 'string' ? scene.template.trim() : '');
+    const id = layoutGalleryId(type, discriminator);
+    if (seen.has(id)) continue;
+
+    layouts.push({
+      id,
+      label: layoutGalleryLabel(scene, type, variant),
+      type,
+      variant,
+      scene,
+    });
+    seen.add(id);
+  }
+
+  return {
+    layouts,
+    issues,
+    valid: issues.length === 0,
+    sourceScenes: sourceScenes.length,
+    uniqueScenes: layouts.length,
+  };
+}
+
+function fallbackLayoutGallery() {
+  return [
+    { id: 'title', label: 'Title', type: 'title', variant: '', scene: { type: 'title', title: 'Title slide', subtitle: 'Add your subtitle', eyebrow: 'Section' } },
+    { id: 'narrative', label: 'Narrative', type: 'narrative', variant: '', scene: { type: 'narrative', eyebrow: 'Narrative', lede: 'A short takeaway', body: 'Start writing the scene copy here.' } },
+    { id: 'cards-grid', label: 'Cards (grid)', type: 'cards', variant: 'grid', scene: { type: 'cards', variant: 'grid', title: 'Grid cards', columns: 2, cards: [{ label: 'Point', sub: 'Describe a key idea' }, { label: 'Point', sub: 'Add supporting context' }] } },
+    { id: 'code-source', label: 'Code block', type: 'code', variant: 'source', scene: { type: 'code', variant: 'source', title: 'Code', lang: 'javascript', code: "console.log('Hello from Slidey');" } },
+    { id: 'diagram-svg', label: 'Diagram', type: 'diagram-svg', variant: '', scene: { type: 'diagram-svg', title: 'Diagram', panels: [{ label: 'Main flow', auto_layout: true, rankdir: 'TB', ranksep: 100, nodesep: 80, marginx: 50, marginy: 50, overlap_gap: 24, overlap_iterations: 12, resolve_overlaps: true, nodes: [{ id: 'start', label: 'Start' }, { id: 'end', label: 'Done' }], edges: [{ from: 'start', to: 'end' }] }] } },
+    { id: 'table-data', label: 'Table', type: 'table', variant: 'data', scene: { type: 'table', variant: 'data', title: 'Table', columns: ['Stage', 'Status'], rows: [{ cells: ['Draft', 'Ready'] }] } },
+    { id: 'chart-bar', label: 'Chart', type: 'chart', variant: 'bar', scene: { type: 'chart', variant: 'bar', title: 'Chart', series: [{ name: 'Series 1', points: [{ x: 'A', y: 7 }, { x: 'B', y: 12 }] }] } },
+    { id: 'mermaid', label: 'Mermaid', type: 'mermaid', variant: '', scene: { type: 'mermaid', title: 'Mermaid', source: 'flowchart TD\nA[Input] --> B[Process]\nB --> C[Output]' } },
+  ];
+}
+
+const LAYOUT_GUIDE_BUILD = buildLayoutGalleryFromGuide(loadLayoutGuideDeck());
+const LAYOUT_GALLERY = LAYOUT_GUIDE_BUILD.layouts.length
+  ? LAYOUT_GUIDE_BUILD.layouts
+  : fallbackLayoutGallery();
+
+if (LAYOUT_GUIDE_BUILD.layouts.length && !LAYOUT_GUIDE_BUILD.valid) {
+  console.error(`slidey layout gallery integrity warning: ${LAYOUT_GUIDE_BUILD.issues.join('; ')}`);
+}
 
 function jsonText(value) {
   return [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }];
@@ -70,6 +175,13 @@ function errorResult(message, details = null) {
 
 function safeResolve(rel = '') {
   if (typeof rel !== 'string') throw new Error('path must be a string');
+  // An ABSOLUTE input path is an explicit, intentional choice by the caller —
+  // honor it verbatim (e.g. validating/rendering a deck that lives outside the
+  // MCP workspace root, like a deck in another repo). The workspace-escape
+  // guard below exists to stop RELATIVE inputs from traversing out via `../`;
+  // it must not mangle an absolute path. (Previously `path.resolve(root, './' +
+  // absPath)` rewrote `/abs/x` into `<root>/abs/x` → "spec not found".)
+  if (path.isAbsolute(rel)) return path.resolve(rel);
   const abs = path.resolve(CONFIG.root, '.' + path.sep + rel);
   const rootWithSep = CONFIG.root.endsWith(path.sep) ? CONFIG.root : CONFIG.root + path.sep;
   if (abs !== CONFIG.root && !abs.startsWith(rootWithSep)) {
@@ -96,17 +208,47 @@ function readSpecFile(inputPath) {
   const abs = requireSpecPath(inputPath);
   const raw = fs.readFileSync(abs, 'utf8');
   const spec = /\.jsonl$/i.test(abs) ? require('./trace').buildSpecFromFile(abs) : JSON.parse(raw);
-  return { abs, raw, spec, generated: /\.jsonl$/i.test(abs) };
+  const generated = /\.jsonl$/i.test(abs);
+  return { abs, raw, spec, generated, editable: isEditableSpec(abs) && !generated };
+}
+
+function inferMode(spec) {
+  if (spec && spec.meta && spec.meta.mode) return spec.meta.mode;
+  return (spec.scenes || []).some(scene => scene && scene.type === 'request') ? 'api' : 'pitch';
 }
 
 function writeSpecFile(inputPath, spec) {
   const abs = requireSpecPath(inputPath);
-  if (!/\.json$/i.test(abs)) throw new Error('only .json specs can be edited; .jsonl traces are generated read-only inputs');
+    ensureEditable(abs);
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new Error('spec must be a JSON object');
   if (!Array.isArray(spec.scenes) || spec.scenes.length === 0) throw new Error('spec must have a non-empty "scenes" array');
   const body = JSON.stringify(spec, null, 2) + '\n';
   fs.writeFileSync(abs, body, 'utf8');
   return { path: relPath(abs), bytes: Buffer.byteLength(body), mtimeMs: fs.statSync(abs).mtimeMs };
+}
+
+function cloneSpecValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function layoutById(layoutId) {
+  return LAYOUT_GALLERY.find((entry) => entry.id === layoutId) || null;
+}
+
+function clampSceneIndex(index, sceneCount) {
+  if (!Number.isInteger(index)) throw new Error('sceneIndex must be an integer');
+  if (sceneCount <= 0) throw new Error('spec must contain at least one scene');
+  if (index < 0 || index >= sceneCount) throw new Error(`sceneIndex must be between 0 and ${sceneCount - 1}`);
+  return index;
+}
+
+function clampIndexForInsert(index, length) {
+  if (!Number.isInteger(index)) return length;
+  return Math.max(0, Math.min(index, length));
+}
+
+function sanitizeScene(scene) {
+  return cloneSpecValue(scene);
 }
 
 function buildTree(absDir, relDir = '') {
@@ -127,7 +269,7 @@ function buildTree(absDir, relDir = '') {
       const children = buildTree(childAbs, childRel);
       if (children.length) dirs.push({ name: entry.name, type: 'dir', path: childRel, children });
     } else if (entry.isFile() && isDiscoverableSpec(entry.name)) {
-      files.push({ name: entry.name, type: 'file', path: childRel, editable: /\.json$/i.test(entry.name) });
+      files.push({ name: entry.name, type: 'file', path: childRel, editable: isEditableSpec(entry.name) });
     }
   }
   const byName = (a, b) => a.name.localeCompare(b.name);
@@ -224,7 +366,10 @@ async function loadRenderPage(spec, specPath, sceneIndex, stepIndex) {
   if (executableError) throw new Error(executableError);
   const puppeteer = require('puppeteer');
   require('./render-bundle').ensureRenderBundle();
-  const { stepsForScene, applyShow } = await import(pathToFileURL(path.join(ROOT_DIR, 'web', 'sceneSteps.mjs')).href);
+  const sceneStepsPath = path.join(ROOT_DIR, 'web', 'sceneSteps.mjs');
+  const sceneStepsUrl = pathToFileURL(sceneStepsPath);
+  sceneStepsUrl.searchParams.set('mtime', String(fs.statSync(sceneStepsPath).mtimeMs));
+  const { stepsForScene, applyShow } = await import(sceneStepsUrl.href);
   const scenes = Array.isArray(spec.scenes) ? spec.scenes : [];
   if (!Number.isInteger(sceneIndex) || sceneIndex < 0 || sceneIndex >= scenes.length) {
     throw new Error(`sceneIndex must be between 0 and ${Math.max(0, scenes.length - 1)}`);
@@ -238,7 +383,7 @@ async function loadRenderPage(spec, specPath, sceneIndex, stepIndex) {
   }
 
   const { width = 1920, height = 1080 } = (spec.meta && spec.meta.resolution) || {};
-  const mode = (spec.meta && spec.meta.mode) || 'api';
+  const mode = inferMode(spec);
   const browser = await puppeteer.launch(launchOptions({ width, height }));
   try {
     const page = await browser.newPage();
@@ -252,18 +397,85 @@ async function loadRenderPage(spec, specPath, sceneIndex, stepIndex) {
       document.body.classList.add('instant');
     }, spec.meta || {}, mode);
     await page.evaluate(applyShow, scene, sceneShowOpts(scene, specPath));
+    // Apply EVERY reveal step up to and including the requested one, so the PNG
+    // shows the cumulative on-screen state the audience actually sees at that
+    // moment (title + items 0..N + caption) — not the single step's element in
+    // isolation. setState() accumulates into the store's `revealed` set, so this
+    // mirrors live nav and the geometry audit (src/audit.js applies pageSteps the
+    // same way). Omitting stepIndex resolves to the last step → the fully-built
+    // composite frame.
+    const appliedSteps = pageSteps.slice(0, resolvedStepIndex + 1).filter(Boolean);
+    if (appliedSteps.length) {
+      await page.evaluate((steps) => { for (const s of steps) window.slidey.setState(s); }, appliedSteps);
+    }
     const step = pageSteps[resolvedStepIndex];
-    if (step) await page.evaluate((s) => window.slidey.setState(s), step);
     await page.evaluate('window.__slideySettle && window.__slideySettle()');
-    return { browser, page, scene, step, steps: pageSteps, width, height, sceneIndex, stepIndex: resolvedStepIndex };
+    return { browser, page, scene, step, appliedSteps, steps: pageSteps, width, height, sceneIndex, stepIndex: resolvedStepIndex };
   } catch (err) {
     await closeBrowser(browser);
     throw err;
   }
 }
 
+// Video scenes are not rendered through the Vue bundle (it excludes the rrweb
+// web player; live render rasterizes natively). Emit a representative poster
+// still instead — the frame a reviewer actually QAs — mirroring the PNG
+// exporter (src/png.js). rrweb-log sources seek-rasterize a single frame; MP4
+// `src` sources grab a frame ~10% in. Returns null if the source is missing so
+// the caller can fall back to the (placeholder) Vue render.
+async function renderVideoPoster(args, spec, specPath, sceneIndex, scene) {
+  const executableError = browserExecutableError();
+  if (executableError) throw new Error(executableError);
+  const { width = 1920, height = 1080 } = (spec.meta && spec.meta.resolution) || {};
+  const tmpPng = path.join(tempRoot(), `slidey-mcp-poster-${process.pid}-${sceneIndex}.png`);
+  const specDir = path.dirname(specPath || '.');
+  try {
+    if (scene.rrweb) {
+      const rrwebPath = path.resolve(specDir, scene.rrweb);
+      if (!fs.existsSync(rrwebPath)) return null;
+      const { extractRrwebPoster } = require('./rrweb-render');
+      await extractRrwebPoster(rrwebPath, tmpPng, { width, height, fit: scene.fit || 'contain', atSec: scene.start || undefined });
+    } else if (scene.src) {
+      const v = require('./video');
+      const src = path.resolve(specDir, scene.src);
+      if (!fs.existsSync(src)) return null;
+      const dur = v.probeDuration(src);
+      const at = Math.max(0, scene.start || 0) + Math.min(1, (dur || 0) * 0.1);
+      v.extractPoster({ src, outPng: tmpPng, width, height, fit: scene.fit || 'contain', atSec: at });
+    } else {
+      return null;
+    }
+    const data = fs.readFileSync(tmpPng).toString('base64');
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            path: args.path,
+            sceneIndex,
+            poster: true,
+            note: 'video scene rendered as a native poster still (the Vue bundle excludes the live rrweb player)',
+            source: scene.rrweb || scene.src,
+            width,
+            height,
+          }, null, 2),
+        },
+        { type: 'image', mimeType: 'image/png', data },
+      ],
+    };
+  } finally {
+    try { fs.unlinkSync(tmpPng); } catch (_) { /* best-effort cleanup */ }
+  }
+}
+
 async function renderPng(args) {
   const { abs, spec } = readSpecFile(args.path);
+  const scenes = Array.isArray(spec.scenes) ? spec.scenes : [];
+  const scene = scenes[args.sceneIndex];
+  if (scene && scene.type === 'video' && (scene.rrweb || scene.src)) {
+    const poster = await renderVideoPoster(args, spec, abs, args.sceneIndex, scene);
+    if (poster) return poster;
+  }
   const session = await loadRenderPage(spec, abs, args.sceneIndex, args.stepIndex);
   try {
     const data = await session.page.screenshot({ type: 'png', encoding: 'base64' });
@@ -276,6 +488,7 @@ async function renderPng(args) {
             sceneIndex: session.sceneIndex,
             stepIndex: session.stepIndex,
             step: session.step,
+            appliedSteps: session.appliedSteps,
             steps: session.steps,
             width: session.width,
             height: session.height,
@@ -316,6 +529,7 @@ async function renderHtml(args) {
       sceneIndex: session.sceneIndex,
       stepIndex: session.stepIndex,
       step: session.step,
+      appliedSteps: session.appliedSteps,
       steps: session.steps,
       html,
     });
@@ -346,14 +560,14 @@ function toolInputSchema(properties, required = []) {
 const TOOLS = [
   {
     name: 'slidey_workspace_tree',
-    description: 'List editable Slidey .slidey.json specs and generated .jsonl trace specs under the MCP workspace root.',
+    description: 'List Slidey .slidey.json specs, read-only .readonly.slidey.json specs, and generated .jsonl trace specs.',
     inputSchema: toolInputSchema({}),
   },
   {
     name: 'slidey_read_spec',
-    description: 'Read a Slidey spec. .jsonl traces are converted to generated specs and returned read-only.',
+    description: 'Read a Slidey spec. .jsonl traces and .readonly.slidey.json decks are returned read-only.',
     inputSchema: toolInputSchema({
-      path: { type: 'string', description: 'Workspace-relative .slidey.json or .jsonl path.' },
+      path: { type: 'string', description: 'Workspace-relative .slidey.json, .readonly.slidey.json, or .jsonl path.' },
     }, ['path']),
   },
   {
@@ -383,6 +597,77 @@ const TOOLS = [
         },
       },
     }, ['path', 'operations']),
+  },
+  {
+    name: 'slidey_layout_gallery',
+    description: 'List reusable scene layouts that can be inserted as new slides.',
+    inputSchema: toolInputSchema({}),
+  },
+  {
+    name: 'slidey_add_slide',
+    description: 'Add a new slide from the layout gallery.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      layout: { type: 'string', description: 'One of the IDs returned by slidey_layout_gallery.' },
+      insertIndex: {
+        type: 'integer',
+        minimum: 0,
+        description: 'Insert position in scenes array. Defaults to append to end.',
+      },
+    }, ['path', 'layout']),
+  },
+  {
+    name: 'slidey_meme_search',
+    description: 'Search the meme-template registry (200+ templates). Each result lists the template id, orientation, and its semantic caption fields with example hints. Use the id with slidey_add_meme.',
+    inputSchema: toolInputSchema({
+      query: { type: 'string', description: 'Free-text query matched against template name, id, keywords, and example captions. Empty returns a sample.' },
+      orientation: { type: 'string', enum: ['landscape', 'portrait', 'square'], description: 'Optional filter to fit a particular slot.' },
+      limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Max results (default 20).' },
+    }),
+  },
+  {
+    name: 'slidey_add_meme',
+    description: 'Add a meme slide built from a registry template (find ids with slidey_meme_search). Fill captions via `text` (positional, by box order) or `fields` (keyed by field name); omit both to seed the template\'s example captions.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      template: { type: 'string', description: 'Meme template id from slidey_meme_search, e.g. "db", "drake".' },
+      text: { type: 'array', items: { type: 'string' }, description: 'Captions in box order.' },
+      fields: { type: 'object', additionalProperties: { type: 'string' }, description: 'Captions keyed by the template field names.' },
+      title: { type: 'string', description: 'Optional eyebrow header.' },
+      caption: { type: 'string', description: 'Optional footer line.' },
+      narration: { type: 'string', description: 'Optional narration for the slide.' },
+      insertIndex: { type: 'integer', minimum: 0, description: 'Insert position. Defaults to append.' },
+    }, ['path', 'template']),
+  },
+  {
+    name: 'slidey_duplicate_slide',
+    description: 'Duplicate a slide and insert it after the original by default.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      sourceIndex: { type: 'integer', minimum: 0, description: 'Index of the source scene to duplicate.' },
+      insertIndex: {
+        type: 'integer',
+        minimum: 0,
+        description: 'Insert position in scenes array. Defaults to sourceIndex + 1.',
+      },
+    }, ['path', 'sourceIndex']),
+  },
+  {
+    name: 'slidey_remove_slide',
+    description: 'Remove a slide from a deck.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      sceneIndex: { type: 'integer', minimum: 0, description: 'Index of the scene to remove.' },
+    }, ['path', 'sceneIndex']),
+  },
+  {
+    name: 'slidey_reorder_slide',
+    description: 'Move a slide from one index to another.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      fromIndex: { type: 'integer', minimum: 0, description: 'Source index to move.' },
+      toIndex: { type: 'integer', minimum: 0, description: 'Destination index in the resulting scenes array.' },
+    }, ['path', 'fromIndex', 'toIndex']),
   },
   {
     name: 'slidey_validate',
@@ -455,8 +740,8 @@ async function callTool(name, args = {}) {
       return okResult({ root: CONFIG.root, children: buildTree(CONFIG.root) });
 
     case 'slidey_read_spec': {
-      const { abs, raw, spec, generated } = readSpecFile(args.path);
-      return okResult({ path: relPath(abs), generated, editable: !generated, raw: generated ? undefined : raw, spec });
+      const { abs, raw, spec, generated, editable } = readSpecFile(args.path);
+      return okResult({ path: relPath(abs), generated, editable: editable, raw: generated ? undefined : raw, spec });
     }
 
     case 'slidey_write_spec': {
@@ -467,11 +752,145 @@ async function callTool(name, args = {}) {
 
     case 'slidey_patch_spec': {
       const { abs, spec } = readSpecFile(args.path);
-      if (!/\.json$/i.test(abs)) throw new Error('only .json specs can be edited; .jsonl traces are generated read-only inputs');
+      ensureEditable(abs);
       const patched = applyJsonPatch(spec, args.operations);
       const written = writeSpecFile(args.path, patched);
       const validation = validateSpec(patched, { specPath: abs });
       return okResult({ ok: validation.valid, written, validation, spec: patched });
+    }
+    case 'slidey_layout_gallery':
+      return okResult({
+        layouts: LAYOUT_GALLERY.map((entry) => ({
+          id: entry.id,
+          label: entry.label,
+          type: entry.scene.type,
+          scene: entry.scene,
+        })),
+      });
+
+    case 'slidey_add_slide': {
+      const { abs, spec } = readSpecFile(args.path);
+      ensureEditable(abs);
+      const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
+      const layout = layoutById(args.layout);
+      if (!layout) {
+        const validLayouts = LAYOUT_GALLERY.map((entry) => entry.id).join(', ');
+        throw new Error(`unknown layout "${args.layout}". use slidey_layout_gallery to list valid values: ${validLayouts}`);
+      }
+      const insertIndex = clampIndexForInsert(args.insertIndex, scenes.length);
+      const scene = sanitizeScene(layout.scene);
+      scenes.splice(insertIndex, 0, scene);
+      const updated = { ...spec, scenes };
+      const written = writeSpecFile(args.path, updated);
+      const validation = validateSpec(updated, { specPath: abs });
+      return okResult({ ok: validation.valid, written, validation, sceneIndex: insertIndex, scene, spec: updated });
+    }
+
+    case 'slidey_meme_search': {
+      const memes = require('./memes/registry');
+      const matches = memes.search(args.query || '', {
+        orientation: args.orientation || null,
+        limit: Number.isInteger(args.limit) ? args.limit : 20,
+      });
+      return okResult({ count: matches.length, matches });
+    }
+
+    case 'slidey_add_meme': {
+      const memes = require('./memes/registry');
+      const template = memes.get(args.template);
+      if (!template) {
+        const hits = memes.search(args.template || '', { limit: 8 })
+          .map((m) => `${m.id} (${m.name})`).join(', ');
+        throw new Error(`unknown meme template "${args.template}". search with slidey_meme_search.${hits ? ` did you mean: ${hits}` : ''}`);
+      }
+      const { abs, spec } = readSpecFile(args.path);
+      ensureEditable(abs);
+      const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
+      const insertIndex = clampIndexForInsert(args.insertIndex, scenes.length);
+      const scene = { type: 'meme', template: template.id };
+      if (args.title) scene.title = String(args.title);
+      if (args.fields && typeof args.fields === 'object') scene.fields = { ...args.fields };
+      if (Array.isArray(args.text)) scene.text = args.text.map((t) => String(t ?? ''));
+      // No captions supplied → seed the template's example captions so the slide
+      // renders something meaningful out of the box.
+      if (!scene.fields && !scene.text) {
+        scene.text = (template.example || template.boxes.map((b) => b.hint || '')).map((t) => String(t ?? ''));
+      }
+      if (args.caption) scene.caption = String(args.caption);
+      if (args.narration) scene.narration = String(args.narration);
+      scenes.splice(insertIndex, 0, scene);
+      const updated = { ...spec, scenes };
+      const written = writeSpecFile(args.path, updated);
+      const validation = validateSpec(updated, { specPath: abs });
+      return okResult({
+        ok: validation.valid, written, validation,
+        sceneIndex: insertIndex, scene,
+        template: memes.summary(template),
+        spec: updated,
+      });
+    }
+
+    case 'slidey_duplicate_slide': {
+      const { abs, spec } = readSpecFile(args.path);
+      ensureEditable(abs);
+      const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
+      const sourceIndex = clampSceneIndex(args.sourceIndex, scenes.length);
+      const insertIndex = clampIndexForInsert(
+        Number.isInteger(args.insertIndex) ? args.insertIndex : sourceIndex + 1,
+        scenes.length + 1,
+      );
+      const scene = sanitizeScene(scenes[sourceIndex]);
+      scenes.splice(insertIndex, 0, scene);
+      const updated = { ...spec, scenes };
+      const written = writeSpecFile(args.path, updated);
+      const validation = validateSpec(updated, { specPath: abs });
+      return okResult({
+        ok: validation.valid,
+        written,
+        validation,
+        sourceIndex,
+        sceneIndex: insertIndex,
+        scene,
+        spec: updated,
+      });
+    }
+
+    case 'slidey_remove_slide': {
+      const { abs, spec } = readSpecFile(args.path);
+      ensureEditable(abs);
+      const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
+      if (scenes.length <= 1) throw new Error('deck must contain at least one scene');
+      const sceneIndex = clampSceneIndex(args.sceneIndex, scenes.length);
+      const removed = scenes.splice(sceneIndex, 1)[0];
+      const updated = { ...spec, scenes };
+      const written = writeSpecFile(args.path, updated);
+      const validation = validateSpec(updated, { specPath: abs });
+      return okResult({
+        ok: validation.valid,
+        written,
+        validation,
+        removedSceneIndex: sceneIndex,
+        scene: removed,
+        sceneCount: updated.scenes.length,
+        spec: updated,
+      });
+    }
+
+    case 'slidey_reorder_slide': {
+      const { abs, spec } = readSpecFile(args.path);
+      ensureEditable(abs);
+      const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
+      const fromIndex = clampSceneIndex(args.fromIndex, scenes.length);
+      const toIndex = clampSceneIndex(args.toIndex, scenes.length);
+      if (fromIndex === toIndex) {
+        return okResult({ ok: true, written: { path: relPath(abs), bytes: 0, mtimeMs: fs.statSync(abs).mtimeMs }, validation: validateSpec(spec, { specPath: abs }), spec, sourceIndex: fromIndex, targetIndex: toIndex });
+      }
+      const [scene] = scenes.splice(fromIndex, 1);
+      scenes.splice(toIndex, 0, scene);
+      const updated = { ...spec, scenes };
+      const written = writeSpecFile(args.path, updated);
+      const validation = validateSpec(updated, { specPath: abs });
+      return okResult({ ok: validation.valid, written, validation, sourceIndex: fromIndex, targetIndex: toIndex, spec: updated });
     }
 
     case 'slidey_validate': {

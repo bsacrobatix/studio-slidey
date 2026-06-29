@@ -126,14 +126,14 @@ onBeforeUnmount(() => {
     :class="[{ embedded }, `phase-${phase}`]"
   >
     <template v-if="mediaKind !== 'none'">
-      <div v-if="embedded" class="video-eyebrow" v-show="scene.eyebrow">{{ scene.eyebrow }}</div>
-      <div v-if="embedded" class="video-title" v-show="scene.title">{{ scene.title }}</div>
+      <div v-if="embedded" class="video-eyebrow" v-show="scene.eyebrow" data-edit-path='["eyebrow"]'>{{ scene.eyebrow }}</div>
+      <div v-if="embedded" class="video-title" v-show="scene.title" data-edit-path='["title"]'>{{ scene.title }}</div>
       <!-- Inline spacer: reserves the slide's framed area so the chrome lays out;
            the live player floats above it (Teleported) matching this box. -->
       <div ref="frameRef" class="video-frame" :class="{ embedded }">
         <div class="video-frame-placeholder"></div>
       </div>
-      <div v-if="embedded" class="video-caption" v-show="scene.caption">{{ scene.caption }}</div>
+      <div v-if="embedded" class="video-caption" v-show="scene.caption" data-edit-path='["caption"]' data-edit-multiline>{{ scene.caption }}</div>
     </template>
     <div v-else class="video-fallback">
       <p>No session replay or video source loaded.</p>

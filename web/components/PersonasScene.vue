@@ -56,6 +56,9 @@ function resolve(ref) {
     intro: base.intro || '',
     color: base.color || '#58a6ff',
     glyph: base.glyph || initials(base.name || base.id || '?'),
+    // Optional image avatar (URL or data-URI, e.g. an SVG logo). When present it
+    // fills the avatar chip instead of the glyph.
+    avatar: base.avatar || '',
   };
 }
 
@@ -106,6 +109,7 @@ const gridStyle = computed(() => ({
       id="personas-title"
       class="personas-title reveal"
       :class="{ shown: shown('personas-title') }"
+      data-edit-path='["title"]'
     >{{ sc.title }}</div>
 
     <!-- CAST: avatar + name + role + intro -->
@@ -117,7 +121,10 @@ const gridStyle = computed(() => ({
         class="persona-card reveal"
         :class="{ shown: shown(`personas-item-${i}`) }"
       >
-        <div class="persona-avatar" :style="avatarStyle(p)">{{ p.glyph }}</div>
+        <div class="persona-avatar" :class="{ 'persona-avatar-img': p.avatar }" :style="avatarStyle(p)">
+          <img v-if="p.avatar" :src="p.avatar" :alt="p.name" class="persona-avatar-image" />
+          <template v-else>{{ p.glyph }}</template>
+        </div>
         <div class="persona-body">
           <div class="persona-name" :style="{ color: p.color }">{{ p.name }}</div>
           <div v-if="p.role" class="persona-role">{{ p.role }}</div>
@@ -136,12 +143,15 @@ const gridStyle = computed(() => ({
         :class="{ shown: shown(`personas-item-${i}`) }"
       >
         <div class="usecase-actor">
-          <div class="persona-avatar persona-avatar-sm" :style="avatarStyle(c.persona)">{{ c.persona.glyph }}</div>
+          <div class="persona-avatar persona-avatar-sm" :class="{ 'persona-avatar-img': c.persona.avatar }" :style="avatarStyle(c.persona)">
+            <img v-if="c.persona.avatar" :src="c.persona.avatar" :alt="c.persona.name" class="persona-avatar-image" />
+            <template v-else>{{ c.persona.glyph }}</template>
+          </div>
           <div class="usecase-actor-name" :style="{ color: c.persona.color }">{{ c.persona.name }}</div>
         </div>
         <div class="usecase-text">
-          <div class="usecase-action">{{ c.action }}</div>
-          <div v-if="c.detail" class="usecase-detail">{{ c.detail }}</div>
+          <div class="usecase-action" :data-edit-path="JSON.stringify(['cases', i, 'action'])">{{ c.action }}</div>
+          <div v-if="c.detail" class="usecase-detail" :data-edit-path="JSON.stringify(['cases', i, 'detail'])">{{ c.detail }}</div>
         </div>
       </div>
     </div>
@@ -151,6 +161,7 @@ const gridStyle = computed(() => ({
       id="personas-caption"
       class="personas-caption reveal"
       :class="{ shown: shown('personas-caption') }"
+      data-edit-path='["caption"]'
     >{{ sc.caption }}</div>
   </div>
 </template>
@@ -201,6 +212,16 @@ const gridStyle = computed(() => ({
   font-size: 33px;
   border-width: 2px;
   box-shadow: none;
+}
+/* Image avatar (e.g. a logo SVG): the image fills the circular chip; the colored
+   ring + halo from avatarStyle still frames it as the persona's identity. */
+.persona-avatar-img { overflow: hidden; padding: 0; }
+.persona-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
 }
 
 /* ── CAST grid ─────────────────────────────────────────────────────────────── */

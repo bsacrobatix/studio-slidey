@@ -16,8 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Brackets the supported range (package.json engines: node >=18).
-        node: ['18', '22']
+        # Brackets the supported range (package.json engines: node >=20.19).
+        node: ['20', '22']
 
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +39,9 @@ jobs:
             libgbm1 libasound2t64 libpango-1.0-0 libcairo2
 
       - name: Install dependencies
-        run: npm ci
+        # --no-audit/--no-fund skip npm's post-install registry calls, which
+        # have intermittently hung/crashed `npm ci` on the runners.
+        run: npm ci --no-audit --no-fund
 
       # Full Node suite (builds dist-render so the browser audit test runs)
       # plus the VS Code extension end-to-end suite. Mirrors `make ci` locally.

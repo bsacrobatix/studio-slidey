@@ -49,6 +49,7 @@ const pad = (extra = 0) => ({ paddingLeft: `${props.depth * 14 + 8 + extra}px` }
         :style="pad(14)"
         @click="select(node.path)"
       >
+        <span v-if="node.editable === false" class="slidey-tree-lock" title="Read-only (clone to edit)">🔒</span>
         <span class="slidey-tree-name">{{ node.name }}</span>
       </div>
     </li>
