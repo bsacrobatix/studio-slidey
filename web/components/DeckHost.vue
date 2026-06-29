@@ -27,6 +27,7 @@ import ChartScene from './ChartScene.vue';
 import ImageScene from './ImageScene.vue';
 import ImageCompareScene from './ImageCompareScene.vue';
 import BookScene from './BookScene.vue';
+import MemeScene from './MemeScene.vue';
 import VideoScene from './VideoScene.vue';
 import PersonasScene from './PersonasScene.vue';
 
@@ -51,6 +52,7 @@ const PITCH_COMPONENTS = {
   image: ImageScene,
   'image-compare': ImageCompareScene,
   book: BookScene,
+  meme: MemeScene,
   video: VideoScene,
   personas: PersonasScene,
 };

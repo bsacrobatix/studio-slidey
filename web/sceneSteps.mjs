@@ -7,8 +7,21 @@
 // (gaps/holds excluded — only the meaningful, content-adding reveals). If a
 // scene module changes its reveal order, update the matching branch here.
 
+import { getMemeTemplate } from './memeGeometry.mjs';
+
 function range(n, prefix) {
   return Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+}
+
+// Number of filled caption boxes for a meme scene (mirrors scenes/meme.js).
+function memeFilledBoxCount(s) {
+  const tpl = getMemeTemplate(s.template);
+  const boxes = (tpl && tpl.boxes) || [];
+  return boxes.filter((b, i) => {
+    if (s.fields && b.field in s.fields) return String(s.fields[b.field] ?? '') !== '';
+    if (Array.isArray(s.text) && s.text[i] != null) return String(s.text[i]) !== '';
+    return false;
+  }).length;
 }
 
 // Ordered reveal step names for a scene. Each becomes one PDF page / nav step.
@@ -121,6 +134,13 @@ export function stepsForScene(scene) {
       if (s.variant === 'qa') return ['reveal_all'];
       return [...(s.title ? ['imagecompare_title'] : []), 'imagecompare_frame',
         ...(s.caption ? ['imagecompare_caption'] : [])];
+    case 'meme':
+      return [
+        ...(s.title ? ['meme_title'] : []),
+        'meme_frame',
+        ...range(memeFilledBoxCount(s), 'meme_box_'),
+        ...(s.caption ? ['meme_caption'] : []),
+      ];
     case 'book':
       return [
         ...(s.title ? ['book_title'] : []),
@@ -175,6 +195,7 @@ export function applyShow(scene, opts) {
     case 'image':        slidey.showImage(scene, o.imageDataUri || ''); break;
     case 'image-compare': slidey.showImageCompare(scene, o.leftImageDataUri || '', o.rightImageDataUri || ''); break;
     case 'book':         slidey.showBook(scene, o.bookCoverDataUris || []); break;
+    case 'meme':         slidey.showMeme(scene, o.memeDataUri || ''); break;
     // video: only the interactive viewer renders it live (the headless render +
     // PDF/PNG export handle video scenes natively). Guard so render adapters
     // without showVideo (export contexts) don't throw.

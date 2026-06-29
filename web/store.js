@@ -128,6 +128,16 @@ export const PITCH_REVEALS = {
   imagecompare_title:   ['imagecompare-title'],
   imagecompare_frame:   ['imagecompare-frame'],
   imagecompare_caption: ['imagecompare-caption'],
+  // ── Meme ──
+  meme_title:   ['meme-title'],
+  meme_frame:   ['meme-frame'],
+  meme_box_0:   ['meme-box-0'],
+  meme_box_1:   ['meme-box-1'],
+  meme_box_2:   ['meme-box-2'],
+  meme_box_3:   ['meme-box-3'],
+  meme_box_4:   ['meme-box-4'],
+  meme_box_5:   ['meme-box-5'],
+  meme_caption: ['meme-caption'],
   // ── Book ──
   book_title:   ['book-title'],
   book_item_0:  ['book-item-0'],
@@ -160,6 +170,9 @@ export const store = reactive({
   leftImageDataUri: '',
   rightImageDataUri: '',
   bookCoverDataUris: [],
+  // meme — blank template image (inlined data URI) + resolved geometry.
+  memeDataUri: '',
+  memeTemplate: null,
   // video (live rrweb) — populated by showVideo for VideoScene/RrwebPlayer.
   rrwebEvents: [],
   rrwebChapters: [],
@@ -311,6 +324,8 @@ export const store = reactive({
     this.leftImageDataUri = '';
     this.rightImageDataUri = '';
     this.bookCoverDataUris = [];
+    this.memeDataUri = '';
+    this.memeTemplate = null;
   },
 
   setPitchSteps(steps) {

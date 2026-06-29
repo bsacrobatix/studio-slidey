@@ -14,6 +14,7 @@
 
 import { nextTick } from 'vue';
 import { store } from './store.js';
+import { getMemeTemplate } from './memeGeometry.mjs';
 
 export function installAdapter() {
   window.__slideyPendingRenders = new Set();
@@ -104,6 +105,13 @@ export function installAdapter() {
       store.leftImageDataUri = '';
       store.rightImageDataUri = '';
     },
+
+    showMeme(scene, dataUri) {
+      store.showScene('meme', scene);
+      store.memeTemplate = getMemeTemplate(scene && scene.template);
+      store.memeDataUri = dataUri || '';
+    },
+    hideMeme() { store.hidePitch(); store.memeTemplate = null; store.memeDataUri = ''; },
 
     showBook(scene, coverDataUris) {
       store.showScene('book', scene);
