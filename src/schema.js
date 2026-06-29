@@ -790,6 +790,42 @@ const SCHEMA = {
               ...COMMON,
             },
           },
+          // ── meme ──────────────────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type', 'template'],
+            description: 'Meme-template slide. `template` is a registry id (see slidey_meme_search); each template knows its own caption boxes, semantic fields, and orientation. Captions are themed to match the deck by default. Use `text` (positional, by box order) or `fields` (keyed by field name) to fill the boxes.',
+            properties: {
+              type: { const: 'meme' },
+              template: { type: 'string', description: 'Meme template id from the registry, e.g. "db" (Distracted Boyfriend), "drake", "fine". Search with slidey_meme_search.' },
+              title: { type: 'string', description: 'Optional eyebrow header shown above the meme.' },
+              text: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Caption strings in box order (top-to-bottom / left-to-right as defined by the template). Empty strings skip a box.',
+              },
+              fields: {
+                type: 'object',
+                additionalProperties: { type: 'string' },
+                description: 'Captions keyed by the template\'s semantic field names (e.g. {"top":"...","bottom":"..."}). Takes precedence over `text` for any field it sets.',
+              },
+              fit: { type: 'string', enum: ['contain', 'cover'], description: 'How the template image fits the stage. contain (default) letterboxes tall/wide memes without distortion; cover fills the frame.' },
+              style: {
+                type: 'object',
+                additionalProperties: false,
+                description: 'Optional per-slide caption styling override. By default captions use the deck theme.',
+                properties: {
+                  impact: { type: 'boolean', description: 'Classic Impact meme look: bold uppercase white text with a heavy black outline.' },
+                  color: { type: 'string', description: 'Caption text color (CSS).' },
+                  stroke: { type: 'string', description: 'Caption outline/stroke color (CSS).' },
+                  font: { type: 'string', description: 'Caption font-family (CSS).' },
+                  uppercase: { type: 'boolean', description: 'Force uppercase captions.' },
+                },
+              },
+              caption: { type: 'string', description: 'Optional footer line below the meme.' },
+              ...COMMON,
+            },
+          },
           // ── image-compare ─────────────────────────────────────────────────
           {
             type: 'object',

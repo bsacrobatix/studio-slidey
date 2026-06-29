@@ -34,6 +34,7 @@
   "files": [
     "src",
     "web",
+    "data",
     "dist",
     "dist-render",
     "tools/vscode-slidey",

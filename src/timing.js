@@ -173,6 +173,18 @@ const TIMING = {
   imagecompare_caption: 25,
   imagecompare_hold:   210,  // 7.0 s
 
+  // ── Meme scene ──────────────────────────────────────────────────
+  meme_title:         20,
+  meme_frame:         30,
+  meme_box_0:         24,
+  meme_box_1:         24,
+  meme_box_2:         24,
+  meme_box_3:         24,
+  meme_box_4:         24,
+  meme_box_5:         24,
+  meme_caption:       25,
+  meme_hold:         210,  // 7.0 s default dwell
+
   // ── Book scene ─────────────────────────────────────────────────
   book_title:         20,
   book_item_0:        30,
@@ -228,6 +240,23 @@ function videoSceneFrames(scene, opts = {}) {
 }
 
 /**
+ * Count how many of a meme template's caption boxes are actually filled, so the
+ * estimate matches scenes/meme.js reveal sequence. Best-effort: an unknown
+ * template (missing registry) falls back to 0 reveal boxes (frame only).
+ */
+function memeFilledBoxCount(scene) {
+  try {
+    const tpl = require('./memes/registry').get(scene.template);
+    const boxes = (tpl && tpl.boxes) || [];
+    return boxes.filter((b, i) => {
+      if (scene.fields && b.field in scene.fields) return String(scene.fields[b.field] ?? '') !== '';
+      if (Array.isArray(scene.text) && scene.text[i] != null) return String(scene.text[i]) !== '';
+      return false;
+    }).length;
+  } catch (_) { return 0; }
+}
+
+/**
  * Estimate the total frame count a scene will produce when rendered.
  * Mirrors the actual reveal/hold sequence in scenes/*.js. Used by
  * --list/--estimate (no rendering) and by --skip-render (to compute
@@ -270,6 +299,7 @@ function estimateScene(scene, opts = {}) {
       case 'image':        return scene.hold ?? T.image_hold ?? T.diagramsvg_hold;
       case 'image-compare': return scene.hold ?? T.imagecompare_hold ?? T.image_hold ?? T.diagramsvg_hold;
       case 'book':         return scene.hold ?? T.book_hold ?? T.cards_hold;
+      case 'meme':         return scene.hold ?? T.meme_hold ?? T.image_hold;
       case 'stat':         return hold('stat_hold',        scene.hold);
       case 'cta':          return hold('cta_hold',         scene.hold);
       case 'request':      return T.sending_ticks * T.sending_per_tick
@@ -462,6 +492,17 @@ function estimateScene(scene, opts = {}) {
       for (let i = 0; i < n; i++) f += T[`book_item_${i}`] ?? 30;
       if (scene.caption) f += T.book_caption;
       f += scene.hold ?? T.book_hold ?? T.cards_hold;
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'meme': {
+      let f = 0;
+      if (scene.title) f += T.meme_title;
+      f += T.meme_frame;
+      for (let i = 0; i < memeFilledBoxCount(scene); i++) f += T[`meme_box_${i}`] ?? 24;
+      if (scene.caption) f += T.meme_caption;
+      f += scene.hold ?? T.meme_hold ?? T.image_hold;
       f += T.inter_scene;
       return f;
     }

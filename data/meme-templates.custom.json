@@ -1,0 +1,77 @@
+{
+  "_note": "Curated meme templates NOT in the memegen.link catalog. Merged on top of meme-templates.json by src/memes/registry.js and web/memeGeometry.mjs. scripts/build-meme-registry.js never touches this file, so a registry rebuild won't wipe these. Same entry shape as the generated file; box geometry is normalized 0..1, top-left origin.",
+  "templates": [
+    {
+      "id": "clown-makeup",
+      "name": "Clown Applying Makeup",
+      "keywords": [
+        "clown",
+        "makeup",
+        "clown applying makeup",
+        "putting on clown makeup",
+        "escalating",
+        "step by step",
+        "progressive"
+      ],
+      "lines": 4,
+      "width": 750,
+      "height": 798,
+      "aspect": 0.9398,
+      "orientation": "portrait",
+      "blank": "https://imgflip.com/s/meme/Clown-Applying-Makeup.jpg",
+      "example": [
+        "a mild, reasonable take",
+        "pushing it a little further",
+        "now it's getting unhinged",
+        "full clown conclusion"
+      ],
+      "source": "https://knowyourmeme.com/memes/clown-applying-makeup-putting-on-clown-makeup",
+      "boxes": [
+        {
+          "field": "step1",
+          "hint": "a mild, reasonable take",
+          "x": 0.03,
+          "y": 0.04,
+          "w": 0.58,
+          "h": 0.17,
+          "align": "left",
+          "color": "black",
+          "angle": 0
+        },
+        {
+          "field": "step2",
+          "hint": "pushing it a little further",
+          "x": 0.03,
+          "y": 0.29,
+          "w": 0.58,
+          "h": 0.17,
+          "align": "left",
+          "color": "black",
+          "angle": 0
+        },
+        {
+          "field": "step3",
+          "hint": "now it's getting unhinged",
+          "x": 0.03,
+          "y": 0.54,
+          "w": 0.58,
+          "h": 0.17,
+          "align": "left",
+          "color": "black",
+          "angle": 0
+        },
+        {
+          "field": "step4",
+          "hint": "full clown conclusion",
+          "x": 0.03,
+          "y": 0.79,
+          "w": 0.58,
+          "h": 0.17,
+          "align": "left",
+          "color": "black",
+          "angle": 0
+        }
+      ]
+    }
+  ]
+}

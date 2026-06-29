@@ -40,6 +40,14 @@ function sceneShowOpts(scene, specPath) {
     opts.leftImageDataUri = assetDataUri(specPath, scene.left && scene.left.src);
     opts.rightImageDataUri = assetDataUri(specPath, scene.right && scene.right.src);
   }
+  if (scene.type === 'meme' && scene.template) {
+    // Best-effort sync cache read for the PDF/PNG export path; the MP4 render
+    // path resolves (and warms the cache) asynchronously in scenes/meme.js.
+    try {
+      const tpl = require('./memes/registry').get(scene.template);
+      if (tpl) opts.memeDataUri = require('./memes/cache').memeImageDataUriSync(tpl);
+    } catch (_) { /* registry/cache best-effort */ }
+  }
   if (scene.type === 'book' && Array.isArray(scene.books)) {
     opts.bookCoverDataUris = scene.books
       .slice(0, 3)

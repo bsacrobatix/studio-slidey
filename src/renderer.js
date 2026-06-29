@@ -53,6 +53,7 @@ const SCENE_MODULES = {
   image:          require('./scenes/image'),
   'image-compare': require('./scenes/image-compare'),
   book:           require('./scenes/book'),
+  meme:           require('./scenes/meme'),
   video:          require('./scenes/video'),
 };
 
