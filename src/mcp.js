@@ -15,6 +15,7 @@ const { auditSpec } = require('./audit');
 const { runCheck } = require('./check');
 const { estimateBoundaries } = require('./timing');
 const { tempRoot } = require('./temp-path');
+const { versionOf } = require('./spec-version');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const RENDER_BUNDLE = path.join(ROOT_DIR, 'dist-render', 'render.html');
@@ -207,10 +208,13 @@ function requireSpecPath(inputPath) {
 
 function readSpecFile(inputPath) {
   const abs = requireSpecPath(inputPath);
-  const raw = fs.readFileSync(abs, 'utf8');
+  const buf = fs.readFileSync(abs);
+  const raw = buf.toString('utf8');
   const spec = /\.jsonl$/i.test(abs) ? require('./trace').buildSpecFromFile(abs) : JSON.parse(raw);
   const generated = /\.jsonl$/i.test(abs);
-  return { abs, raw, spec, generated, editable: isEditableSpec(abs) && !generated };
+  // Content version: hand this back to writeSpecFile as baseVersion so a write
+  // built from a stale read can't silently clobber a concurrent edit.
+  return { abs, raw, spec, generated, editable: isEditableSpec(abs) && !generated, version: versionOf(buf) };
 }
 
 function inferMode(spec) {
@@ -218,14 +222,33 @@ function inferMode(spec) {
   return (spec.scenes || []).some(scene => scene && scene.type === 'request') ? 'api' : 'pitch';
 }
 
-function writeSpecFile(inputPath, spec) {
+function writeSpecFile(inputPath, spec, opts = {}) {
   const abs = requireSpecPath(inputPath);
     ensureEditable(abs);
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new Error('spec must be a JSON object');
   if (!Array.isArray(spec.scenes) || spec.scenes.length === 0) throw new Error('spec must have a non-empty "scenes" array');
   const body = JSON.stringify(spec, null, 2) + '\n';
-  fs.writeFileSync(abs, body, 'utf8');
-  return { path: relPath(abs), bytes: Buffer.byteLength(body), mtimeMs: fs.statSync(abs).mtimeMs };
+  const nextBytes = Buffer.from(body, 'utf8');
+  // Optimistic concurrency: when the caller passes the baseVersion it read, a
+  // mismatch means the file changed underneath (e.g. the human saved an edit in
+  // the viewer since the AI read it). Refuse to clobber unless force:true (OURS);
+  // the caller should otherwise re-read and re-apply (THEIRS). Identical content
+  // is never a conflict. No baseVersion → unchecked write (back-compat).
+  if (opts.baseVersion && opts.force !== true) {
+    const currentBytes = fs.readFileSync(abs);
+    const currentVersion = versionOf(currentBytes);
+    if (opts.baseVersion !== currentVersion && !currentBytes.equals(nextBytes)) {
+      const err = new Error(
+        `conflict: ${relPath(abs)} changed on disk since version ${opts.baseVersion} (now ${currentVersion}). ` +
+        'Re-read it with slidey_read_spec and re-apply your change (THEIRS), or pass force:true to overwrite (OURS).',
+      );
+      err.code = 'ESPECCONFLICT';
+      err.currentVersion = currentVersion;
+      throw err;
+    }
+  }
+  fs.writeFileSync(abs, nextBytes);
+  return { path: relPath(abs), bytes: Buffer.byteLength(body), mtimeMs: fs.statSync(abs).mtimeMs, version: versionOf(nextBytes) };
 }
 
 function cloneSpecValue(value) {
@@ -573,17 +596,21 @@ const TOOLS = [
   },
   {
     name: 'slidey_write_spec',
-    description: 'Replace an editable Slidey spec with a full JSON object. New decks should use the .slidey.json extension (e.g. my-deck.slidey.json).',
+    description: 'Replace an editable Slidey spec with a full JSON object. New decks should use the .slidey.json extension (e.g. my-deck.slidey.json). Pass the `version` from slidey_read_spec as baseVersion so a concurrent edit (e.g. the human editing in the viewer) is reported as a conflict instead of being clobbered; resolve with force:true to overwrite (OURS) or re-read and re-apply (THEIRS).',
     inputSchema: toolInputSchema({
       path: { type: 'string', description: 'Workspace-relative path; use the .slidey.json extension for new decks.' },
       spec: { type: 'object' },
+      baseVersion: { type: 'string', description: 'Optional content version from the last slidey_read_spec. A mismatch aborts the write as a conflict.' },
+      force: { type: 'boolean', description: 'Overwrite even if the file changed since baseVersion (OURS). Defaults to false.' },
     }, ['path', 'spec']),
   },
   {
     name: 'slidey_patch_spec',
-    description: 'Edit an editable .slidey.json spec with JSON Patch operations: add, replace, remove, and test.',
+    description: 'Edit an editable .slidey.json spec with JSON Patch operations: add, replace, remove, and test. Patches apply to the freshest on-disk content, so concurrent edits are preserved; pass baseVersion to also fail loudly if the file changed since you last read it.',
     inputSchema: toolInputSchema({
       path: { type: 'string' },
+      baseVersion: { type: 'string', description: 'Optional content version from the last slidey_read_spec. A mismatch aborts the patch as a conflict.' },
+      force: { type: 'boolean', description: 'Apply even if the file changed since baseVersion (OURS). Defaults to false.' },
       operations: {
         type: 'array',
         items: {
@@ -746,21 +773,27 @@ async function callTool(name, args = {}) {
       return okResult({ root: CONFIG.root, children: buildTree(CONFIG.root) });
 
     case 'slidey_read_spec': {
-      const { abs, raw, spec, generated, editable } = readSpecFile(args.path);
-      return okResult({ path: relPath(abs), generated, editable: editable, raw: generated ? undefined : raw, spec });
+      const { abs, raw, spec, generated, editable, version } = readSpecFile(args.path);
+      return okResult({ path: relPath(abs), generated, editable: editable, raw: generated ? undefined : raw, spec, version });
     }
 
     case 'slidey_write_spec': {
-      const written = writeSpecFile(args.path, args.spec);
+      const written = writeSpecFile(args.path, args.spec, { baseVersion: args.baseVersion, force: args.force });
       const validation = validateSpec(args.spec, { specPath: safeResolve(args.path) });
       return okResult({ ok: validation.valid, written, validation });
     }
 
     case 'slidey_patch_spec': {
-      const { abs, spec } = readSpecFile(args.path);
+      const { abs, spec, version } = readSpecFile(args.path);
       ensureEditable(abs);
       const patched = applyJsonPatch(spec, args.operations);
-      const written = writeSpecFile(args.path, patched);
+      // Guard the just-read version so an interleaving write between this read
+      // and our write is caught (force:true overrides). Patches still apply to
+      // the freshest on-disk content, so they incorporate concurrent edits.
+      const written = writeSpecFile(args.path, patched, {
+        baseVersion: args.baseVersion || version,
+        force: args.force,
+      });
       const validation = validateSpec(patched, { specPath: abs });
       return okResult({ ok: validation.valid, written, validation, spec: patched });
     }

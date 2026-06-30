@@ -765,8 +765,14 @@ watch(() => {
 const stale = ref(false);            // on-disk version differs from the loaded one
 const reloadError = ref('');         // transient toast when a reload attempt fails
 const reloading = ref(false);
+// Save conflict (concurrent edit): set when the server rejects a save because
+// the file changed on disk since we loaded it. Holds the on-disk version so the
+// user can resolve it as OURS (overwrite) or THEIRS (discard local + reload).
+const conflict = ref(null);          // { theirsSpec, theirsVersion } | null
 let loadedMtime = 0;                 // mtime of the spec currently rendered
 let latestMtime = 0;                 // most recent mtime observed on disk
+let loadedVersion = '';              // content version of the spec currently rendered
+let latestVersion = '';              // most recent content version observed on disk
 let pollTimer = null;
 let errTimer = null;
 const POLL_MS = 1500;
@@ -887,7 +893,9 @@ async function openPath(rel, restore, deckId) {
     activePath.value = rel;
     // Fresh file → reset the live-reload watch to this version.
     loadedMtime = latestMtime = data.mtimeMs || 0;
+    loadedVersion = latestVersion = data.version || '';
     stale.value = false;
+    conflict.value = null;
     clearReloadError();
     dirty.value = false;
     saveError.value = '';
@@ -975,10 +983,15 @@ async function pollMtime() {
   try {
     const r = await fetch(`/api/stat?path=${encodeURIComponent(activePath.value)}`);
     if (!r.ok) return;
-    const { mtimeMs } = await r.json();
+    const { mtimeMs, version } = await r.json();
     if (!mtimeMs) return;
     latestMtime = mtimeMs;
-    if (loadedMtime && mtimeMs !== loadedMtime) {
+    latestVersion = version || '';
+    // Compare content version when the server provides one (an identical-content
+    // rewrite bumps mtime but not version, so it shouldn't read as stale); fall
+    // back to mtime for older servers.
+    const changed = version ? (loadedVersion && version !== loadedVersion) : (loadedMtime && mtimeMs !== loadedMtime);
+    if (changed) {
       stale.value = true;
       // Embedded preview: there's no sidebar reload pill, so refresh in place —
       // unless the user has unsaved in-place edits, in which case auto-reloading
@@ -1008,13 +1021,16 @@ async function reloadActive() {
     const base = data.assetBase || new URL(`/workspace/${data.dir ? data.dir + '/' : ''}`, window.location.href).href;
     await loadSpec(data.spec, base, restore, { deckId: activeDeckId.value, resetSession: true });   // swaps deck.value only on success
     loadedMtime = latestMtime = data.mtimeMs || latestMtime;
+    loadedVersion = latestVersion = data.version || latestVersion;
     stale.value = false;
+    conflict.value = null;
   } catch (err) {
     // Keep the current version on screen and continue.
     reloadError.value = `Reload failed — kept the previous version. ${String(err.message || err)}`;
     // Acknowledge the broken revision so we stop re-prompting for it; a further
     // edit (newer mtime) re-arms the stale flag on the next poll.
     loadedMtime = latestMtime;
+    loadedVersion = latestVersion;
     stale.value = false;
     errTimer = setTimeout(clearReloadError, 8000);
   } finally {
@@ -1147,20 +1163,37 @@ function clearDeckClickSuppression() {
   suppressDeckNavClick.value = false;
 }
 
-async function saveActive() {
+// Save the in-memory spec. `force` overwrites a concurrent on-disk change
+// (OURS resolution); otherwise the server rejects a stale base with 409 and we
+// raise the conflict bar so the user can choose OURS or THEIRS.
+async function saveActive(force = false) {
   if (!activePath.value || !sourceSpec.value || saving.value || !activeViewEditable.value) return;
+  // Strict: Save is bound as `@click="saveActive"`, so a click event must not be
+  // mistaken for force — only an explicit `true` (the OURS path) overwrites.
+  const forceWrite = force === true;
   saving.value = true;
   saveError.value = '';
   try {
     const res = await fetch(`/api/spec?path=${encodeURIComponent(activePath.value)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ spec: sourceSpec.value }),
+      body: JSON.stringify({ spec: sourceSpec.value, baseVersion: loadedVersion, force: forceWrite }),
     });
     const data = await res.json();
+    if (res.status === 409 && data.conflict) {
+      // Someone else wrote this file since we loaded it. Hold their version and
+      // let the user resolve; don't lose either side silently.
+      conflict.value = { theirsSpec: data.current && data.current.spec, theirsVersion: data.current && data.current.version };
+      latestVersion = (data.current && data.current.version) || latestVersion;
+      latestMtime = (data.current && data.current.mtimeMs) || latestMtime;
+      stale.value = true;
+      return;
+    }
     if (!res.ok || data.error) throw new Error(data.error || `${res.status} saving ${activePath.value}`);
     loadedMtime = latestMtime = data.mtimeMs || latestMtime;
+    loadedVersion = latestVersion = data.version || loadedVersion;
     stale.value = false;
+    conflict.value = null;
     dirty.value = false;
     sessionSpec.value = cloneSpec(sourceSpec.value);
   } catch (err) {
@@ -1168,6 +1201,18 @@ async function saveActive() {
   } finally {
     saving.value = false;
   }
+}
+
+// OURS — keep my edits, overwrite the concurrent on-disk version.
+async function resolveConflictOurs() {
+  conflict.value = null;
+  await saveActive(true);
+}
+
+// THEIRS — discard my edits and adopt the on-disk version.
+async function resolveConflictTheirs() {
+  conflict.value = null;
+  await reloadActive();
 }
 
 async function revertActive() {
@@ -1622,6 +1667,33 @@ onUnmounted(() => {
       </div>
     </section>
   </nav>
+
+  <!-- Save conflict: the file changed on disk (e.g. an AI edit) while you had
+       unsaved changes. Resolve by keeping yours or taking the on-disk version —
+       neither side is discarded without a choice. -->
+  <div v-if="conflict" class="slidey-conflict" role="alertdialog" aria-label="Save conflict">
+    <div class="slidey-conflict-icon">⚠</div>
+    <div class="slidey-conflict-body">
+      <div class="slidey-conflict-title">This deck changed on disk while you were editing</div>
+      <div class="slidey-conflict-msg">Saving now would overwrite the other change. Keep your version, or discard your edits and load the on-disk one.</div>
+    </div>
+    <div class="slidey-conflict-actions">
+      <button
+        type="button"
+        class="slidey-conflict-ours"
+        :disabled="saving || reloading"
+        title="Overwrite the on-disk version with your edits"
+        @click.stop="resolveConflictOurs"
+      >Keep mine</button>
+      <button
+        type="button"
+        class="slidey-conflict-theirs"
+        :disabled="saving || reloading"
+        title="Discard your edits and load the version on disk"
+        @click.stop="resolveConflictTheirs"
+      >Use on-disk</button>
+    </div>
+  </div>
 
   <DeckHost />
   <NavController
@@ -2473,6 +2545,38 @@ body.slidey-workspace.slidey-edit-mode .slidey-collection-nav {
     grid-template-columns: 64px minmax(0, 1fr);
   }
 }
+
+/* Save-conflict bar — concurrent edit detected; force an OURS/THEIRS choice. */
+.slidey-conflict {
+  position: fixed;
+  top: 16px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 2300;
+  max-width: min(720px, 92vw);
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid #b06104;
+  border-radius: 10px;
+  background: #2a1d04;
+  color: #f6dca0;
+  font-family: 'Courier New', monospace;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+}
+.slidey-conflict-icon { color: #e3b341; font-size: 18px; line-height: 1.3; flex: none; }
+.slidey-conflict-body { flex: 1 1 auto; min-width: 0; }
+.slidey-conflict-title { font-weight: bold; font-size: 13px; margin-bottom: 4px; }
+.slidey-conflict-msg { font-size: 12px; line-height: 1.45; color: #d6bd84; overflow-wrap: anywhere; }
+.slidey-conflict-actions { display: flex; gap: 8px; flex: none; align-self: center; }
+.slidey-conflict-actions button {
+  border-radius: 7px;
+  padding: 6px 14px; font-size: 12px; font-weight: bold;
+  font-family: inherit; cursor: pointer; border: 1px solid transparent;
+}
+.slidey-conflict-actions button:disabled { cursor: default; opacity: 0.6; }
+.slidey-conflict-ours { background: #1f6feb; color: #fff; }
+.slidey-conflict-ours:hover:not(:disabled) { background: #388bfd; }
+.slidey-conflict-theirs { background: transparent; border-color: #6e7681; color: #c9d1d9; }
+.slidey-conflict-theirs:hover:not(:disabled) { border-color: #f0883e; color: #f0883e; }
 
 /* ── Inline (in-place) text editing — only in edit mode ────────────────────── */
 /* Hover affordance on anything click-to-editable. */

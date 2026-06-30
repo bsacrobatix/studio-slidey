@@ -29,6 +29,7 @@ const { execFileSync, spawn } = require('child_process');
 const { isRrwebFile, rrwebSpecForFile, readSpecOrRrweb } = require('./rrweb-viewer');
 const { normalizeDeckDefinitions, SOURCE_DECK_ID } = require('./collections');
 const { handleNarrationPreviewRequest } = require('./narration-preview');
+const { versionOf } = require('./spec-version');
 
 const ROOT_DIR = path.resolve(__dirname, '..');      // repo root (has dist/, package.json)
 const DIST_DIR = path.join(ROOT_DIR, 'dist');         // `npm run build:web` output
@@ -375,6 +376,7 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
       const abs = safeResolve(workspaceRoot, rel);
       if (!abs || !fs.existsSync(abs)) return sendJSON(res, 404, { error: `not found: ${rel}` });
       try {
+        const bytes = fs.readFileSync(abs);
         const mtimeMs = fs.statSync(abs).mtimeMs;
         const spec = /\.jsonl$/i.test(abs)
           ? require('./trace').buildSpecFromFile(abs)
@@ -385,6 +387,9 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
           spec,
           dir: dir === '.' ? '' : dir,
           mtimeMs,
+          // Content version the editor hands back on save so a concurrent write
+          // (e.g. the AI editing the same file) can't be silently clobbered.
+          version: versionOf(bytes),
           editable,
         });
       } catch (err) {
@@ -411,8 +416,32 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
           return sendJSON(res, 400, { error: 'spec must have a non-empty "scenes" array' });
         }
         const body = JSON.stringify(payload.spec, null, 2) + '\n';
-        fs.writeFileSync(abs, body, 'utf8');
-        return sendJSON(res, 200, { ok: true, mtimeMs: fs.statSync(abs).mtimeMs });
+        const nextBytes = Buffer.from(body, 'utf8');
+        // Optimistic concurrency: if the caller loaded version X but the file is
+        // now version Y, someone else wrote in between. Refuse the blind
+        // overwrite and return the on-disk version so the client can resolve it
+        // as OURS (resend with force) or THEIRS (adopt `current.spec`). An
+        // identical-content save is never a conflict; a save with no baseVersion
+        // (older client) keeps the previous blind-write behaviour.
+        const currentBytes = fs.readFileSync(abs);
+        const currentVersion = versionOf(currentBytes);
+        const baseVersion = typeof payload.baseVersion === 'string' ? payload.baseVersion : null;
+        if (
+          baseVersion &&
+          baseVersion !== currentVersion &&
+          payload.force !== true &&
+          !currentBytes.equals(nextBytes)
+        ) {
+          let currentSpec = null;
+          try { currentSpec = JSON.parse(currentBytes.toString('utf8')); } catch (_) { /* leave null */ }
+          return sendJSON(res, 409, {
+            error: 'conflict: this deck changed on disk since you loaded it',
+            conflict: true,
+            current: { spec: currentSpec, version: currentVersion, mtimeMs: fs.statSync(abs).mtimeMs },
+          });
+        }
+        fs.writeFileSync(abs, nextBytes);
+        return sendJSON(res, 200, { ok: true, mtimeMs: fs.statSync(abs).mtimeMs, version: versionOf(nextBytes) });
       } catch (err) {
         return sendJSON(res, 400, { error: String(err.message || err) });
       }
@@ -464,7 +493,11 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
       const abs = safeResolve(workspaceRoot, rel);
       if (!abs || !fs.existsSync(abs)) return sendJSON(res, 404, { error: `not found: ${rel}` });
       try {
-        return sendJSON(res, 200, { mtimeMs: fs.statSync(abs).mtimeMs });
+        const st = fs.statSync(abs);
+        // Cheap mtime probe still gates the work, but we also return the content
+        // version so the viewer only flags a real change (and not an identical
+        // rewrite that merely bumped mtime).
+        return sendJSON(res, 200, { mtimeMs: st.mtimeMs, version: versionOf(fs.readFileSync(abs)) });
       } catch (err) {
         return sendJSON(res, 400, { error: String(err.message || err) });
       }
