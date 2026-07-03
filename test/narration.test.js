@@ -8,7 +8,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { applyPronunciations, edgeTtsAvailable, generateOne, getAudioDuration } = require('../src/narration');
+const {
+  applyPronunciations,
+  edgeTtsAvailable,
+  generateOne,
+  getAudioDuration,
+  hasNarrationText,
+} = require('../src/narration');
 
 const DICT = {
   'Anthropic': 'an throp ik',
@@ -61,9 +67,9 @@ test('passthrough when no dictionary or empty text', () => {
 
 test('edgeTtsAvailable returns a boolean and never throws on a missing binary', () => {
   // The preflight must be total: whether or not edge-tts is installed, it
-  // resolves to a plain boolean so the caller can degrade to a silent video
-  // instead of crashing. We can't assert the value (host-dependent), only the
-  // contract: no throw, boolean result.
+  // resolves to a plain boolean so the caller can report a clean error instead
+  // of crashing. We can't assert the value (host-dependent), only the contract:
+  // no throw, boolean result.
   const orig = process.env.PATH;
   try {
     process.env.PATH = '/nonexistent-path-for-slidey-test';
@@ -98,4 +104,11 @@ test('getAudioDuration explains how to fix a missing ffprobe binary', () => {
   } finally {
     process.env.PATH = orig;
   }
+});
+
+test('hasNarrationText detects scene narration and timed cues', () => {
+  assert.strictEqual(hasNarrationText([{ narration: 'hello' }]), true);
+  assert.strictEqual(hasNarrationText([{ narrationCues: [{ text: 'hello' }] }]), true);
+  assert.strictEqual(hasNarrationText([{ narration: '' }, { narrationCues: [{ text: '' }] }]), false);
+  assert.strictEqual(hasNarrationText([{ title: 'silent' }]), false);
 });

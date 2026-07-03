@@ -24,7 +24,7 @@ const os   = require('os');
 const { mkdtemp } = require('./temp-path');
 
 const { framesToVideo }     = require('./assembler');
-const { generateAll: generateNarration, applyPronunciations, edgeTtsAvailable, DEFAULT_VOICE } = require('./narration');
+const { generateAll: generateNarration, applyPronunciations, edgeTtsAvailable, hasNarrationText, DEFAULT_VOICE } = require('./narration');
 const { estimateBoundaries } = require('./timing');
 const { validateSpec }       = require('./validate');
 const { resolveDeckSpec }    = require('./collections');
@@ -1054,23 +1054,23 @@ async function main() {
 
   // ── Narration (optional, only if any scene has a `narration` field) ────
   //
-  // Narration is additive: a video without it still plays. So a missing TTS
-  // tool, or a TTS failure, degrades to a silent video rather than discarding
-  // every frame we just rendered. The `edge-tts` preflight reports the missing
-  // dependency once, up front, with an install hint — instead of letting an
-  // ENOENT surface as a fatal stack trace after the render is already done.
+  // A deck with narration should not silently produce a no-audio MP4. If TTS is
+  // unavailable or fails, stop after rendering frames with a clear error so the
+  // operator can fix the voice/network/tooling issue and rerun.
   let audioSegments = null;
-  const hasNarration = sceneBoundaries.some(sb => sb.narration);
+  const hasNarration = hasNarrationText(sceneBoundaries);
   const audioDir = path.join(framesDir, 'audio');
   const narrationMeta = (spec.meta && spec.meta.narration) || {};
   const narrationVoice = narrationMeta.voice || DEFAULT_VOICE;
   if (hasNarration && !edgeTtsAvailable()) {
-    console.warn(
-      '[slidey] WARNING: narration skipped because edge-tts was not found on PATH.\n' +
-      '[slidey]          This deck has narration, so the exported MP4 will be SILENT.\n' +
-      '[slidey]          Install: pipx install edge-tts  # or: python3 -m pip install --user edge-tts\n' +
-      `[slidey]          Check:   slidey doctor --voice ${narrationVoice}`
+    console.error(
+      '[slidey] ERROR: narration requested, but `edge-tts` was not found on PATH.\n' +
+      '[slidey]        This deck has narration, so refusing to assemble a silent MP4.\n' +
+      '[slidey]        Install: pipx install edge-tts  # or: python3 -m pip install --user edge-tts\n' +
+      `[slidey]        Check:   slidey doctor --voice ${narrationVoice}`
     );
+    if (!keepFrames && ownFramesDir) fs.rmSync(framesDir, { recursive: true, force: true });
+    process.exit(1);
   } else if (hasNarration) {
     console.log('[slidey] Generating narration audio…');
     try {
@@ -1080,12 +1080,17 @@ async function main() {
         audioDir,
       );
     } catch (err) {
-      // Don't throw away a good render over narration: warn and assemble silent.
-      console.warn(
-        `[slidey] WARNING: narration failed. The exported MP4 will be SILENT.\n${err.message}\n` +
+      console.error(
+        `[slidey] ERROR: narration failed. Refusing to assemble a silent video for a narrated deck.\n${err.message}\n` +
         `[slidey] Check: slidey doctor --voice ${narrationVoice}`
       );
-      audioSegments = null;
+      if (!keepFrames && ownFramesDir) fs.rmSync(framesDir, { recursive: true, force: true });
+      process.exit(1);
+    }
+    if (!audioSegments || audioSegments.length === 0) {
+      console.error('[slidey] ERROR: narration requested, but no audio segments were generated.');
+      if (!keepFrames && ownFramesDir) fs.rmSync(framesDir, { recursive: true, force: true });
+      process.exit(1);
     }
   }
 

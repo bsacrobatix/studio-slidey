@@ -51,6 +51,13 @@ function edgeTtsAvailable() {
   }
 }
 
+function hasNarrationText(sceneBoundaries) {
+  return sceneBoundaries.some(sb => {
+    if (typeof sb.narration === 'string' && sb.narration) return true;
+    return Array.isArray(sb.narrationCues) && sb.narrationCues.some(cue => cue && cue.text);
+  });
+}
+
 /**
  * Apply phonetic respellings to spoken narration text.
  *
@@ -216,4 +223,13 @@ function generateAll(sceneBoundaries, fps, totalFrames, narrationMeta, audioDir)
   return segments;
 }
 
-module.exports = { generateAll, generateOne, synthesizeOne, getAudioDuration, applyPronunciations, edgeTtsAvailable, DEFAULT_VOICE };
+module.exports = {
+  generateAll,
+  generateOne,
+  synthesizeOne,
+  getAudioDuration,
+  applyPronunciations,
+  edgeTtsAvailable,
+  hasNarrationText,
+  DEFAULT_VOICE,
+};
