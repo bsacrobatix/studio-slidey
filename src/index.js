@@ -28,6 +28,7 @@ const { generateAll: generateNarration, applyPronunciations, edgeTtsAvailable, D
 const { estimateBoundaries } = require('./timing');
 const { validateSpec }       = require('./validate');
 const { resolveDeckSpec }    = require('./collections');
+const { attachRuntimeThemePacks, stripRuntimeThemePacks } = require('./theme-packs');
 
 function generateFrames(...args) {
   return require('./renderer').generateFrames(...args);
@@ -226,6 +227,7 @@ if (args[0] === 'validate') {
     console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
     process.exit(1);
   }
+  spec = attachRuntimeThemePacks(spec, absIn);
   const resolvedDeck = resolveDeckSpec(spec, { deckId: deckLocal || 'source' });
   for (const line of resolvedDeck.warnings || []) console.warn(`[slidey] warning:${line}`);
   if (resolvedDeck.errors && resolvedDeck.errors.length) {
@@ -276,6 +278,7 @@ if (args[0] === 'bundle') {
       console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
       process.exit(1);
     }
+    spec = attachRuntimeThemePacks(spec, absIn);
     const deckIdxLocal = args.indexOf('--deck');
     const deckLocal = deckIdxLocal !== -1 ? args[deckIdxLocal + 1] : null;
     const resolvedDeck = resolveDeckSpec(spec, { deckId: deckLocal });
@@ -834,6 +837,7 @@ async function main() {
     console.error('[slidey] ERROR: spec must have a non-empty "scenes" array');
     process.exit(1);
   }
+  spec = attachRuntimeThemePacks(spec, absInput);
 
   // ── JSON Schema validation (always; exits on failure) ─────────────────────
   {
@@ -871,7 +875,7 @@ async function main() {
   if (fromTrace && !wantsList && outputPath && /\.json$/i.test(outputPath)) {
     const absOut = path.resolve(outputPath);
     fs.mkdirSync(path.dirname(absOut), { recursive: true });
-    fs.writeFileSync(absOut, JSON.stringify(spec, null, 2) + '\n', 'utf-8');
+    fs.writeFileSync(absOut, JSON.stringify(stripRuntimeThemePacks(spec), null, 2) + '\n', 'utf-8');
     console.log(`[slidey] Spec written → ${absOut}  (${spec.scenes.length} scenes)`);
     process.exit(0);
   }

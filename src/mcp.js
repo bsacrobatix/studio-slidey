@@ -16,6 +16,7 @@ const { runCheck } = require('./check');
 const { estimateBoundaries } = require('./timing');
 const { tempRoot } = require('./temp-path');
 const { versionOf } = require('./spec-version');
+const { attachRuntimeThemePacks, loadThemePacks, stripRuntimeThemePacks } = require('./theme-packs');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const RENDER_BUNDLE = path.join(ROOT_DIR, 'dist-render', 'render.html');
@@ -154,7 +155,7 @@ function fallbackLayoutGallery() {
 }
 
 const LAYOUT_GUIDE_BUILD = buildLayoutGalleryFromGuide(loadLayoutGuideDeck());
-const LAYOUT_GALLERY = LAYOUT_GUIDE_BUILD.layouts.length
+const BUILTIN_LAYOUT_GALLERY = LAYOUT_GUIDE_BUILD.layouts.length
   ? LAYOUT_GUIDE_BUILD.layouts
   : fallbackLayoutGallery();
 
@@ -210,7 +211,8 @@ function readSpecFile(inputPath) {
   const abs = requireSpecPath(inputPath);
   const buf = fs.readFileSync(abs);
   const raw = buf.toString('utf8');
-  const spec = /\.jsonl$/i.test(abs) ? require('./trace').buildSpecFromFile(abs) : JSON.parse(raw);
+  const parsedSpec = /\.jsonl$/i.test(abs) ? require('./trace').buildSpecFromFile(abs) : JSON.parse(raw);
+  const spec = attachRuntimeThemePacks(parsedSpec, abs, { workspaceRoot: CONFIG.root });
   const generated = /\.jsonl$/i.test(abs);
   // Content version: hand this back to writeSpecFile as baseVersion so a write
   // built from a stale read can't silently clobber a concurrent edit.
@@ -227,7 +229,7 @@ function writeSpecFile(inputPath, spec, opts = {}) {
     ensureEditable(abs);
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new Error('spec must be a JSON object');
   if (!Array.isArray(spec.scenes) || spec.scenes.length === 0) throw new Error('spec must have a non-empty "scenes" array');
-  const body = JSON.stringify(spec, null, 2) + '\n';
+  const body = JSON.stringify(stripRuntimeThemePacks(spec), null, 2) + '\n';
   const nextBytes = Buffer.from(body, 'utf8');
   // Optimistic concurrency: when the caller passes the baseVersion it read, a
   // mismatch means the file changed underneath (e.g. the human saved an edit in
@@ -255,8 +257,25 @@ function cloneSpecValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function layoutById(layoutId) {
-  return LAYOUT_GALLERY.find((entry) => entry.id === layoutId) || null;
+function layoutGalleryForSpec(specPath = null, spec = {}) {
+  const byId = new Map(BUILTIN_LAYOUT_GALLERY.map((entry) => [entry.id, entry]));
+  for (const pack of loadThemePacks(specPath, spec, { workspaceRoot: CONFIG.root })) {
+    for (const layout of pack.layouts || []) {
+      byId.set(layout.id, {
+        id: layout.id,
+        label: layout.label || layoutGalleryLabel(layout.scene, layout.type, layout.variant),
+        type: layout.type || layout.scene.type,
+        variant: layout.variant || layout.scene.variant || '',
+        scene: layout.scene,
+        pack: pack.id || pack.name || '',
+      });
+    }
+  }
+  return [...byId.values()];
+}
+
+function layoutById(layoutId, specPath = null, spec = {}) {
+  return layoutGalleryForSpec(specPath, spec).find((entry) => entry.id === layoutId) || null;
 }
 
 function clampSceneIndex(index, sceneCount) {
@@ -628,8 +647,10 @@ const TOOLS = [
   },
   {
     name: 'slidey_layout_gallery',
-    description: 'List reusable scene layouts that can be inserted as new slides.',
-    inputSchema: toolInputSchema({}),
+    description: 'List reusable scene layouts that can be inserted as new slides. Pass path to include packs beside that deck.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string', description: 'Optional deck path used to resolve project-local Slidey packs.' },
+    }),
   },
   {
     name: 'slidey_add_slide',
@@ -797,23 +818,33 @@ async function callTool(name, args = {}) {
       const validation = validateSpec(patched, { specPath: abs });
       return okResult({ ok: validation.valid, written, validation, spec: patched });
     }
-    case 'slidey_layout_gallery':
+    case 'slidey_layout_gallery': {
+      let gallerySpecPath = null;
+      let gallerySpec = {};
+      if (args.path) {
+        const read = readSpecFile(args.path);
+        gallerySpecPath = read.abs;
+        gallerySpec = read.spec;
+      }
+      const gallery = layoutGalleryForSpec(gallerySpecPath, gallerySpec);
       return okResult({
-        layouts: LAYOUT_GALLERY.map((entry) => ({
+        layouts: gallery.map((entry) => ({
           id: entry.id,
           label: entry.label,
           type: entry.scene.type,
           scene: entry.scene,
+          pack: entry.pack,
         })),
       });
+    }
 
     case 'slidey_add_slide': {
       const { abs, spec } = readSpecFile(args.path);
       ensureEditable(abs);
       const scenes = cloneSpecValue(Array.isArray(spec.scenes) ? spec.scenes : []);
-      const layout = layoutById(args.layout);
+      const layout = layoutById(args.layout, abs, spec);
       if (!layout) {
-        const validLayouts = LAYOUT_GALLERY.map((entry) => entry.id).join(', ');
+        const validLayouts = layoutGalleryForSpec(abs, spec).map((entry) => entry.id).join(', ');
         throw new Error(`unknown layout "${args.layout}". use slidey_layout_gallery to list valid values: ${validLayouts}`);
       }
       const insertIndex = clampIndexForInsert(args.insertIndex, scenes.length);

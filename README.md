@@ -503,6 +503,8 @@ A spec is a JSON object with two top-level keys: `meta` (optional) and
 | `meta.narration.pronunciations` | `{ "term": "respelling" }` map fixing TTS mispronunciations. Applied whole-word and case-insensitively to the **spoken** audio only (spec/`--list` text is unchanged). Use lower-case pronounceable syllables for words; use spaced capitals only for acronyms you want spelled out. Avoid uncommon tokens like `soh` that some voices spell out. e.g. `{ "Anthropic": "an throp ik", "SDLC": "S D L C", "Kitsoki": "kit so key" }` |
 | `meta.context` | Key/value template variables interpolated into scene fields. Overridden by `--context` CLI flags |
 | `meta.personas` | Deck-wide cast registry for `personas` scenes. Each entry has `id`, plus optional `name`, `role`, `intro`, `color`, and `glyph` |
+| `meta.theme` | Theme name or `{ name, background, fontFamily, colors, css }`. Built-ins include `rose-pine-moon`, `github-dark-default`, `one-dark-pro`, `dracula`, `ayu-dark`, `monokai-pro`, `night-owl`, `tokyo-night`, `palenight`, `synthwave-84`, and `atom-one-light` |
+| `meta.themePacks` | Optional array of pack JSON paths, resolved relative to the deck, or inline pack objects. Use this when a deck needs an explicit reusable theme/layout pack |
 
 A scene also takes a top-level `narration: "..."` string (any scene type). If
 **any** scene has `narration`, edge-tts is invoked and the resulting audio is
@@ -511,6 +513,47 @@ muxed onto the video, with each segment starting at that scene's start frame.
 Scenes also accept `hold: <frames>` to extend the post-reveal dwell. `30
 frames = 1s` at default fps. The default hold per scene type lives in
 `timing.js` (`narrative_hold`, `diagram_hold`, etc.).
+
+### Theme and layout packs
+
+Slidey discovers reusable packs at render/view time, so a project can add color
+schemes or layout templates without rebuilding Slidey. Put JSON files in any of:
+
+- `.slidey/packs/*.json`
+- `.slidey/theme-packs/*.json`
+- `.slidey/template-packs/*.json`
+- `slidey-packs/*.json`
+- `theme-packs/*.json`
+- `slidey.packs.json`, `slidey.theme-pack.json`, or `slidey.template-pack.json`
+
+Pack shape:
+
+```json
+{
+  "id": "my-project",
+  "themes": {
+    "my-project": {
+      "background": "#101820",
+      "colors": {
+        "base": "#101820",
+        "surface": "#162333",
+        "text": "#f6f7f9",
+        "accent": "#58a6ff"
+      }
+    }
+  },
+  "layouts": [
+    {
+      "id": "project-proof",
+      "label": "Project Proof",
+      "scene": { "type": "title", "title": "Proof" }
+    }
+  ]
+}
+```
+
+The web editor and `slidey_layout_gallery` include pack layouts. `slidey_add_slide`
+can insert them by id.
 
 ### Scene types
 

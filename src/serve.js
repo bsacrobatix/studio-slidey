@@ -30,6 +30,7 @@ const { isRrwebFile, rrwebSpecForFile, readSpecOrRrweb } = require('./rrweb-view
 const { normalizeDeckDefinitions, SOURCE_DECK_ID } = require('./collections');
 const { handleNarrationPreviewRequest } = require('./narration-preview');
 const { versionOf } = require('./spec-version');
+const { attachRuntimeThemePacks, stripRuntimeThemePacks } = require('./theme-packs');
 
 const ROOT_DIR = path.resolve(__dirname, '..');      // repo root (has dist/, package.json)
 const DIST_DIR = path.join(ROOT_DIR, 'dist');         // `npm run build:web` output
@@ -378,9 +379,10 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
       try {
         const bytes = fs.readFileSync(abs);
         const mtimeMs = fs.statSync(abs).mtimeMs;
-        const spec = /\.jsonl$/i.test(abs)
+        const parsedSpec = /\.jsonl$/i.test(abs)
           ? require('./trace').buildSpecFromFile(abs)
           : readSpecOrRrweb(abs);
+        const spec = attachRuntimeThemePacks(parsedSpec, abs, { workspaceRoot });
         const dir = path.dirname(rel).replace(/\\/g, '/');
         const editable = isEditableSpec(abs);
         return sendJSON(res, 200, {
@@ -415,7 +417,7 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
         if (!Array.isArray(payload.spec.scenes) || !payload.spec.scenes.length) {
           return sendJSON(res, 400, { error: 'spec must have a non-empty "scenes" array' });
         }
-        const body = JSON.stringify(payload.spec, null, 2) + '\n';
+        const body = JSON.stringify(stripRuntimeThemePacks(payload.spec), null, 2) + '\n';
         const nextBytes = Buffer.from(body, 'utf8');
         // Optimistic concurrency: if the caller loaded version X but the file is
         // now version Y, someone else wrote in between. Refuse the blind

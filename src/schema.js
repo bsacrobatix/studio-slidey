@@ -332,6 +332,25 @@ const SCHEMA = {
           ],
           description: 'Optional deck theme; imported Marp themes are preserved here when supported',
         },
+        themePacks: {
+          type: 'array',
+          description: 'Reusable Slidey pack references. String entries resolve to JSON files relative to the spec; inline objects can define themes and layouts directly.',
+          items: {
+            oneOf: [
+              { type: 'string' },
+              {
+                type: 'object',
+                additionalProperties: true,
+                properties: {
+                  id: { type: 'string' },
+                  name: { type: 'string' },
+                  themes: { type: 'object', additionalProperties: true },
+                  layouts: { type: 'array', items: { type: 'object', additionalProperties: true } },
+                },
+              },
+            ],
+          },
+        },
       },
     },
     library: {

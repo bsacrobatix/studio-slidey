@@ -75,8 +75,7 @@ function buildLayoutGalleryFromGuide(scenes) {
 }
 
 const LAYOUT_GUIDE_BUILD = buildLayoutGalleryFromGuide(layoutGalleryDeck?.scenes || []);
-const LAYOUT_GALLERY = LAYOUT_GUIDE_BUILD.layouts.length ? LAYOUT_GUIDE_BUILD.layouts : LAYOUT_GALLERY_FALLBACK;
-const LAYOUT_GALLERY_MAP = new Map(LAYOUT_GALLERY.map((item) => [item.id, item]));
+const BUILTIN_LAYOUT_GALLERY = LAYOUT_GUIDE_BUILD.layouts.length ? LAYOUT_GUIDE_BUILD.layouts : LAYOUT_GALLERY_FALLBACK;
 const layoutGalleryIntegrity = computed(() => {
   const messages = [];
   if (!Array.isArray(layoutGalleryDeck?.scenes)) messages.push('layout guide deck missing or unreadable');
@@ -91,7 +90,7 @@ const layoutGalleryIntegrity = computed(() => {
 });
 
 function findGalleryLayout(id) {
-  return LAYOUT_GALLERY_MAP.get(id);
+  return layoutGalleryMap.value.get(id);
 }
 
 const SKIP_KEYS = new Set([
@@ -108,11 +107,33 @@ const sceneIndex = computed(() => props.deck.state.sceneIndex);
 const scene = computed(() => (props.spec.scenes || [])[sceneIndex.value] || {});
 const canSave = computed(() => /\.json$/i.test(props.activePath || ''));
 const semanticMessages = reactive({});
-const selectedLayout = ref(LAYOUT_GALLERY[0]?.id || 'title');
+const selectedLayout = ref(BUILTIN_LAYOUT_GALLERY[0]?.id || 'title');
 const showLayoutGallery = ref(false);
 const canRevert = computed(() => canSave.value && props.dirty && !props.saving);
 const sceneCount = computed(() => Array.isArray(props.spec.scenes) ? props.spec.scenes.length : 0);
-const selectedGallery = computed(() => LAYOUT_GALLERY.find(item => item.id === selectedLayout.value) || LAYOUT_GALLERY[0]);
+const layoutGallery = computed(() => {
+  const byId = new Map(BUILTIN_LAYOUT_GALLERY.map((item) => [item.id, item]));
+  const packs = Array.isArray(props.spec?.meta?._themePacks) ? props.spec.meta._themePacks : [];
+  for (const pack of packs) {
+    const layouts = Array.isArray(pack && pack.layouts) ? pack.layouts : [];
+    for (const layout of layouts) {
+      if (!layout || !layout.scene || typeof layout.scene !== 'object') continue;
+      const id = String(layout.id || layout.scene.type || '').trim();
+      if (!id) continue;
+      byId.set(id, {
+        id,
+        label: layout.label || layoutGalleryLabel(layout.scene, layout.type || layout.scene.type, layout.variant || layout.scene.variant || ''),
+        type: layout.type || layout.scene.type,
+        variant: layout.variant || layout.scene.variant || '',
+        scene: layout.scene,
+        pack: pack.id || pack.name || '',
+      });
+    }
+  }
+  return [...byId.values()];
+});
+const layoutGalleryMap = computed(() => new Map(layoutGallery.value.map((item) => [item.id, item])));
+const selectedGallery = computed(() => layoutGallery.value.find(item => item.id === selectedLayout.value) || layoutGallery.value[0]);
 const canDuplicateCurrent = computed(() => canSave.value && scene.value.type);
 const canDeleteCurrent = computed(() => canSave.value && sceneCount.value > 1);
 const canMoveCurrentUp = computed(() => canSave.value && sceneIndex.value > 0);
@@ -120,7 +141,7 @@ const canMoveCurrentDown = computed(() => canSave.value && sceneIndex.value + 1 
 
 function openLayoutGallery() {
   if (!canSave.value) return;
-  selectedLayout.value = selectedGallery.value?.id || LAYOUT_GALLERY[0]?.id || 'title';
+  selectedLayout.value = selectedGallery.value?.id || layoutGallery.value[0]?.id || 'title';
   showLayoutGallery.value = true;
 }
 
@@ -754,7 +775,7 @@ function validatePythonByPattern(source) {
         </header>
         <div class="slidey-layout-grid">
           <button
-            v-for="item in LAYOUT_GALLERY"
+            v-for="item in layoutGallery"
             :key="item.id"
             class="slidey-layout-card"
             :class="{ 'is-active': item.id === selectedLayout }"

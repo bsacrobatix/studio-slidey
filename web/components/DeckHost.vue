@@ -67,7 +67,7 @@ watchEffect(() => {
   document.body.classList.toggle('mode-api', !pitch);
 });
 
-const activeTheme = computed(() => themeConfig(store.meta && store.meta.theme));
+const activeTheme = computed(() => themeConfig(store.meta && store.meta.theme, store.meta || {}));
 
 watchEffect(() => {
   const id = 'slidey-runtime-theme';

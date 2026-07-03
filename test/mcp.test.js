@@ -277,6 +277,45 @@ test('MCP slide-management tools add, duplicate, reorder, and remove', async (t)
   assert.equal(removePayload.sceneCount, 3);
 });
 
+test('MCP layout gallery includes project-local pack layouts', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-pack-'));
+  fs.mkdirSync(path.join(root, '.slidey', 'packs'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.slidey', 'packs', 'local.json'), JSON.stringify({
+    id: 'local-pack',
+    layouts: [
+      {
+        id: 'local-proof',
+        label: 'Local Proof',
+        scene: { type: 'title', title: 'Local proof' },
+      },
+    ],
+  }, null, 2) + '\n');
+  fs.writeFileSync(path.join(root, 'deck.slidey.json'), JSON.stringify({
+    meta: { mode: 'pitch' },
+    scenes: [{ type: 'title', title: 'Before' }],
+  }, null, 2) + '\n');
+
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+  await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+
+  const gallery = await server.send('tools/call', {
+    name: 'slidey_layout_gallery',
+    arguments: { path: 'deck.slidey.json' },
+  });
+  assert.ifError(gallery.error);
+  const payload = JSON.parse(gallery.result.content[0].text);
+  assert.ok(payload.layouts.some((entry) => entry.id === 'local-proof'));
+
+  const add = await server.send('tools/call', {
+    name: 'slidey_add_slide',
+    arguments: { path: 'deck.slidey.json', layout: 'local-proof' },
+  });
+  assert.ifError(add.error);
+  const addPayload = JSON.parse(add.result.content[0].text);
+  assert.equal(addPayload.scene.title, 'Local proof');
+});
+
 test('MCP validates an ABSOLUTE spec path outside the workspace root', async (t) => {
   // Regression: safeResolve() previously did path.resolve(root, './' + input),
   // which mangled an absolute path into `<root>/abs/...` → "spec not found".

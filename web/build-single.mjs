@@ -64,6 +64,9 @@ if (!spec || !Array.isArray(spec.scenes) || !spec.scenes.length) {
   console.error('[build-single] ERROR: spec must have a non-empty "scenes" array');
   process.exit(1);
 }
+const themePacks = await import('../src/theme-packs.js');
+const attachRuntimeThemePacks = themePacks.attachRuntimeThemePacks || themePacks.default.attachRuntimeThemePacks;
+const bundledSpec = attachRuntimeThemePacks(spec, specPath);
 
 // Embed local image/gif assets the spec references (resolved relative to the
 // spec file) as data URIs, so portable single-file decks render with no
@@ -94,7 +97,7 @@ function embedAsset(ref, label) {
   return `data:${mime};base64,${readFileSync(assetPath).toString('base64')}`;
 }
 
-for (const sc of spec.scenes) {
+for (const sc of bundledSpec.scenes) {
   for (const field of ['gif', 'src']) {
     if (!sc[field] || /^data:/.test(sc[field]) || /^https?:\/\//i.test(sc[field])) continue;
     if (field === 'src' && sc.type !== 'image') continue;
@@ -167,7 +170,7 @@ if (/<script\b[^>]*\bsrc=|<link\b[^>]*\brel="stylesheet"/.test(html)) {
 // 3. Embed the spec ahead of the app script so App.vue loads it without a fetch.
 //    JSON.stringify is HTML-safe except for a literal </script>; split the tag
 //    so the embedded JSON can never close the surrounding <script> early.
-const specJson = JSON.stringify(spec).replace(/<\/script>/gi, '<\\/script>');
+const specJson = JSON.stringify(bundledSpec).replace(/<\/script>/gi, '<\\/script>');
 const initialDeckJson = resolvedDeck.isCollection && !resolvedDeck.isSource
   ? JSON.stringify(resolvedDeck.deckId)
   : 'null';
@@ -183,6 +186,6 @@ writeFileSync(outPath, html);
 const sizeMB = (statSync(outPath).size / 1e6).toFixed(2);
 console.log(
   `[build-single] wrote ${outPath} (${sizeMB} MB, self-contained — ` +
-  `${spec.scenes.length} source scene(s), ${embeddedAssets} asset(s) embedded)`,
+  `${bundledSpec.scenes.length} source scene(s), ${embeddedAssets} asset(s) embedded)`,
 );
 console.log('[build-single] open it directly in a browser; no server needed.');
