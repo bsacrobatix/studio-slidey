@@ -389,7 +389,7 @@ demos, especially when chapters, annotations, trimming, or narration cues matter
 { "type": "kitsoki-tui",
   "title": "kitsoki run",
   "appTitle": "kitsoki · project onboarding",
-  "hints": ["onboard .    prepare this repo", "/help        list commands"],
+  "hints": ["/help        list commands", "/world       inspect current state"],
   "choicePrompt": "Start Kitsoki onboarding?",
   "menuItems": [
     { "label": "Start onboarding", "hint": "discover project, then ask before writes" },

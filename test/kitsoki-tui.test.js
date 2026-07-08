@@ -16,7 +16,7 @@ test('schema accepts a kitsoki-tui onboarding scene', () => {
     title: 'kitsoki run',
     appTitle: 'kitsoki · project onboarding',
     subtitle: 'v1.2.0 · local setup story',
-    hints: ['onboard .    prepare this repo', '/help        list commands'],
+    hints: ['/help        list commands', '/world       inspect current state'],
     status: 'session sess_42... · story onboarding · state intro',
     choicePrompt: 'Start Kitsoki onboarding?',
     menuItems: [

@@ -44,7 +44,6 @@ const footer = computed(() => scene.value.footer || '[↑/↓ move • Enter pic
 const hints = computed(() => {
   if (Array.isArray(scene.value.hints) && scene.value.hints.length) return scene.value.hints.slice(0, 5);
   return [
-    'onboard .    prepare this repo',
     '/help        list commands',
     '/world       inspect current state',
     '/quit        exit',
