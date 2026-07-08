@@ -101,6 +101,17 @@ function readCodexSlideyConfig() {
   return { command, args, cwd };
 }
 
+function readProjectMcpConfig() {
+  const configPath = path.join(REPO_ROOT, '.mcp.json');
+  const doc = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const server = doc.mcpServers && doc.mcpServers.slidey;
+  assert.ok(server, 'missing mcpServers.slidey in .mcp.json');
+  assert.equal(typeof server.command, 'string', 'slidey MCP command must be a string');
+  assert.ok(Array.isArray(server.args), 'slidey MCP args must be an array');
+  assert.ok(!JSON.stringify(server).includes('/Users/brad/code/slidey'), 'slidey MCP config must not reference the old checkout path');
+  return server;
+}
+
 test('MCP server exposes spec editing and validation over stdio', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-test-'));
   const specPath = path.join(root, 'deck.json');
@@ -299,6 +310,26 @@ test('Codex MCP config starts Slidey and lists tools', async (t) => {
     protocolVersion: '2024-11-05',
     capabilities: {},
     clientInfo: { name: 'slidey-mcp-test', version: '0' },
+  });
+  assert.ifError(init.error);
+  assert.equal(init.result.serverInfo.name, 'slidey-mcp');
+
+  const tools = await server.send('tools/list');
+  assert.ifError(tools.error);
+  const names = tools.result.tools.map((tool) => tool.name);
+  assert.ok(names.includes('slidey_workspace_tree'));
+  assert.ok(names.includes('slidey_doctor'));
+});
+
+test('project MCP config starts Slidey from the repo root', async (t) => {
+  const config = readProjectMcpConfig();
+  const server = startMcpProcess(config.command, config.args, { cwd: REPO_ROOT });
+  t.after(() => server.child.kill());
+
+  const init = await server.send('initialize', {
+    protocolVersion: '2024-11-05',
+    capabilities: {},
+    clientInfo: { name: 'slidey-project-mcp-test', version: '0' },
   });
   assert.ifError(init.error);
   assert.equal(init.result.serverInfo.name, 'slidey-mcp');
