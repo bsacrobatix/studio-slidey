@@ -53,6 +53,9 @@ export function stepsForScene(scene) {
         ...(s.caption ? ['mermaid_caption'] : [])];
     case 'terminal-gif':
       return ['termgif_frame', ...(s.caption ? ['termgif_caption'] : [])];
+    case 'kitsoki-tui':
+      return ['kitsokitui_frame', 'kitsokitui_welcome', 'kitsokitui_menu',
+        ...(s.caption ? ['kitsokitui_caption'] : [])];
     case 'stat':
       return ['stat_value', 'stat_label', ...(s.detail ? ['stat_detail'] : [])];
     case 'cta':
@@ -179,6 +182,7 @@ export function applyShow(scene, opts) {
     case 'diagram-svg':  slidey.showDiagramSvg(scene); break;
     case 'mermaid':      slidey.showMermaid(scene); break;
     case 'terminal-gif': slidey.showTerminalGif(scene, o.gifDataUri || ''); break;
+    case 'kitsoki-tui':  slidey.showKitsokiTui(scene); break;
     case 'stat':         slidey.showStat(scene); break;
     case 'cta':          slidey.showCta(scene); break;
     case 'trace':        slidey.showTrace(scene); break;

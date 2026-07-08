@@ -43,6 +43,13 @@ const TIMING = {
   termgif_caption:     20,
   termgif_hold:       360,  // 12.0 s default — covers one gif loop
 
+  // ── Kitsoki TUI scene ───────────────────────────────────────────
+  kitsokitui_frame:    20,
+  kitsokitui_welcome:  30,
+  kitsokitui_menu:     24,
+  kitsokitui_caption:  24,
+  kitsokitui_hold:    220,
+
   // ── Stat scene ──────────────────────────────────────────────────
   stat_value:          30,
   stat_label:          20,
@@ -283,6 +290,7 @@ function estimateScene(scene, opts = {}) {
       case 'diagram-svg':  return hold('diagramsvg_hold',  scene.hold);
       case 'mermaid':      return hold('mermaid_hold',     scene.hold);
       case 'terminal-gif': return hold('termgif_hold',     scene.hold);
+      case 'kitsoki-tui':  return hold('kitsokitui_hold',  scene.hold);
       case 'trace':        return hold('trace_hold',       scene.hold);
       case 'transcript': {
         const cards = (scene.cards || []).length;
@@ -352,6 +360,14 @@ function estimateScene(scene, opts = {}) {
     case 'terminal-gif':
       return T.termgif_frame + T.termgif_caption
            + hold('termgif_hold', scene.hold) + T.inter_scene;
+
+    case 'kitsoki-tui': {
+      let f = T.kitsokitui_frame + T.kitsokitui_welcome + T.kitsokitui_menu;
+      if (scene.caption) f += T.kitsokitui_caption;
+      f += hold('kitsokitui_hold', scene.hold);
+      f += T.inter_scene;
+      return f;
+    }
 
     case 'trace': {
       let f = T.trace_title;

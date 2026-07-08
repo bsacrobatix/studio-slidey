@@ -50,6 +50,9 @@ export function installAdapter() {
     },
     hideTerminalGif() { store.hidePitch(); store.gifDataUri = ''; },
 
+    showKitsokiTui(scene) { store.showScene('kitsoki-tui', scene); },
+    hideKitsokiTui() { store.hidePitch(); },
+
     showStat(scene) { store.showScene('stat', scene); },
     hideStat() { store.hidePitch(); },
 

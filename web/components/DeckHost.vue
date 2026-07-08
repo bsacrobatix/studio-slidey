@@ -12,6 +12,7 @@ import DiagramScene from './DiagramScene.vue';
 import DiagramSvgScene from './DiagramSvgScene.vue';
 import MermaidScene from './MermaidScene.vue';
 import TerminalGifScene from './TerminalGifScene.vue';
+import KitsokiTuiScene from './KitsokiTuiScene.vue';
 import StatScene from './StatScene.vue';
 import CtaScene from './CtaScene.vue';
 import TraceScene from './TraceScene.vue';
@@ -37,6 +38,7 @@ const PITCH_COMPONENTS = {
   'diagram-svg': DiagramSvgScene,
   mermaid: MermaidScene,
   'terminal-gif': TerminalGifScene,
+  'kitsoki-tui': KitsokiTuiScene,
   stat: StatScene,
   cta: CtaScene,
   trace: TraceScene,

@@ -485,6 +485,49 @@ const SCHEMA = {
               ...COMMON,
             },
           },
+          // ── kitsoki-tui ───────────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type'],
+            description: 'Static Kitsoki TUI welcome/onboarding screen with Mesa startup chrome and a selectable action menu.',
+            properties: {
+              type: { const: 'kitsoki-tui' },
+              title: { type: 'string', description: 'Terminal window title bar text' },
+              appTitle: { type: 'string', description: 'Welcome banner title, e.g. "kitsoki · project onboarding"' },
+              subtitle: { type: 'string', description: 'Welcome banner subtitle/version line' },
+              hints: {
+                type: 'array',
+                maxItems: 5,
+                items: { type: 'string' },
+                description: 'Command hint lines shown in the welcome block.',
+              },
+              status: { type: 'string', description: 'Session/state footer line' },
+              choicePrompt: { type: 'string', description: 'Menu prompt shown above the selectable rows.' },
+              menuItems: {
+                type: 'array',
+                maxItems: 6,
+                items: {
+                  oneOf: [
+                    { type: 'string' },
+                    {
+                      type: 'object',
+                      required: ['label'],
+                      properties: {
+                        label: { type: 'string' },
+                        hint: { type: 'string' },
+                      },
+                      additionalProperties: false,
+                    },
+                  ],
+                },
+                description: 'Selectable menu rows. The active row is marked with a caret.',
+              },
+              selectedIndex: { type: 'integer', minimum: 0, description: 'Zero-based selected menu row.' },
+              footer: { type: 'string', description: 'Menu keybinding footer.' },
+              caption: { type: 'string' },
+              ...COMMON,
+            },
+          },
           // ── cards ──────────────────────────────────────────────────────────
           {
             type: 'object',

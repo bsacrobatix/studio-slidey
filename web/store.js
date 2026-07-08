@@ -21,6 +21,11 @@ export const PITCH_REVEALS = {
   diagram_caption:   ['diagram-caption'],
   termgif_frame:     ['termgif-frame'],
   termgif_caption:   ['termgif-caption'],
+  // ── Kitsoki TUI ──
+  kitsokitui_frame:   ['kitsokitui-frame'],
+  kitsokitui_welcome: ['kitsokitui-welcome'],
+  kitsokitui_menu:    ['kitsokitui-menu'],
+  kitsokitui_caption: ['kitsokitui-caption'],
   stat_value:        ['stat-value'],
   stat_label:        ['stat-label'],
   stat_detail:       ['stat-detail'],

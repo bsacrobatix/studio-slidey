@@ -37,6 +37,7 @@ const SCENE_MODULES = {
   'diagram-svg':  require('./scenes/diagram-svg'),
   mermaid:        require('./scenes/mermaid'),
   'terminal-gif': require('./scenes/terminal-gif'),
+  'kitsoki-tui':  require('./scenes/kitsoki-tui'),
   trace:          require('./scenes/trace'),
   transcript:     require('./scenes/transcript'),
   thread:         require('./scenes/thread'),
