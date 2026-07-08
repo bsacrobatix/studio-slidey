@@ -23,11 +23,14 @@ const fs   = require('fs');
 const os   = require('os');
 const { mkdtemp } = require('./temp-path');
 
-const { generateFrames }    = require('./renderer');
 const { framesToVideo }     = require('./assembler');
 const { generateAll: generateNarration, applyPronunciations, edgeTtsAvailable } = require('./narration');
 const { estimateBoundaries } = require('./timing');
 const { validateSpec }       = require('./validate');
+
+function generateFrames(...args) {
+  return require('./renderer').generateFrames(...args);
+}
 
 // Calibrated speech rate for default Edge TTS voice (en-AU-NatashaNeural at
 // rate +0%). Measured across real narration: 1.7-2.3 wps depending on
