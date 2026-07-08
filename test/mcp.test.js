@@ -15,21 +15,25 @@ function startMcpProcess(command, args, opts = {}) {
     env: { ...process.env, ...(opts.env || {}) },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  return wrapMcpProcess(child);
+  return wrapMcpProcess(child, opts);
 }
 
 function startServer(root, opts = {}) {
   return startMcpProcess(process.execPath, [path.join(__dirname, '..', 'src', 'mcp.js'), '--root', root], {
     cwd: REPO_ROOT,
     env: opts.env,
+    requestTransport: opts.requestTransport,
   });
 }
 
-function wrapMcpProcess(child) {
+function wrapMcpProcess(child, opts = {}) {
   let out = Buffer.alloc(0);
   let nextId = 1;
   const pending = new Map();
-  function resolveMessage(message) {
+  const requestTransport = opts.requestTransport || 'jsonl';
+  const responseTransports = [];
+  function resolveMessage(message, transport) {
+    responseTransports.push(transport);
     const entry = pending.get(message.id);
     if (entry) {
       pending.delete(message.id);
@@ -51,7 +55,7 @@ function wrapMcpProcess(child) {
         const raw = out.slice(bodyStart, bodyStart + length).toString('utf8');
         out = out.slice(bodyStart + length);
         if (!raw.trim()) continue;
-        resolveMessage(JSON.parse(raw));
+        resolveMessage(JSON.parse(raw), 'framed');
         continue;
       }
       const lineEnd = out.indexOf('\n');
@@ -59,7 +63,7 @@ function wrapMcpProcess(child) {
       const raw = out.slice(0, lineEnd).toString('utf8');
       out = out.slice(lineEnd + 1);
       if (!raw.trim()) continue;
-      resolveMessage(JSON.parse(raw));
+      resolveMessage(JSON.parse(raw), 'jsonl');
     }
   });
   child.stderr.on('data', () => {});
@@ -72,7 +76,12 @@ function wrapMcpProcess(child) {
 
   function send(method, params = {}) {
     const id = nextId++;
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
+    if (requestTransport === 'framed') {
+      child.stdin.write(`Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`);
+    } else {
+      child.stdin.write(body + '\n');
+    }
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
       setTimeout(() => {
@@ -81,7 +90,7 @@ function wrapMcpProcess(child) {
     });
   }
 
-  return { child, send };
+  return { child, send, responseTransports };
 }
 
 function readCodexSlideyConfig() {
@@ -177,6 +186,28 @@ test('MCP server exposes spec editing and validation over stdio', async (t) => {
   assert.ifError(escape.error);
   assert.equal(escape.result.isError, true);
   assert.match(escape.result.content[0].text, /escapes workspace root/);
+});
+
+test('MCP responds with JSON lines for JSON-line clients', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-jsonl-'));
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+
+  const init = await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+  assert.ifError(init.error);
+  assert.equal(init.result.serverInfo.name, 'slidey-mcp');
+  assert.equal(server.responseTransports[0], 'jsonl');
+});
+
+test('MCP responds with Content-Length frames for framed clients', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-framed-'));
+  const server = startServer(root, { requestTransport: 'framed' });
+  t.after(() => server.child.kill());
+
+  const init = await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+  assert.ifError(init.error);
+  assert.equal(init.result.serverInfo.name, 'slidey-mcp');
+  assert.equal(server.responseTransports[0], 'framed');
 });
 
 test('MCP slide-management tools add, duplicate, reorder, and remove', async (t) => {

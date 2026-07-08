@@ -41,7 +41,7 @@ function ensureEditable(abs) {
 }
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-render', 'dist-web-single', '.git', '.worktrees']);
 
-// MCP uses stdout for framed JSON-RPC. Keep every existing Slidey diagnostic off
+// MCP uses stdout for JSON-RPC. Keep every existing Slidey diagnostic off
 // stdout so build/render logs cannot corrupt the protocol stream.
 console.log = (...args) => process.stderr.write(args.join(' ') + '\n');
 
@@ -1054,24 +1054,28 @@ async function handleRequest(message) {
   }
 }
 
-function writeMessage(message) {
+function writeMessage(message, transport = 'jsonl') {
   const body = JSON.stringify(message);
-  process.stdout.write(`Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`);
+  if (transport === 'framed') {
+    process.stdout.write(`Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`);
+    return;
+  }
+  process.stdout.write(`${body}\n`);
 }
 
 let buffer = Buffer.alloc(0);
-async function dispatchRawMessage(raw) {
+async function dispatchRawMessage(raw, transport) {
   if (!raw.trim()) return;
   let message;
   try {
     message = JSON.parse(raw);
   } catch (err) {
-    writeMessage({ jsonrpc: '2.0', id: null, error: { code: -32700, message: err.message } });
+    writeMessage({ jsonrpc: '2.0', id: null, error: { code: -32700, message: err.message } }, transport);
     return;
   }
   if (message.id === undefined || message.id === null) return;
   const response = await handleRequest(message);
-  if (response) writeMessage(response);
+  if (response) writeMessage(response, transport);
 }
 
 process.stdin.on('data', async (chunk) => {
@@ -1094,7 +1098,7 @@ process.stdin.on('data', async (chunk) => {
       if (buffer.length < bodyStart + length) return;
       const raw = buffer.slice(bodyStart, bodyStart + length).toString('utf8');
       buffer = buffer.slice(bodyStart + length);
-      await dispatchRawMessage(raw);
+      await dispatchRawMessage(raw, 'framed');
       continue;
     }
 
@@ -1102,7 +1106,7 @@ process.stdin.on('data', async (chunk) => {
     if (lineEnd === -1) return;
     const raw = buffer.slice(0, lineEnd).toString('utf8').trimEnd();
     buffer = buffer.slice(lineEnd + 1);
-    await dispatchRawMessage(raw);
+    await dispatchRawMessage(raw, 'jsonl');
   }
 });
 
