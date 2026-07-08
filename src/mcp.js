@@ -1055,7 +1055,8 @@ async function handleRequest(message) {
 }
 
 function writeMessage(message) {
-  process.stdout.write(JSON.stringify(message) + '\n');
+  const body = JSON.stringify(message);
+  process.stdout.write(`Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`);
 }
 
 let buffer = Buffer.alloc(0);

@@ -29,20 +29,37 @@ function wrapMcpProcess(child) {
   let out = Buffer.alloc(0);
   let nextId = 1;
   const pending = new Map();
+  function resolveMessage(message) {
+    const entry = pending.get(message.id);
+    if (entry) {
+      pending.delete(message.id);
+      entry.resolve(message);
+    }
+  }
   child.stdout.on('data', (chunk) => {
     out = Buffer.concat([out, chunk]);
     while (true) {
+      if (/^content-length:/i.test(out.slice(0, Math.min(out.length, 32)).toString('utf8'))) {
+        const headerEnd = out.indexOf('\r\n\r\n');
+        if (headerEnd === -1) return;
+        const header = out.slice(0, headerEnd).toString('utf8');
+        const match = header.match(/content-length:\s*(\d+)/i);
+        if (!match) throw new Error(`malformed Content-Length header: ${header}`);
+        const length = Number(match[1]);
+        const bodyStart = headerEnd + 4;
+        if (out.length < bodyStart + length) return;
+        const raw = out.slice(bodyStart, bodyStart + length).toString('utf8');
+        out = out.slice(bodyStart + length);
+        if (!raw.trim()) continue;
+        resolveMessage(JSON.parse(raw));
+        continue;
+      }
       const lineEnd = out.indexOf('\n');
       if (lineEnd === -1) return;
       const raw = out.slice(0, lineEnd).toString('utf8');
       out = out.slice(lineEnd + 1);
       if (!raw.trim()) continue;
-      const message = JSON.parse(raw);
-      const entry = pending.get(message.id);
-      if (entry) {
-        pending.delete(message.id);
-        entry.resolve(message);
-      }
+      resolveMessage(JSON.parse(raw));
     }
   });
   child.stderr.on('data', () => {});
