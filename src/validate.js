@@ -7,7 +7,7 @@ const { resolveAsset } = require('./assets');
 const VALID_TYPES = [
   'title', 'narrative', 'diagram', 'diagram-svg', 'mermaid', 'trace', 'transcript',
   'thread', 'stat', 'cta', 'terminal-gif', 'kitsoki-tui', 'cards', 'objectives', 'code', 'table', 'chart',
-  'mcp-drive', 'evidence', 'image', 'image-compare', 'book', 'meme', 'request',
+  'mcp-drive', 'evidence', 'image', 'image-compare', 'book', 'meme', 'request', 'video',
 ];
 
 let _validate;

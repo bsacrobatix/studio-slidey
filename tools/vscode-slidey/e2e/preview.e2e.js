@@ -12,6 +12,7 @@ const { mkdtemp } = require('../../../src/temp-path');
 const {
   handleApiRequest,
   handleSpecWrite,
+  readSpec,
   writeSpecDocument,
   rewriteViewerHtml,
 } = require('../src/extension');
@@ -168,6 +169,35 @@ test('writeSpecDocument routes through the VS Code editor model when available',
   assert.ok(calls.saved, 'saved the document');
   assert.ok(mtimeMs > 0);
   assert.deepEqual(JSON.parse(fs.readFileSync(abs, 'utf8')), spec);
+});
+
+test('VS Code preview API treats raw rrweb logs as read-only replay decks', () => {
+  const dir = mkdtemp('slidey-vscode-rrweb-');
+  try {
+    const rel = 'tour.rrweb.json';
+    const abs = path.join(dir, rel);
+    const events = [
+      { type: 4, data: { href: 'about:blank', width: 1280, height: 720 }, timestamp: 1 },
+      { type: 2, data: { node: { type: 0, childNodes: [] }, initialOffset: { left: 0, top: 0 } }, timestamp: 2 },
+    ];
+    fs.writeFileSync(abs, JSON.stringify({ schemaVersion: 1, events }), 'utf8');
+
+    const spec = readSpec(abs);
+    assert.equal(spec.scenes[0].rrweb, rel);
+
+    const got = handleApiRequest({ root: dir, openFile: rel }, { url: `/api/spec?path=${encodeURIComponent(rel)}`, method: 'GET' });
+    assert.equal(got.status, 200);
+    assert.equal(got.body.editable, false);
+    assert.equal(got.body.spec.scenes[0].type, 'video');
+    assert.equal(got.body.spec.scenes[0].rrweb, rel);
+
+    const clone = handleApiRequest({ root: dir, openFile: rel }, { url: `/api/clone-spec?path=${encodeURIComponent(rel)}`, method: 'POST', body: '{}' });
+    assert.equal(clone.status, 200);
+    assert.match(clone.body.path, /\.slidey\.json$/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, clone.body.path), 'utf8')).scenes[0].rrweb, rel);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('VS Code preview webview opens the real Slidey viewer and selected deck', async (t) => {

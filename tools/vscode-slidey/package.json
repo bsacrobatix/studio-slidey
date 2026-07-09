@@ -40,14 +40,14 @@
       "explorer/context": [
         {
           "command": "slidey.preview",
-          "when": "resourceFilename =~ /\\.slidey\\.json$/ || resourceExtname == .jsonl",
+          "when": "resourceFilename =~ /\\.slidey\\.json$/ || resourceFilename =~ /\\.rrweb\\.json$/ || resourceExtname == .jsonl",
           "group": "navigation@30"
         }
       ],
       "editor/title": [
         {
           "command": "slidey.preview",
-          "when": "resourceFilename =~ /\\.slidey\\.json$/ || resourceExtname == .jsonl",
+          "when": "resourceFilename =~ /\\.slidey\\.json$/ || resourceFilename =~ /\\.rrweb\\.json$/ || resourceExtname == .jsonl",
           "group": "navigation@30"
         }
       ]

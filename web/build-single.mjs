@@ -13,6 +13,7 @@
 //
 // Defaults the output to dist-web-single/<spec-basename>.html.
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import {
   readFileSync, writeFileSync, readdirSync, existsSync, statSync,
 } from 'node:fs';
@@ -21,6 +22,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const buildDir = join(root, 'dist-web-single');
+const require = createRequire(import.meta.url);
+const { readSpecOrRrweb } = require('../src/rrweb-viewer.js');
 
 const [, , specArg, outArg] = process.argv;
 if (!specArg) {
@@ -34,7 +37,7 @@ if (!existsSync(specPath)) {
   process.exit(1);
 }
 
-const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+const spec = readSpecOrRrweb(specPath);
 if (!spec || !Array.isArray(spec.scenes) || !spec.scenes.length) {
   console.error('[build-single] ERROR: spec must have a non-empty "scenes" array');
   process.exit(1);
@@ -44,7 +47,18 @@ if (!spec || !Array.isArray(spec.scenes) || !spec.scenes.length) {
 // spec file) as data URIs, so portable single-file decks render with no
 // external files. Missing assets are left as-is — the viewer degrades visibly.
 const specDir = dirname(specPath);
-const assetMime = { '.gif': 'image/gif', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
+const assetMime = {
+  '.gif': 'image/gif',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+};
 let embeddedAssets = 0;
 function embedAsset(ref, label) {
   if (!ref || /^data:/.test(ref) || /^https?:\/\//i.test(ref)) return ref;
@@ -76,6 +90,9 @@ for (const sc of spec.scenes) {
     } else {
       console.warn(`[build-single] WARNING: rrweb log not found, leaving reference as-is: ${sc.rrweb}`);
     }
+  }
+  if (sc.type === 'video' && sc.audio) {
+    sc.audio = embedAsset(sc.audio, sc.audio);
   }
   if (sc.type === 'image-compare') {
     if (sc.left && sc.left.src) sc.left.src = embedAsset(sc.left.src, sc.left.src);

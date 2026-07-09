@@ -26,6 +26,7 @@ const scene = computed(() => store.scene || {});
 const embedded = computed(() => scene.value.mode === 'embedded');
 const hasRrweb = computed(() => (store.rrwebEvents || []).length >= 2);
 const mediaKind = computed(() => (hasRrweb.value ? 'rrweb' : (scene.value.src ? 'mp4' : 'none')));
+const hasAudio = computed(() => !!scene.value.audio);
 
 // Cinematic choreography runs for embedded scenes that have media, unless the
 // scene opts out. Non-embedded (fullscreen) scenes already fill the stage.
@@ -48,6 +49,7 @@ const showControls = computed(() => !cinematic.value || expanded.value);
 const frameRef = ref(null);
 const playerRef = ref(null);
 const videoRef = ref(null);
+const audioRef = ref(null);
 const frameRect = ref(null);
 // Gate the size transition: off for the initial inline placement (so the holder
 // snaps onto the thumbnail with no grow-in), on once we start expanding.
@@ -75,19 +77,55 @@ const holderStyle = computed(() => {
 function startPlayback() {
   if (mediaKind.value === 'rrweb' && playerRef.value) {
     playerRef.value.seek(0);
+    syncAudioToMs(0);
     playerRef.value.play();
+    playAudio();
   } else if (mediaKind.value === 'mp4' && videoRef.value) {
     try { videoRef.value.currentTime = 0; } catch { /* ignore */ }
+    syncAudioToMs(0);
     const p = videoRef.value.play();
     if (p && p.catch) p.catch(() => {});
+    playAudio();
   }
 }
 
-function onEnded() { if (phase.value === 'full') phase.value = 'outro'; }
+function syncAudioToMs(ms) {
+  const a = audioRef.value;
+  if (!a) return;
+  const seconds = Math.max(0, ms / 1000);
+  if (Math.abs((a.currentTime || 0) - seconds) > 0.25) {
+    try { a.currentTime = seconds; } catch { /* ignore */ }
+  }
+}
+
+function playAudio() {
+  const a = audioRef.value;
+  if (!a) return;
+  const p = a.play();
+  if (p && p.catch) p.catch(() => {});
+}
+
+function pauseAudio() {
+  const a = audioRef.value;
+  if (a) a.pause();
+}
+
+function onReplayTime(ms) { syncAudioToMs(ms); }
+function onReplayPlay() { playAudio(); }
+function onReplayPause() { pauseAudio(); }
+function onMp4Play() { syncAudioToMs((videoRef.value?.currentTime || 0) * 1000); playAudio(); }
+function onMp4Pause() { pauseAudio(); }
+function onMp4TimeUpdate() { syncAudioToMs((videoRef.value?.currentTime || 0) * 1000); }
+
+function onEnded() {
+  pauseAudio();
+  if (phase.value === 'full') phase.value = 'outro';
+}
 
 // Drive the choreography whenever a video scene mounts/activates.
 function begin() {
   clearTimeout(introTimer);
+  pauseAudio();
   animate.value = false;
   measure();
   if (!cinematic.value) { phase.value = 'full'; nextTick(startPlayback); return; }
@@ -152,6 +190,9 @@ onBeforeUnmount(() => {
             :chapters="store.rrwebChapters"
             :autoplay="false"
             :controls="showControls"
+            @timeupdate="onReplayTime"
+            @play="onReplayPlay"
+            @pause="onReplayPause"
             @ended="onEnded"
           />
           <video
@@ -162,8 +203,17 @@ onBeforeUnmount(() => {
             playsinline
             :controls="showControls"
             preload="auto"
+            @play="onMp4Play"
+            @pause="onMp4Pause"
+            @timeupdate="onMp4TimeUpdate"
             @ended="onEnded"
           ></video>
+          <audio
+            v-if="hasAudio"
+            ref="audioRef"
+            :src="scene.audio"
+            preload="auto"
+          ></audio>
         </div>
       </template>
     </Teleport>
@@ -230,6 +280,7 @@ onBeforeUnmount(() => {
   height: auto;
   aspect-ratio: auto;
 }
+.video-cine-holder > audio { display: none; }
 .video-mp4 {
   width: 100%;
   height: 100%;

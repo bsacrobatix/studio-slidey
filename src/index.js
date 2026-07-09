@@ -250,7 +250,7 @@ if (args[0] === 'bundle') {
   if (!args.includes('--skip-validate')) {
     let spec;
     try {
-      spec = JSON.parse(fs.readFileSync(absIn, 'utf8'));
+      spec = require('./rrweb-viewer').readSpecOrRrweb(absIn);
     } catch (err) {
       console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
       process.exit(1);
@@ -440,9 +440,10 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '    node index.js <input.json> <output.mp4> [options]   render a video/PDF/PNG',
     '    node index.js                                       open the viewer on the current folder',
     '    node index.js <folder>                              open the viewer (file-tree sidebar)',
-    '    node index.js <input.json>                          open the viewer on one deck',
+    '    node index.js <input.json|input.rrweb.json>          open the viewer on one deck or rrweb log',
     '    node index.js convert <input.md> [output.slidey.json]  convert Markdown/Marp slides to Slidey JSON',
-    '    node index.js bundle <input.json> <output.html>      build a self-contained interactive HTML deck',
+    '    node index.js bundle <input.json|input.rrweb.json> <output.html>',
+    '                                                          build a self-contained interactive HTML deck/viewer',
     '    node index.js drawio <input...> --out-dir <dir>       convert Draw.io PNG/XML to themed SVG',
     '    node index.js capture <tour.json> <out.mp4>         record a demo MP4 + chapter sidecar from a tour',
     '    node index.js doctor                                verify headless Chrome launch + screenshot',

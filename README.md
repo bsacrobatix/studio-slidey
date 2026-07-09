@@ -660,7 +660,9 @@ Splices a product demo or recorded UI session into the deck. Pick **one** source
 
 `mode: "embedded"` insets the video in a slide with `eyebrow`/`title`/`caption`
 chrome instead of filling the frame (`fit: "contain"|"cover"`);
-`start`/`end`/`speed` trim and retime. Deck-styled lower-third captions come from
+`start`/`end`/`speed` trim and retime. `audio` can point at an mp3/m4a/wav/ogg
+file synced with rrweb playback in the web viewer; raw `*.rrweb.json` viewer
+inputs automatically pick up a sibling `*.mp3` when present. Deck-styled lower-third captions come from
 the chapter sidecar (`chapters`), `annotations` add timed callouts, and
 `narration` may be a string or time-keyed cues (`{at|chapter, text}`) so the
 voiceover tracks demo moments. The scene's duration equals the (trimmed) source

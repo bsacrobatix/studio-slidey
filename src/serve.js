@@ -26,6 +26,7 @@ const http = require('http');
 const fs   = require('fs');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
+const { isRrwebFile, rrwebSpecForFile, readSpecOrRrweb } = require('./rrweb-viewer');
 
 const ROOT_DIR = path.resolve(__dirname, '..');      // repo root (has dist/, package.json)
 const DIST_DIR = path.join(ROOT_DIR, 'dist');         // `npm run build:web` output
@@ -41,7 +42,7 @@ const READONLY_SUFFIX = '.readonly.slidey.json';
 // traces. Plain `.json` files are still readable when opened explicitly, just
 // not listed.
 function isDiscoverableSpec(name) {
-  return /\.(?:readonly\.)?slidey\.json$/i.test(name) || /\.jsonl$/i.test(name);
+  return /\.(?:readonly\.)?slidey\.json$/i.test(name) || /\.jsonl$/i.test(name) || isRrwebFile(name);
 }
 
 function isReadOnlySlideySpec(filePath) {
@@ -49,7 +50,7 @@ function isReadOnlySlideySpec(filePath) {
 }
 
 function isEditableSpec(filePath) {
-  return /\.json$/i.test(filePath) && !isReadOnlySlideySpec(filePath);
+  return /\.json$/i.test(filePath) && !isReadOnlySlideySpec(filePath) && !isRrwebFile(filePath);
 }
 
 function defaultCloneTarget(sourceRel) {
@@ -57,6 +58,7 @@ function defaultCloneTarget(sourceRel) {
   const dir = path.posix.dirname(normalized);
   const base = path.posix.basename(normalized);
   const editableBase = base
+    .replace(/\.rrweb\.json$/i, '.slidey.json')
     .replace(/\.readonly\.slidey\.json$/i, '.slidey.json')
     .replace(/\.jsonl$/i, '.slidey.json');
   const candidate = /\.slidey\.json$/i.test(editableBase)
@@ -272,7 +274,7 @@ function startViewer({ root, openFile = null, port = 4321, open = true, _tries =
         const mtimeMs = fs.statSync(abs).mtimeMs;
         const spec = /\.jsonl$/i.test(abs)
           ? require('./trace').buildSpecFromFile(abs)
-          : JSON.parse(fs.readFileSync(abs, 'utf8'));
+          : readSpecOrRrweb(abs);
         const dir = path.dirname(rel).replace(/\\/g, '/');
         const editable = isEditableSpec(abs);
         return sendJSON(res, 200, {
@@ -334,8 +336,11 @@ function startViewer({ root, openFile = null, port = 4321, open = true, _tries =
       if (target === source) return sendJSON(res, 400, { error: 'clone target must differ from source' });
       const finalRel = uniqueRel(workspaceRoot, path.relative(workspaceRoot, target).replace(/\\/g, '/'));
       const finalAbs = safeResolve(workspaceRoot, finalRel);
-      fs.writeFileSync(finalAbs, fs.readFileSync(source, 'utf8'), 'utf8');
-      return sendJSON(res, 200, { source: rel, path: relPath(finalAbs), mtimeMs: fs.statSync(finalAbs).mtimeMs, editable: isEditableSpec(finalAbs) });
+      const body = isRrwebFile(source)
+        ? JSON.stringify(rrwebSpecForFile(source), null, 2) + '\n'
+        : fs.readFileSync(source, 'utf8');
+      fs.writeFileSync(finalAbs, body, 'utf8');
+      return sendJSON(res, 200, { source: rel, path: finalRel, mtimeMs: fs.statSync(finalAbs).mtimeMs, editable: isEditableSpec(finalAbs) });
     }
 
     // Lightweight mtime probe so the viewer can detect on-disk edits without

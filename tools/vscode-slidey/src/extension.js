@@ -13,6 +13,7 @@ const DIST_DIR = fs.existsSync(path.join(PACKAGED_DIST_DIR, 'index.html'))
 const RUNTIME_SRC_DIR = fs.existsSync(path.join(PACKAGED_RUNTIME_DIR, 'schema.js'))
   ? PACKAGED_RUNTIME_DIR
   : path.join(CHECKOUT_ROOT, 'src');
+const { isRrwebFile, rrwebSpecForFile, readSpecOrRrweb } = require(path.join(RUNTIME_SRC_DIR, 'rrweb-viewer'));
 const SPEC_EXT = new Set(['.json', '.jsonl']);
 const READONLY_SUFFIX = '.readonly.slidey.json';
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-render', 'dist-web-single', '.slidey-dist', '.slidey-runtime', '.git']);
@@ -21,7 +22,7 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-render', 'dist-web-sing
 // convention (plus generated `.jsonl` traces). Plain `.json` files still
 // preview when opened explicitly, they just don't clutter the picker.
 function isDiscoverableSpec(name) {
-  return /\.(?:readonly\.)?slidey\.json$/i.test(name) || /\.jsonl$/i.test(name);
+  return /\.(?:readonly\.)?slidey\.json$/i.test(name) || /\.jsonl$/i.test(name) || isRrwebFile(name);
 }
 
 function isReadOnlySlideySpec(abs) {
@@ -29,7 +30,7 @@ function isReadOnlySlideySpec(abs) {
 }
 
 function isEditableSpec(abs) {
-  return /\.json$/i.test(abs) && !isReadOnlySlideySpec(abs);
+  return /\.json$/i.test(abs) && !isReadOnlySlideySpec(abs) && !isRrwebFile(abs);
 }
 
 function defaultCloneTarget(sourceRel) {
@@ -37,6 +38,7 @@ function defaultCloneTarget(sourceRel) {
   const dir = path.posix.dirname(normalized);
   const base = path.posix.basename(normalized);
   const candidate = base
+    .replace(/\.rrweb\.json$/i, '.slidey.json')
     .replace(/\.readonly\.slidey\.json$/i, '.slidey.json')
     .replace(/\.jsonl$/i, '.slidey.json');
   return dir === '.' ? candidate : path.posix.join(dir, candidate);
@@ -103,7 +105,7 @@ function readSpec(absFile) {
   if (/\.jsonl$/i.test(absFile)) {
     return require(path.join(RUNTIME_SRC_DIR, 'trace')).buildSpecFromFile(absFile);
   }
-  return JSON.parse(fs.readFileSync(absFile, 'utf8'));
+  return readSpecOrRrweb(absFile);
 }
 
 function response(status, body) {
@@ -191,7 +193,10 @@ function handleApiRequest({ root, openFile, webview, vscode }, request) {
     if (target === source) return response(400, { error: 'clone target must differ from source' });
     const finalRel = uniqueRel(workspaceRoot, path.relative(workspaceRoot, target).replace(/\\/g, '/'));
     const finalAbs = safeResolve(workspaceRoot, finalRel);
-    fs.writeFileSync(finalAbs, fs.readFileSync(source, 'utf8'), 'utf8');
+    const body = isRrwebFile(source)
+      ? JSON.stringify(rrwebSpecForFile(source), null, 2) + '\n'
+      : fs.readFileSync(source, 'utf8');
+    fs.writeFileSync(finalAbs, body, 'utf8');
     return response(200, {
       source: rel,
       path: posixRel(workspaceRoot, finalAbs),
@@ -336,7 +341,7 @@ async function openPreview(vscode, context, uri) {
   }
   const file = target.fsPath;
   if (!SPEC_EXT.has(path.extname(file).toLowerCase())) {
-    vscode.window.showErrorMessage('Slidey previews require a .json or .jsonl spec.');
+    vscode.window.showErrorMessage('Slidey previews require a .json, .jsonl, or .rrweb.json file.');
     return;
   }
   const folder = vscode.workspace.getWorkspaceFolder(target);

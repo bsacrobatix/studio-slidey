@@ -44,7 +44,7 @@ vscode-stage: build-web
 	@rm -rf $(VSCODE_DIST) $(VSCODE_DIR)/.slidey-runtime
 	@mkdir -p $(VSCODE_DIST) $(VSCODE_RUNTIME)
 	cp -R dist/. $(VSCODE_DIST)/
-	cp src/schema.js src/trace.js $(VSCODE_RUNTIME)/
+	cp src/schema.js src/trace.js src/rrweb-viewer.js $(VSCODE_RUNTIME)/
 
 # Output: tools/vscode-slidey/slidey-vscode-<version>.vsix.
 vscode-package: vscode-stage

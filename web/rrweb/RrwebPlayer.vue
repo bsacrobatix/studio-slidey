@@ -26,7 +26,7 @@
  *   startAtEnd Bool    pause on the last frame on mount (default false; useful
  *                      for bug reports where the final state is most relevant)
  *   loop       Bool    restart at end (default false)
- * Emits: ready(meta), timeupdate(ms), chapter(id)
+ * Emits: ready(meta), timeupdate(ms), chapter(id), play, pause, ended
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 
@@ -40,7 +40,7 @@ const props = defineProps({
   // Off for lean-back cinematic playback where the deck drives everything.
   controls: { type: Boolean, default: true },
 });
-const emit = defineEmits(['ready', 'timeupdate', 'chapter', 'ended']);
+const emit = defineEmits(['ready', 'timeupdate', 'chapter', 'play', 'pause', 'ended']);
 
 const host = ref(null);
 let player = null;
@@ -155,11 +155,13 @@ function togglePlay() {
     player.pause();
     playing.value = false;
     stopTick();
+    emit('pause');
     return;
   }
   const from = currentMs.value >= totalMs.value ? 0 : currentMs.value;
   player.play(from);
   playing.value = true;
+  emit('play');
   stopTick();
   tick = setInterval(() => {
     if (!player) return;
@@ -167,7 +169,7 @@ function togglePlay() {
     emit('timeupdate', currentMs.value);
     if (currentMs.value >= totalMs.value) {
       if (props.loop) { player.play(0); }
-      else { playing.value = false; stopTick(); emit('ended'); }
+      else { playing.value = false; stopTick(); emit('pause'); emit('ended'); }
     }
   }, 100);
 }
@@ -179,6 +181,7 @@ function seek(ms) {
   playing.value = false;
   stopTick();
   emit('timeupdate', currentMs.value);
+  emit('pause');
 }
 
 function onScrub(e) { seek(Number(e.target.value)); }
