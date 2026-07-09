@@ -1058,25 +1058,28 @@ async function main() {
   let audioSegments = null;
   const hasNarration = sceneBoundaries.some(sb => sb.narration);
   const audioDir = path.join(framesDir, 'audio');
+  const narrationMeta = (spec.meta && spec.meta.narration) || {};
+  const narrationVoice = narrationMeta.voice || DEFAULT_VOICE;
   if (hasNarration && !edgeTtsAvailable()) {
     console.warn(
-      '[slidey] ⚠ narration skipped — `edge-tts` not found on PATH. ' +
-      'Rendering a SILENT video.\n' +
-      '          Install it to enable narration:  pip install edge-tts'
+      '[slidey] WARNING: narration skipped because edge-tts was not found on PATH.\n' +
+      '[slidey]          This deck has narration, so the exported MP4 will be SILENT.\n' +
+      '[slidey]          Install: pipx install edge-tts  # or: python3 -m pip install --user edge-tts\n' +
+      `[slidey]          Check:   slidey doctor --voice ${narrationVoice}`
     );
   } else if (hasNarration) {
     console.log('[slidey] Generating narration audio…');
     try {
       audioSegments = generateNarration(
         sceneBoundaries, fps, frameCount,
-        (spec.meta && spec.meta.narration) || {},
+        narrationMeta,
         audioDir,
       );
     } catch (err) {
       // Don't throw away a good render over narration: warn and assemble silent.
       console.warn(
-        `[slidey] ⚠ narration failed (${err.message}) — ` +
-        'assembling a SILENT video from the rendered frames.'
+        `[slidey] WARNING: narration failed. The exported MP4 will be SILENT.\n${err.message}\n` +
+        `[slidey] Check: slidey doctor --voice ${narrationVoice}`
       );
       audioSegments = null;
     }

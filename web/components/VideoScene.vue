@@ -56,6 +56,13 @@ const frameRect = ref(null);
 const animate = ref(false);
 let introTimer = null;
 
+function emitVideoEvent(name, detail = {}) {
+  if (typeof window === 'undefined' || typeof CustomEvent !== 'function') return;
+  window.dispatchEvent(new CustomEvent(`slidey:video-${name}`, {
+    detail: { kind: mediaKind.value, scene: scene.value, ...detail },
+  }));
+}
+
 function measure() {
   const el = frameRef.value;
   if (!el) return;
@@ -110,15 +117,37 @@ function pauseAudio() {
   if (a) a.pause();
 }
 
-function onReplayTime(ms) { syncAudioToMs(ms); }
-function onReplayPlay() { playAudio(); }
-function onReplayPause() { pauseAudio(); }
-function onMp4Play() { syncAudioToMs((videoRef.value?.currentTime || 0) * 1000); playAudio(); }
-function onMp4Pause() { pauseAudio(); }
-function onMp4TimeUpdate() { syncAudioToMs((videoRef.value?.currentTime || 0) * 1000); }
+function onReplayTime(ms) {
+  syncAudioToMs(ms);
+  emitVideoEvent('time', { ms });
+}
+function onReplayPlay() {
+  playAudio();
+  emitVideoEvent('play');
+}
+function onReplayPause() {
+  pauseAudio();
+  emitVideoEvent('pause');
+}
+function onMp4Play() {
+  const ms = (videoRef.value?.currentTime || 0) * 1000;
+  syncAudioToMs(ms);
+  playAudio();
+  emitVideoEvent('play', { ms });
+}
+function onMp4Pause() {
+  pauseAudio();
+  emitVideoEvent('pause', { ms: (videoRef.value?.currentTime || 0) * 1000 });
+}
+function onMp4TimeUpdate() {
+  const ms = (videoRef.value?.currentTime || 0) * 1000;
+  syncAudioToMs(ms);
+  emitVideoEvent('time', { ms });
+}
 
 function onEnded() {
   pauseAudio();
+  emitVideoEvent('ended');
   if (phase.value === 'full') phase.value = 'outro';
 }
 
@@ -140,6 +169,16 @@ function begin() {
 
 function onResize() { if (!expanded.value) measure(); }
 
+function onVideoCommand(e) {
+  const action = e && e.detail && e.detail.action;
+  if (action === 'play') startPlayback();
+  if (action === 'pause') {
+    if (playerRef.value && mediaKind.value === 'rrweb') playerRef.value.pause();
+    if (videoRef.value && mediaKind.value === 'mp4') videoRef.value.pause();
+    pauseAudio();
+  }
+}
+
 // While a video is expanded, flag the document so the slidey HUD relocates to the
 // top (NavController reacts to body.slidey-video-full) — keeping its bar clear of
 // the player's transport at the bottom of the fullscreen video.
@@ -149,10 +188,15 @@ function setFullFlag(on) {
 watch(expanded, setFullFlag);
 
 watch(() => store.scene, () => nextTick(begin));
-onMounted(() => { window.addEventListener('resize', onResize); nextTick(begin); });
+onMounted(() => {
+  window.addEventListener('resize', onResize);
+  window.addEventListener('slidey:video-command', onVideoCommand);
+  nextTick(begin);
+});
 onBeforeUnmount(() => {
   clearTimeout(introTimer);
   window.removeEventListener('resize', onResize);
+  window.removeEventListener('slidey:video-command', onVideoCommand);
   setFullFlag(false);
 });
 </script>

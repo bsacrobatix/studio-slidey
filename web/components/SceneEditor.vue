@@ -11,8 +11,9 @@ const props = defineProps({
   saving: { type: Boolean, default: false },
   saveError: { type: String, default: '' },
   schema: { type: Object, default: null },
+  narrationState: { type: Object, default: () => ({}) },
 });
-const emit = defineEmits(['change', 'save', 'revert']);
+const emit = defineEmits(['change', 'save', 'revert', 'listen-narration', 'stop-narration']);
 
 const LAYOUT_GALLERY_FALLBACK = [
   { id: 'title', label: 'Title', type: 'title', variant: '', scene: { type: 'title', title: 'Title slide', subtitle: 'Add your subtitle', eyebrow: 'Section' } },
@@ -325,6 +326,57 @@ const narrationFields = computed(() => {
   return [];
 });
 const hasNarration = computed(() => scene.value.narration != null);
+const isVideoNarrationCues = computed(() => scene.value.type === 'video' && Array.isArray(scene.value.narration));
+const pronunciationRows = computed(() => {
+  const dict = props.spec?.meta?.narration?.pronunciations || {};
+  return Object.entries(dict).map(([term, value]) => ({ term, value }));
+});
+const canListenNarration = computed(() =>
+  Boolean(props.narrationState?.supported && props.narrationState?.hasSceneNarration && !props.narrationState?.live));
+
+function ensureNarrationMeta() {
+  if (!props.spec.meta || typeof props.spec.meta !== 'object') props.spec.meta = {};
+  if (!props.spec.meta.narration || typeof props.spec.meta.narration !== 'object') props.spec.meta.narration = {};
+  if (!props.spec.meta.narration.pronunciations || typeof props.spec.meta.narration.pronunciations !== 'object') {
+    props.spec.meta.narration.pronunciations = {};
+  }
+  return props.spec.meta.narration;
+}
+
+function uniquePronunciationTerm(base = 'term') {
+  const dict = ensureNarrationMeta().pronunciations;
+  if (!dict[base]) return base;
+  let i = 2;
+  while (dict[`${base} ${i}`]) i += 1;
+  return `${base} ${i}`;
+}
+
+function addPronunciation() {
+  const dict = ensureNarrationMeta().pronunciations;
+  dict[uniquePronunciationTerm()] = '';
+  emit('change');
+}
+
+function updatePronunciationTerm(oldTerm, nextTerm) {
+  const next = String(nextTerm || '').trim();
+  if (!next || next === oldTerm) return;
+  const dict = ensureNarrationMeta().pronunciations;
+  const value = dict[oldTerm] || '';
+  delete dict[oldTerm];
+  dict[next] = value;
+  emit('change');
+}
+
+function updatePronunciationValue(term, value) {
+  ensureNarrationMeta().pronunciations[term] = String(value || '');
+  emit('change');
+}
+
+function removePronunciation(term) {
+  const dict = ensureNarrationMeta().pronunciations;
+  delete dict[term];
+  emit('change');
+}
 
 async function update(path, value) {
   const kind = inputKind(schemaForPath(path), getByPath(scene.value, path));
@@ -342,6 +394,29 @@ async function addNarration() {
   scene.value.narration = '';
   await props.deck.render();
   emit('change');
+}
+
+async function addNarrationCue() {
+  const existing = scene.value.narration;
+  if (!Array.isArray(existing)) {
+    const text = typeof existing === 'string' ? existing : '';
+    scene.value.narration = text ? [{ at: 0, text }] : [];
+  }
+  scene.value.narration.push({ at: 0, text: '' });
+  await props.deck.render();
+  emit('change');
+}
+
+async function removeNarrationCue(index) {
+  if (!Array.isArray(scene.value.narration)) return;
+  scene.value.narration.splice(index, 1);
+  await props.deck.render();
+  emit('change');
+}
+
+function listenOrStopNarration() {
+  if (props.narrationState?.speaking && !props.narrationState?.live) emit('stop-narration');
+  else emit('listen-narration');
 }
 
 function keyFor(path) {
@@ -524,8 +599,54 @@ function validatePythonByPattern(source) {
     </div>
 
     <section class="slidey-editor-section">
-      <div class="slidey-editor-section-title">Narration</div>
-      <template v-if="hasNarration && narrationFields.length">
+      <div class="slidey-editor-section-title-row">
+        <div class="slidey-editor-section-title">Narration</div>
+        <button
+          class="slidey-editor-btn slidey-editor-listen"
+          :disabled="!canListenNarration && !(narrationState?.speaking && !narrationState?.live)"
+          :title="narrationState?.supported ? 'Listen to this slide narration' : 'Edge TTS preview is available in the Slidey web viewer and VS Code preview'"
+          @click="listenOrStopNarration"
+        >{{ narrationState?.speaking && !narrationState?.live ? 'Stop' : 'Listen' }}</button>
+      </div>
+      <template v-if="isVideoNarrationCues">
+        <div v-for="(cue, i) in scene.narration" :key="i" class="slidey-narration-cue">
+          <div class="slidey-narration-cue-head">
+            <span>Cue {{ i + 1 }}</span>
+            <button class="slidey-editor-mini" :disabled="!canSave" @click="removeNarrationCue(i)">Remove</button>
+          </div>
+          <label class="slidey-editor-field">
+            <span>At seconds</span>
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              :value="cue.at ?? 0"
+              :disabled="!canSave"
+              @input="update(['narration', i, 'at'], $event.target.value)"
+            />
+          </label>
+          <label class="slidey-editor-field">
+            <span>Chapter</span>
+            <input
+              :value="cue.chapter || ''"
+              :disabled="!canSave"
+              @input="update(['narration', i, 'chapter'], $event.target.value)"
+            />
+          </label>
+          <label class="slidey-editor-field">
+            <span>Text</span>
+            <textarea
+              :value="cue.text || ''"
+              :disabled="!canSave"
+              rows="3"
+              spellcheck="true"
+              @input="update(['narration', i, 'text'], $event.target.value)"
+            ></textarea>
+          </label>
+        </div>
+        <button class="slidey-editor-add" :disabled="!canSave" @click="addNarrationCue">Add cue</button>
+      </template>
+      <template v-else-if="hasNarration && narrationFields.length">
         <label v-for="field in narrationFields" :key="field.path.join('.')" class="slidey-editor-field">
           <span>{{ field.label }}</span>
           <textarea
@@ -536,8 +657,41 @@ function validatePythonByPattern(source) {
             @input="update(field.path, $event.target.value)"
           ></textarea>
         </label>
+        <button v-if="scene.type === 'video'" class="slidey-editor-btn" :disabled="!canSave" @click="addNarrationCue">Use timed cues</button>
       </template>
-      <button v-else class="slidey-editor-add" :disabled="!canSave" @click="addNarration">Add narration</button>
+      <div v-else class="slidey-editor-inline-actions">
+        <button class="slidey-editor-add" :disabled="!canSave" @click="addNarration">Add narration</button>
+        <button v-if="scene.type === 'video'" class="slidey-editor-btn" :disabled="!canSave" @click="addNarrationCue">Add timed cue</button>
+      </div>
+      <p v-if="narrationState?.error" class="slidey-editor-field-error">{{ narrationState.error }}</p>
+    </section>
+
+    <section class="slidey-editor-section">
+      <div class="slidey-editor-section-title-row">
+        <div class="slidey-editor-section-title">Pronunciations</div>
+        <button class="slidey-editor-btn slidey-editor-listen" :disabled="!canSave" @click="addPronunciation">Add</button>
+      </div>
+      <p v-if="!pronunciationRows.length" class="slidey-editor-empty">No pronunciation fixes.</p>
+      <div v-for="row in pronunciationRows" :key="row.term" class="slidey-pronunciation-row">
+        <input
+          :value="row.term"
+          :disabled="!canSave"
+          placeholder="Term"
+          @change="updatePronunciationTerm(row.term, $event.target.value)"
+        />
+        <input
+          :value="row.value"
+          :disabled="!canSave"
+          placeholder="Spoken respelling"
+          @input="updatePronunciationValue(row.term, $event.target.value)"
+        />
+        <button
+          class="slidey-editor-mini"
+          :disabled="!canSave"
+          aria-label="Remove pronunciation"
+          @click="removePronunciation(row.term)"
+        >×</button>
+      </div>
     </section>
 
     <section class="slidey-editor-section">

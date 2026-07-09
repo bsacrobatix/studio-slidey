@@ -16,6 +16,7 @@
 //   the corrected sizes so layout reflects real text dimensions.
 
 import dagre from 'dagre';
+import { linkTargetForItem } from './collections.mjs';
 
 // ---------------------------------------------------------------------------
 const LAYOUT_DIRECTIONS = new Set(['TB', 'BT', 'LR', 'RL']);
@@ -328,6 +329,7 @@ export function buildPanel(panel, idx, sizeOverrides = {}) {
     return {
       id: nd.id,
       groupClass: `dsvg-node dsvg-style-${nd.style || 'default'}`,
+      link: linkTargetForItem(nd),
       rect: { x: nd.x, y: nd.y, w: nd.w, h: nd.h },
       texts,
     };

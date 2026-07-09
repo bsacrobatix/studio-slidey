@@ -150,17 +150,84 @@ body.slidey-workspace #app {
 }
 .slidey-tree-row:hover { background: #161b22; }
 .slidey-tree-row.dir { color: #8b949e; }
+.slidey-tree-row.deck-group {
+  color: #d29922;
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
 .slidey-tree-caret { width: 12px; display: inline-block; font-size: 10px; color: #6e7681; }
-.slidey-tree-name { overflow: hidden; text-overflow: ellipsis; }
+.slidey-tree-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .slidey-tree-lock {
   font-size: 11px;
   color: #e3b341;
   opacity: 0.85;
 }
-.slidey-tree-row.file.active {
+.slidey-tree-row.file.collection {
+  color: #f0f6fc;
+  font-weight: bold;
+}
+.slidey-tree-row.deck {
+  color: #c9d1d9;
+}
+.slidey-tree-row.deck-source {
+  color: #c9d1d9;
+}
+.slidey-tree-row.deck-subset {
+  color: #e3b341;
+  font-style: italic;
+}
+.slidey-tree-deck-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1px solid #58a6ff;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.slidey-tree-row.deck-source .slidey-tree-deck-dot,
+.slidey-tree-row.deck-deck .slidey-tree-deck-dot,
+.slidey-tree-row.deck-hierarchy .slidey-tree-deck-dot {
+  border-color: #58a6ff;
+  background: #58a6ff;
+}
+.slidey-tree-row.deck-subset .slidey-tree-deck-dot {
+  border-color: #d29922;
+  background: #d29922;
+  width: 10px;
+  height: 6px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px #d2992226;
+}
+.slidey-tree-kind {
+  flex: none;
+  border: 1px solid #d2992259;
+  border-radius: 999px;
+  color: #f0d894;
+  background: #d299221a;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  padding: 2px 5px;
+  text-transform: uppercase;
+}
+.slidey-tree-row.file.active,
+.slidey-tree-row.deck.active {
   background: #1f6feb33;
   color: #79c0ff;
   box-shadow: inset 2px 0 0 #1f6feb;
+}
+.slidey-tree-row.deck-subset.active {
+  background: #d299222b;
+  color: #f0d894;
+  box-shadow: inset 2px 0 0 #d29922;
 }
 
 /* current-scene editor */
@@ -484,6 +551,82 @@ body.slidey-workspace #app {
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+.slidey-editor-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.slidey-editor-listen {
+  flex: none;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+.slidey-editor-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.slidey-editor-mini {
+  flex: none;
+  border: 1px solid #30363d;
+  border-radius: 5px;
+  background: #161b22;
+  color: #c9d1d9;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 7px;
+  cursor: pointer;
+}
+.slidey-editor-mini:hover:not(:disabled) {
+  border-color: #f85149;
+  color: #ffb4ad;
+}
+.slidey-editor-mini:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.slidey-narration-cue {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #111821;
+}
+.slidey-narration-cue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #8b949e;
+  font-size: 12px;
+  font-weight: bold;
+}
+.slidey-pronunciation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+.slidey-pronunciation-row input {
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #161b22;
+  color: #e6edf3;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 7px 8px;
+  outline: none;
+}
+.slidey-pronunciation-row input:focus {
+  border-color: #1f6feb;
+  box-shadow: 0 0 0 2px #1f6feb33;
 }
 .slidey-editor-field {
   display: flex;

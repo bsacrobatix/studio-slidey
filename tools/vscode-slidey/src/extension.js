@@ -7,13 +7,16 @@ const EXTENSION_ROOT = path.resolve(__dirname, '..');
 const CHECKOUT_ROOT = path.resolve(__dirname, '..', '..', '..');
 const PACKAGED_DIST_DIR = path.join(EXTENSION_ROOT, '.slidey-dist');
 const PACKAGED_RUNTIME_DIR = path.join(EXTENSION_ROOT, '.slidey-runtime', 'src');
+const PACKAGED_RUNTIME_READY = ['schema.js', 'trace.js', 'rrweb-viewer.js', 'narration.js', 'narration-preview.js']
+  .every((name) => fs.existsSync(path.join(PACKAGED_RUNTIME_DIR, name)));
 const DIST_DIR = fs.existsSync(path.join(PACKAGED_DIST_DIR, 'index.html'))
   ? PACKAGED_DIST_DIR
   : path.join(CHECKOUT_ROOT, 'dist');
-const RUNTIME_SRC_DIR = fs.existsSync(path.join(PACKAGED_RUNTIME_DIR, 'schema.js'))
+const RUNTIME_SRC_DIR = PACKAGED_RUNTIME_READY
   ? PACKAGED_RUNTIME_DIR
   : path.join(CHECKOUT_ROOT, 'src');
 const { isRrwebFile, rrwebSpecForFile, readSpecOrRrweb } = require(path.join(RUNTIME_SRC_DIR, 'rrweb-viewer'));
+const { handleNarrationPreviewRequest } = require(path.join(RUNTIME_SRC_DIR, 'narration-preview'));
 const SPEC_EXT = new Set(['.json', '.jsonl']);
 const READONLY_SUFFIX = '.readonly.slidey.json';
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-render', 'dist-web-single', '.slidey-dist', '.slidey-runtime', '.git']);
@@ -173,6 +176,10 @@ function handleApiRequest({ root, openFile, webview, vscode }, request) {
     return response(405, { error: 'spec writes are handled asynchronously' });
   }
 
+  if (pathname === '/api/narration-audio' && request.method === 'POST') {
+    return handleNarrationPreviewRequest(request);
+  }
+
   if (pathname === '/api/clone-spec' && request.method === 'POST') {
     const rel = url.searchParams.get('path') || '';
     const source = safeResolve(workspaceRoot, rel);
@@ -305,11 +312,12 @@ function webviewBridgeScript() {
       const body = init.body == null ? null : String(init.body);
       const promise = new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
+        const timeoutMs = url.pathname === '/api/narration-audio' ? 60000 : 15000;
         setTimeout(() => {
           if (!pending.has(id)) return;
           pending.delete(id);
           reject(new Error('Timed out waiting for Slidey preview API response'));
-        }, 15000);
+        }, timeoutMs);
       });
       vscode.postMessage({ type: 'slidey.fetch', id, url: url.pathname + url.search, method, body });
       return promise;

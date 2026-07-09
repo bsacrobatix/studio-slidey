@@ -824,6 +824,20 @@ body.instant .reveal { transition: none !important; }
   stroke: #bc8cff;
   stroke-width: 3.5;
 }
+.dsvg-node.dsvg-node-link {
+  cursor: pointer;
+}
+.dsvg-node.dsvg-node-link rect {
+  stroke: #3fb950;
+  filter: drop-shadow(0 0 9px rgba(63, 185, 80, 0.34));
+}
+.dsvg-node.dsvg-node-link:hover rect,
+.dsvg-node.dsvg-node-link:focus-visible rect {
+  stroke: #7ee787;
+  stroke-width: 4.5;
+  filter: drop-shadow(0 0 14px rgba(126, 231, 135, 0.48));
+  outline: none;
+}
 .dsvg-label {
   font-family: 'JetBrains Mono', 'Courier New', monospace;
   font-size: 30px;

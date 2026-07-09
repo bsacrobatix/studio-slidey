@@ -27,6 +27,8 @@ const fs   = require('fs');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 const { isRrwebFile, rrwebSpecForFile, readSpecOrRrweb } = require('./rrweb-viewer');
+const { normalizeDeckDefinitions, SOURCE_DECK_ID } = require('./collections');
+const { handleNarrationPreviewRequest } = require('./narration-preview');
 
 const ROOT_DIR = path.resolve(__dirname, '..');      // repo root (has dist/, package.json)
 const DIST_DIR = path.join(ROOT_DIR, 'dist');         // `npm run build:web` output
@@ -51,6 +53,102 @@ function isReadOnlySlideySpec(filePath) {
 
 function isEditableSpec(filePath) {
   return /\.json$/i.test(filePath) && !isReadOnlySlideySpec(filePath) && !isRrwebFile(filePath);
+}
+
+function displayNameForSpec(name) {
+  return String(name || '')
+    .replace(/\.readonly\.slidey\.json$/i, '')
+    .replace(/\.slidey\.json$/i, '')
+    .replace(/\.jsonl$/i, '')
+    .replace(/\.rrweb\.json$/i, '');
+}
+
+function deckTreeForSpec(absFile, rel) {
+  if (!/\.json$/i.test(absFile) || isRrwebFile(absFile)) return [];
+  let spec;
+  try {
+    spec = readSpecOrRrweb(absFile);
+  } catch (_) {
+    return [];
+  }
+  const decks = normalizeDeckDefinitions(spec);
+  if (!decks.length) return [];
+
+  const source = decks.find(deck => deck.source);
+  const childrenByParent = new Map();
+  for (const deck of decks) {
+    if (deck.source) continue;
+    const parent = deck.parent || SOURCE_DECK_ID;
+    if (!childrenByParent.has(parent)) childrenByParent.set(parent, []);
+    childrenByParent.get(parent).push(deck);
+  }
+
+  const deckTreeOrder = (a, b) => {
+    const aSubset = a.deckType === 'subset' ? 0 : 1;
+    const bSubset = b.deckType === 'subset' ? 0 : 1;
+    return aSubset - bSubset;
+  };
+  const makeDeckNode = (deck) => ({
+    name: deck.title || deck.id,
+    type: 'deck',
+    path: rel,
+    deckId: deck.id,
+    deckType: deck.deckType || (deck.source ? 'source' : 'hierarchy'),
+    description: deck.description || '',
+    children: [...(childrenByParent.get(deck.id) || [])].sort(deckTreeOrder).map(makeDeckNode),
+  });
+
+  return source ? [makeDeckNode(source)] : [];
+}
+
+function withTreeSort(node, sortPath, sortIndex) {
+  Object.defineProperties(node, {
+    sortPath: { value: sortPath, enumerable: false },
+    sortIndex: { value: sortIndex, enumerable: false },
+  });
+  return node;
+}
+
+function treeNodesForSpec(absFile, rel, entryName) {
+  const baseName = displayNameForSpec(entryName || path.basename(rel));
+  if (/\.json$/i.test(absFile) && !isRrwebFile(absFile)) {
+    let spec = null;
+    try {
+      spec = readSpecOrRrweb(absFile);
+    } catch (_) {
+      return [{
+        name: baseName,
+        type: 'file',
+        path: rel,
+        editable: isEditableSpec(entryName || absFile),
+        children: [],
+      }];
+    }
+
+    const collectionNodes = deckTreeForSpec(absFile, rel);
+    if (collectionNodes.length) {
+      return collectionNodes.map((node, index) => withTreeSort(node, rel, index));
+    }
+
+    return [withTreeSort({
+      name: (spec.meta && spec.meta.title) || baseName,
+      type: 'deck',
+      path: rel,
+      deckId: SOURCE_DECK_ID,
+      deckType: 'deck',
+      description: (spec.meta && spec.meta.description) || '',
+      editable: isEditableSpec(entryName || absFile),
+      children: [],
+    }, rel, 0)];
+  }
+
+  return [{
+    name: baseName,
+    type: 'file',
+    path: rel,
+    editable: isEditableSpec(entryName || absFile),
+    children: [],
+  }];
 }
 
 function defaultCloneTarget(sourceRel) {
@@ -151,10 +249,15 @@ function buildTree(absDir, root, relDir = '') {
       if (children.length) dirs.push({ name: e.name, type: 'dir', path: childRel, children });
     } else if (e.isFile() && isDiscoverableSpec(e.name)) {
       const rel = relDir ? `${relDir}/${e.name}` : e.name;
-      files.push({ name: e.name, type: 'file', path: rel, editable: isEditableSpec(e.name) });
+      const abs = path.join(absDir, e.name);
+      files.push(...treeNodesForSpec(abs, rel, e.name));
     }
   }
-  const byName = (a, b) => a.name.localeCompare(b.name);
+  const byName = (a, b) => (
+    (a.sortPath || a.path || a.name).localeCompare(b.sortPath || b.path || b.name)
+    || (a.sortIndex || 0) - (b.sortIndex || 0)
+    || a.name.localeCompare(b.name)
+  );
   dirs.sort(byName);
   files.sort(byName);
   return [...dirs, ...files]; // folders first, then files (VS Code ordering)
@@ -227,10 +330,11 @@ function openBrowser(url) {
  * @param {object} opts
  * @param {string} opts.root      absolute path of the workspace folder to serve
  * @param {string|null} opts.openFile  workspace-relative spec to auto-open (or null)
+ * @param {string|null} opts.deckId    library deck id to open initially (or null)
  * @param {number} opts.port      preferred port (auto-increments if taken)
  * @param {boolean} opts.open     launch the browser when true
  */
-function startViewer({ root, openFile = null, port = 4321, open = true, _tries = 0 }) {
+function startViewer({ root, openFile = null, deckId = null, port = 4321, open = true, _tries = 0 }) {
   if (!ensureDist()) process.exit(1);
   const workspaceRoot = path.resolve(root);
 
@@ -246,7 +350,7 @@ function startViewer({ root, openFile = null, port = 4321, open = true, _tries =
 
     // ── API ──
     if (pathname === '/api/config') {
-      return sendJSON(res, 200, { root: workspaceRoot, openFile });
+      return sendJSON(res, 200, { root: workspaceRoot, openFile, deckId });
     }
 
     if (pathname === '/api/tree') {
@@ -309,6 +413,16 @@ function startViewer({ root, openFile = null, port = 4321, open = true, _tries =
         const body = JSON.stringify(payload.spec, null, 2) + '\n';
         fs.writeFileSync(abs, body, 'utf8');
         return sendJSON(res, 200, { ok: true, mtimeMs: fs.statSync(abs).mtimeMs });
+      } catch (err) {
+        return sendJSON(res, 400, { error: String(err.message || err) });
+      }
+    }
+
+    if (pathname === '/api/narration-audio' && req.method === 'POST') {
+      try {
+        const raw = await readBody(req, 512 * 1024);
+        const result = handleNarrationPreviewRequest({ body: raw });
+        return sendJSON(res, result.status, result.body);
       } catch (err) {
         return sendJSON(res, 400, { error: String(err.message || err) });
       }
@@ -382,7 +496,7 @@ function startViewer({ root, openFile = null, port = 4321, open = true, _tries =
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE' && _tries < 50) {
-      startViewer({ root, openFile, port: port + 1, open, _tries: _tries + 1 });
+      startViewer({ root, openFile, deckId, port: port + 1, open, _tries: _tries + 1 });
     } else {
       console.error(`[slidey] ERROR: could not start viewer server: ${err.message}`);
       process.exit(1);
@@ -390,10 +504,12 @@ function startViewer({ root, openFile = null, port = 4321, open = true, _tries =
   });
 
   server.listen(port, '127.0.0.1', () => {
-    const url = `http://localhost:${port}/`;
+    const suffix = deckId ? `?deck=${encodeURIComponent(deckId)}` : '';
+    const url = `http://localhost:${port}/${suffix}`;
     console.log(`\n[slidey] Viewer  : ${url}`);
     console.log(`[slidey] Workspace: ${workspaceRoot}`);
     if (openFile) console.log(`[slidey] Opening : ${openFile}`);
+    if (deckId) console.log(`[slidey] Deck    : ${deckId}`);
     console.log('[slidey] Press Ctrl-C to stop.\n');
     if (open) openBrowser(url);
   });

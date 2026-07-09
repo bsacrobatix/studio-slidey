@@ -1,7 +1,7 @@
 <script setup>
-// Manual click-through controller: keyboard + click navigation, plus a progress
-// readout. Wraps a deck created by useDeck(). No audio, no autoplay (v1 scope).
-import { onMounted, onUnmounted } from 'vue';
+// Manual click-through controller: keyboard + click navigation, plus progress
+// and Edge TTS narration controls. Wraps a deck created by useDeck().
+import { computed, onMounted, onUnmounted } from 'vue';
 import { store } from '../store.js';
 
 const props = defineProps({
@@ -9,8 +9,37 @@ const props = defineProps({
   isInlineEditing: { type: Boolean, default: false },
   suppressDeckClick: { type: Boolean, default: false },
   clearDeckClickSuppression: { type: Function, default: () => {} },
+  narrationState: { type: Object, default: () => ({}) },
+  listenNarration: { type: Function, default: () => {} },
+  startLiveNarration: { type: Function, default: () => {} },
+  stopNarration: { type: Function, default: () => {} },
 });
 const s = props.deck.state;
+const narration = computed(() => props.narrationState || {});
+const canListen = computed(() => Boolean(narration.value.supported && narration.value.hasSceneNarration && !narration.value.live));
+const canPlayDeck = computed(() => Boolean(narration.value.supported && narration.value.hasDeckNarration));
+const listenLabel = computed(() => (narration.value.speaking && !narration.value.live ? 'Stop' : 'Listen'));
+const liveLabel = computed(() => (narration.value.live ? 'Stop deck' : 'Play deck'));
+const listenTitle = computed(() => {
+  if (!narration.value.supported) return 'Edge TTS preview is available in the Slidey web viewer and VS Code preview';
+  if (!narration.value.hasSceneNarration) return 'This slide has no narration';
+  return 'Listen to this slide narration';
+});
+const liveTitle = computed(() => {
+  if (!narration.value.supported) return 'Edge TTS preview is available in the Slidey web viewer and VS Code preview';
+  if (!narration.value.hasDeckNarration) return 'This deck has no narration';
+  return narration.value.live ? 'Stop narrated deck playback' : 'Play this deck live with Edge TTS narration';
+});
+
+function onListenNarration() {
+  if (narration.value.speaking && !narration.value.live) props.stopNarration();
+  else props.listenNarration();
+}
+
+function onLiveNarration() {
+  if (narration.value.live) props.stopNarration();
+  else props.startLiveNarration();
+}
 
 function onKey(e) {
   if (e.target.closest && e.target.closest('.slidey-editor')) return;
@@ -43,6 +72,7 @@ function onClick(e) {
   if (e.target.closest('.slidey-hud')) return;
   if (e.target.closest('.slidey-sidebar')) return;
   if (e.target.closest('.slidey-editor')) return;
+  if (e.target.closest('.slidey-library-link')) return;
   // Clicks on the video player / its transport (play, scrub, grab) must not also
   // advance the slide, so the controls are actually usable.
   if (e.target.closest('.video-cine-holder')) return;
@@ -84,6 +114,25 @@ onUnmounted(() => {
       :disabled="s.pos >= s.total - 1"
       @click="deck.last()"
     >⏭</button>
+    <div class="slidey-narration-controls" @click.stop>
+      <button
+        type="button"
+        class="slidey-narration-btn"
+        :class="{ active: narration.speaking && !narration.live }"
+        :disabled="!canListen && !(narration.speaking && !narration.live)"
+        :title="listenTitle"
+        @click="onListenNarration"
+      >{{ listenLabel }}</button>
+      <button
+        type="button"
+        class="slidey-narration-btn"
+        :class="{ active: narration.live }"
+        :disabled="!canPlayDeck && !narration.live"
+        :title="liveTitle"
+        @click="onLiveNarration"
+      >{{ liveLabel }}</button>
+      <span v-if="narration.error" class="slidey-narration-error" :title="narration.error">!</span>
+    </div>
     <div class="slidey-hint">⏮ ⏭ / ← → / click to navigate</div>
   </div>
 </template>
@@ -149,4 +198,47 @@ body.slidey-video-full .slidey-hud {
 }
 .slidey-jump:hover:not(:disabled) { color: #58a6ff; background: rgba(88,166,255,0.12); }
 .slidey-jump:disabled { opacity: 0.3; cursor: default; }
+.slidey-narration-controls {
+  pointer-events: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.slidey-narration-btn {
+  min-width: 66px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: rgba(22, 27, 34, 0.78);
+  color: #8b949e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 8px;
+}
+.slidey-narration-btn:hover:not(:disabled) {
+  border-color: #58a6ff;
+  color: #c9d1d9;
+}
+.slidey-narration-btn.active {
+  border-color: #3fb950;
+  color: #d2f8d2;
+  background: rgba(35, 134, 54, 0.24);
+}
+.slidey-narration-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.slidey-narration-error {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #da3633;
+  border-radius: 50%;
+  color: #ffb4ad;
+  font-size: 12px;
+  font-weight: bold;
+}
 </style>

@@ -149,15 +149,20 @@ function destroy() {
   playing.value = false;
 }
 
-function togglePlay() {
+function pause() {
   if (!player) return;
   if (playing.value) {
     player.pause();
     playing.value = false;
     stopTick();
     emit('pause');
-    return;
   }
+}
+
+function play(fromMs = null) {
+  if (!player) return;
+  if (fromMs != null) currentMs.value = Math.min(Math.max(0, Number(fromMs) || 0), totalMs.value);
+  if (playing.value) return;
   const from = currentMs.value >= totalMs.value ? 0 : currentMs.value;
   player.play(from);
   playing.value = true;
@@ -172,6 +177,11 @@ function togglePlay() {
       else { playing.value = false; stopTick(); emit('pause'); emit('ended'); }
     }
   }, 100);
+}
+
+function togglePlay() {
+  if (playing.value) pause();
+  else play();
 }
 
 function seek(ms) {
@@ -192,7 +202,7 @@ watch(() => props.events, () => { destroy(); mount(); });
 onMounted(mount);
 onBeforeUnmount(destroy);
 
-defineExpose({ play: togglePlay, seek, destroy });
+defineExpose({ play, pause, seek, destroy });
 </script>
 
 <template>

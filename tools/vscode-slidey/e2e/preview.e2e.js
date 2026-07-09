@@ -200,6 +200,19 @@ test('VS Code preview API treats raw rrweb logs as read-only replay decks', () =
   }
 });
 
+test('VS Code preview API exposes the Edge TTS narration route', () => {
+  const got = handleApiRequest({
+    root: ROOT,
+    openFile: path.relative(ROOT, EXAMPLE).split(path.sep).join('/'),
+  }, {
+    url: '/api/narration-audio',
+    method: 'POST',
+    body: JSON.stringify({ text: '' }),
+  });
+  assert.equal(got.status, 400);
+  assert.match(got.body.error, /narration text is empty/);
+});
+
 test('VS Code preview webview opens the real Slidey viewer and selected deck', async (t) => {
   assert.ok(fs.existsSync(path.join(DIST, 'index.html')), 'dist/index.html must exist; run npm run build:web first');
 
