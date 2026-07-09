@@ -16,7 +16,7 @@ const graphScene = {
     { id: 'proof', label: 'Proof', sub: 'validated', x: 240, y: 0 },
   ],
   edges: [
-    { id: 'runtime-proof', from: 'runtime', to: 'proof', label: 'produces' },
+    { id: 'runtime-proof', from: 'runtime', to: 'proof', label: 'produces', labelMarginX: 12, labelMarginY: -24 },
   ],
   path: [
     'runtime',
@@ -28,7 +28,25 @@ const graphScene = {
 test('schema accepts a graph scene with focus path entries', () => {
   const ajv = new Ajv({ allErrors: true, strict: false });
   const validate = ajv.compile(SCHEMA);
-  const ok = validate({ scenes: [graphScene] });
+  const ok = validate({
+    scenes: [{
+      ...graphScene,
+      layoutTemplate: 'lane-grid',
+      grid: { columns: 2, rows: 1, x: 0, y: 0, width: 240, height: 1 },
+      nodes: [
+        { id: 'runtime', label: 'Runtime', col: 1, row: 1 },
+        { id: 'proof', label: 'Proof', sub: 'validated', col: 2, row: 1 },
+      ],
+      focusMode: 'neighborhood',
+      focusPadding: 160,
+      floatMotion: true,
+      floatAmplitude: 8,
+      gravity: 0.4,
+      componentSpacing: 160,
+      nestingFactor: 1.05,
+      numIter: 1000,
+    }],
+  });
   assert.equal(ok, true, JSON.stringify(validate.errors, null, 2));
 });
 
@@ -56,6 +74,10 @@ test('store graph focus steps reveal the frame and reset between scenes', async 
   store.setState('graph_focus_1');
   assert.equal(store.graphFocus, 1);
   assert.equal(store.isRevealed('graph-frame'), true);
+
+  store.setState('graph_caption');
+  assert.equal(store.graphFocus, -1);
+  assert.equal(store.isRevealed('graph-caption'), true);
 
   store.showScene('graph', { type: 'graph', nodes: [{ id: 'other' }] });
   assert.equal(store.graphFocus, -1);

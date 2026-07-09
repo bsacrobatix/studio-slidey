@@ -359,6 +359,7 @@ export const store = reactive({
         this.revealed.add('graph-frame');
         continue;
       }
+      if (step === 'graph_caption') this.graphFocus = -1;
       if (step === 'reveal_all') {
         this.revealAll = true;
         continue;
@@ -397,6 +398,7 @@ export const store = reactive({
       this.revealed.add('graph-frame');
       return;
     }
+    if (step === 'graph_caption') this.graphFocus = -1;
     if (step === 'reveal_all') { this.revealAll = true; return; }
     const ids = PITCH_REVEALS[step];
     if (ids) { ids.forEach(id => this.revealed.add(id)); return; }

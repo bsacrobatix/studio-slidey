@@ -710,6 +710,46 @@ Single-panel vs two-panel layouts differ in scale (single = larger fonts,
 fixed 680px SVG height, no panel chrome; two = side-by-side, smaller fonts,
 1/0.7 aspect ratio). See the authoring skill for sizing rules.
 
+#### `graph` — Cytoscape graph viewer with reveal-by-reveal navigation
+
+Use `graph` when the audience should follow a path through a graph, not just
+inspect a static diagram. The first reveal shows the graph; each `path` entry
+can center a node, highlight one or more edges, and show a short focus note.
+
+For repeatable pitch or diligence diagrams, prefer a lane grid over hand-tuned
+pixel positions:
+
+```json
+{
+  "type": "graph",
+  "title": "Buyer diligence graph",
+  "layout": "preset",
+  "layoutTemplate": "lane-grid",
+  "grid": { "columns": 5, "rows": 3, "x": 105, "y": 95, "width": 2800, "height": 810 },
+  "nodes": [
+    { "id": "buyer", "label": "Regulated buyer", "col": 1, "row": 2 },
+    { "id": "gate", "label": "FIPS 140-3", "sub": "federal crypto gate", "col": 2, "row": 1 },
+    { "id": "proof", "label": "Security packet", "col": 4, "row": 1 },
+    { "id": "signoff", "label": "Diligence signoff", "col": 5, "row": 2 }
+  ],
+  "edges": [
+    { "id": "buyer-gate", "from": "buyer", "to": "gate", "label": "eligibility gate", "weight": 10 },
+    { "id": "gate-proof", "from": "gate", "to": "proof", "label": "evidence", "weight": 8 },
+    { "id": "proof-signoff", "from": "proof", "to": "signoff", "label": "clears gate", "weight": 10 }
+  ],
+  "path": [
+    { "node": "buyer", "view": "overview" },
+    { "node": "gate", "edge": "buyer-gate", "note": "Hard gate before evaluation." }
+  ]
+}
+```
+
+`layoutTemplate: "lane-grid-3x5"` is a built-in shortcut for three horizontal
+lanes across five columns. A custom `grid` overrides the shortcut. Nodes use
+one-indexed `col`/`row` slots plus optional `xOffset`/`yOffset` nudges for small
+semantic adjustments. Edge labels get deterministic geometry-based offsets and
+opaque backgrounds; use `labelMarginX`/`labelMarginY` only for exceptions.
+
 #### `mermaid` — Mermaid diagrams rendered as themed SVG
 
 ```json
