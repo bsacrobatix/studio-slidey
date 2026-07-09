@@ -22,8 +22,10 @@ import { resolveEvidencePlaybackHref } from '../evidencePlayback.mjs';
 import {
   audioUrlFromBase64,
   speechTextForScene,
+  stepNarrationCues,
   timedNarrationCues,
 } from '../narration.mjs';
+import { stepsForScene } from '../sceneSteps.mjs';
 import { normalizeReference, normalizeReferences } from '../reference-viewer.js';
 
 const deck = shallowRef(null);
@@ -138,11 +140,17 @@ const narrationState = computed(() => ({
 }));
 let narrationSeq = 0;
 let narrationAbortController = null;
+const activeNarrationControllers = new Set();
 const activeNarrationAudio = new Set();
 const narrationObjectUrls = new Set();
 let liveNarrationTimer = null;
 let liveAdvanceInProgress = false;
+let sceneNarrationSeq = 0;
+let sceneNarrationAdvanceInProgress = false;
 let videoCueState = { key: '', cues: [], spoken: new Set() };
+const NARRATION_PREFETCH_AHEAD = 2;
+const SILENT_WAV_DATA_URL = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+let narrationAudioElement = null;
 
 function deckKind(option) {
   if (!option) return '';
@@ -539,12 +547,57 @@ function revokeNarrationUrl(url) {
   try { URL.revokeObjectURL(url); } catch (_) {}
 }
 
+function reusableNarrationAudio() {
+  if (!narrationAudioElement) {
+    narrationAudioElement = new Audio();
+    narrationAudioElement.preload = 'auto';
+    narrationAudioElement.playsInline = true;
+  }
+  return narrationAudioElement;
+}
+
+function primeNarrationPlaybackForGesture() {
+  const audio = reusableNarrationAudio();
+  try {
+    audio.pause();
+    audio.muted = true;
+    audio.src = SILENT_WAV_DATA_URL;
+    const started = audio.play();
+    if (started && typeof started.then === 'function') {
+      started
+        .then(() => {
+          try {
+            audio.pause();
+            audio.currentTime = 0;
+          } catch (_) {}
+          audio.muted = false;
+        })
+        .catch(() => {
+          audio.muted = false;
+        });
+    } else {
+      audio.muted = false;
+    }
+  } catch (_) {
+    audio.muted = false;
+  }
+}
+
+function resetNarrationForUserGesture() {
+  stopNarrationAudioOnly();
+  primeNarrationPlaybackForGesture();
+}
+
 function stopNarrationAudioOnly() {
   narrationSeq += 1;
   if (narrationAbortController) {
     try { narrationAbortController.abort(); } catch (_) {}
     narrationAbortController = null;
   }
+  for (const controller of Array.from(activeNarrationControllers)) {
+    try { controller.abort(); } catch (_) {}
+  }
+  activeNarrationControllers.clear();
   narrationLoading.value = false;
   for (const audio of activeNarrationAudio) {
     try {
@@ -559,6 +612,7 @@ function stopNarrationAudioOnly() {
 }
 
 function stopNarration(opts = {}) {
+  sceneNarrationSeq += 1;
   liveNarration.value = false;
   clearLiveNarrationTimer();
   resetVideoCueState();
@@ -592,12 +646,36 @@ async function requestNarrationAudio(text, signal) {
   return url;
 }
 
+async function requestNarrationAudioWithController(text, controller) {
+  activeNarrationControllers.add(controller);
+  narrationLoading.value = true;
+  updateNarrationActivity();
+  try {
+    return await requestNarrationAudio(text, controller.signal);
+  } finally {
+    activeNarrationControllers.delete(controller);
+    if (narrationAbortController === controller) narrationAbortController = null;
+    narrationLoading.value = activeNarrationControllers.size > 0;
+    updateNarrationActivity();
+  }
+}
+
 function playNarrationUrl(url, token, opts = {}) {
   return new Promise((resolve) => {
-    const audio = new Audio(url);
+    const audio = reusableNarrationAudio();
+    try {
+      audio.pause();
+      audio.onended = null;
+      audio.onerror = null;
+      audio.onloadedmetadata = null;
+      audio.oncanplay = null;
+      audio.muted = false;
+      audio.src = url;
+    } catch (_) {}
     activeNarrationAudio.add(audio);
     updateNarrationActivity();
     let settled = false;
+    let started = false;
     const finish = (ok, err) => {
       if (settled) return;
       settled = true;
@@ -612,9 +690,19 @@ function playNarrationUrl(url, token, opts = {}) {
       if (ok && typeof opts.onDone === 'function') opts.onDone();
       resolve(ok);
     };
+    const startPlayback = () => {
+      if (started || settled) return;
+      started = true;
+      if (typeof opts.onStart === 'function') {
+        try { opts.onStart(audio); } catch (_) {}
+      }
+      audio.play().catch(err => finish(false, err));
+    };
     audio.onended = () => finish(true);
     audio.onerror = () => finish(false, new Error('Could not play edge-tts narration audio'));
-    audio.play().catch(err => finish(false, err));
+    audio.onloadedmetadata = startPlayback;
+    audio.oncanplay = startPlayback;
+    audio.load();
   });
 }
 
@@ -631,10 +719,8 @@ async function speakText(text, opts = {}) {
   const controller = new AbortController();
   if (cancelFirst) narrationAbortController = controller;
   narrationError.value = '';
-  narrationLoading.value = true;
-  updateNarrationActivity();
   try {
-    const url = await requestNarrationAudio(raw, controller.signal);
+    const url = await requestNarrationAudioWithController(raw, controller);
     if (token !== narrationSeq) {
       revokeNarrationUrl(url);
       return false;
@@ -646,10 +732,84 @@ async function speakText(text, opts = {}) {
     }
     return false;
   } finally {
-    if (narrationAbortController === controller) narrationAbortController = null;
-    if (token === narrationSeq) narrationLoading.value = false;
     updateNarrationActivity();
   }
+}
+
+function preloadNarrationCue(item, audioToken, sceneToken) {
+  if (!item || !item.cue) return null;
+  if (item.audio) return item.audio;
+  const controller = new AbortController();
+  const promise = requestNarrationAudioWithController(item.cue, controller)
+    .then(url => {
+      if (audioToken !== narrationSeq || sceneToken !== sceneNarrationSeq) {
+        revokeNarrationUrl(url);
+        return null;
+      }
+      return url;
+    })
+    .catch(err => {
+      if (audioToken === narrationSeq && sceneToken === sceneNarrationSeq && (!err || err.name !== 'AbortError')) {
+        item.error = err;
+      }
+      return null;
+    });
+  item.audio = { controller, promise };
+  return item.audio;
+}
+
+function primeNarrationBuffer(items, index, audioToken, sceneToken) {
+  for (let i = index; i < Math.min(items.length, index + NARRATION_PREFETCH_AHEAD + 1); i += 1) {
+    preloadNarrationCue(items[i], audioToken, sceneToken);
+  }
+}
+
+async function waitForNarrationCue(item, audioToken, sceneToken) {
+  if (!item || !item.cue) return '';
+  const entry = preloadNarrationCue(item, audioToken, sceneToken);
+  const url = entry ? await entry.promise : '';
+  if (audioToken !== narrationSeq || sceneToken !== sceneNarrationSeq) return '';
+  if (!url) {
+    const detail = item.error && item.error.message ? item.error.message : item.error;
+    narrationError.value = detail ? `Narration paused: ${detail}` : 'Narration paused: audio for the next reveal was not available.';
+    return '';
+  }
+  return url;
+}
+
+async function playBufferedNarrationSteps(items, sceneToken) {
+  if (!Array.isArray(items) || !items.length) return false;
+  if (!narrationPreviewSupported.value) {
+    narrationError.value = 'Edge TTS preview is available in the Slidey web viewer and VS Code preview.';
+    return false;
+  }
+  const audioToken = narrationSeq;
+  narrationError.value = '';
+  primeNarrationBuffer(items, 0, audioToken, sceneToken);
+  for (let i = 0; i < items.length; i += 1) {
+    if (audioToken !== narrationSeq || sceneToken !== sceneNarrationSeq) return false;
+    primeNarrationBuffer(items, i, audioToken, sceneToken);
+    const item = items[i];
+    const url = await waitForNarrationCue(item, audioToken, sceneToken);
+    if (audioToken !== narrationSeq || sceneToken !== sceneNarrationSeq) return false;
+    if (item.cue && !url) {
+      stopNarrationAudioOnly();
+      return false;
+    }
+    const ok = await goForSceneNarration(item.pos, sceneToken);
+    if (!ok) return false;
+    if (url) {
+      const played = await playNarrationUrl(url, audioToken);
+      if (!played) {
+        stopNarrationAudioOnly();
+        return false;
+      }
+    } else {
+      const stillCurrent = await delaySceneNarration(item.delayMs || 650, sceneToken);
+      if (!stillCurrent) return false;
+    }
+  }
+  return true;
 }
 
 function videoCueKey() {
@@ -684,6 +844,59 @@ async function advanceLiveNarration() {
   runLiveNarrationForCurrent();
 }
 
+function delaySceneNarration(ms, token) {
+  return new Promise(resolve => {
+    window.setTimeout(() => resolve(token === sceneNarrationSeq), Math.max(0, Number(ms || 0)));
+  });
+}
+
+async function goForSceneNarration(pos, token) {
+  if (!deck.value || token !== sceneNarrationSeq) return false;
+  sceneNarrationAdvanceInProgress = true;
+  try {
+    await deck.value.go(pos);
+    await nextTick();
+  } finally {
+    sceneNarrationAdvanceInProgress = false;
+  }
+  return token === sceneNarrationSeq;
+}
+
+function firstNarrationStepIndex(scene, steps) {
+  if (scene && scene.type === 'graph') {
+    const frameIndex = steps.indexOf('graph_frame');
+    if (frameIndex > 0) return frameIndex;
+  }
+  return 0;
+}
+
+async function listenCurrentSceneByReveal(scene, token) {
+  if (!deck.value || !scene) return;
+  const state = deck.value.state;
+  const sceneIndex = state ? state.sceneIndex : 0;
+  const steps = stepsForScene(scene);
+  if (!steps.length) {
+    await speakText(speechTextForScene(scene), { cancel: false });
+    return;
+  }
+
+  const startPos = deck.value.posForScene(sceneIndex, 0);
+  const cues = stepNarrationCues(scene, steps);
+  const firstStepIndex = firstNarrationStepIndex(scene, steps);
+  if (firstStepIndex > 0) {
+    const leadingCue = cues.slice(0, firstStepIndex).map(cue => String(cue || '').trim()).filter(Boolean).join('\n');
+    if (leadingCue) cues[firstStepIndex] = [leadingCue, cues[firstStepIndex]].filter(Boolean).join('\n');
+  }
+  const items = [];
+  for (let i = firstStepIndex; i < steps.length; i += 1) {
+    items.push({ index: i, pos: startPos + i, cue: String(cues[i] || '').trim() });
+  }
+  if (!items.length) return;
+  const delayMs = scene.type === 'graph' ? 760 : 650;
+  for (const item of items) item.delayMs = delayMs;
+  await playBufferedNarrationSteps(items, token);
+}
+
 function runLiveNarrationForCurrent() {
   if (!liveNarration.value || !deck.value) return;
   clearLiveNarrationTimer();
@@ -692,9 +905,10 @@ function runLiveNarrationForCurrent() {
   if (scene.type === 'video') {
     armVideoCueNarration(scene);
     if (typeof scene.narration === 'string' && scene.narration.trim()) {
-      speakText(scene.narration, { cancel: true });
+      speakText(scene.narration, { cancel: false });
     } else {
-      stopNarrationAudioOnly();
+      narrationLoading.value = false;
+      updateNarrationActivity();
     }
     nextTick(() => {
       try {
@@ -709,26 +923,33 @@ function runLiveNarrationForCurrent() {
   }
   const text = speechTextForScene(scene);
   if (text) {
-    speakText(text, { cancel: true, onDone: advanceLiveNarration });
+    speakText(text, { cancel: false, onDone: advanceLiveNarration });
   } else {
-    stopNarrationAudioOnly();
+    narrationLoading.value = false;
+    updateNarrationActivity();
     liveNarrationTimer = setTimeout(advanceLiveNarration, 1200);
   }
 }
 
 function listenCurrentNarration() {
+  sceneNarrationSeq += 1;
+  const token = sceneNarrationSeq;
   liveNarration.value = false;
   clearLiveNarrationTimer();
   resetVideoCueState();
-  const text = speechTextForScene(currentScene.value);
+  resetNarrationForUserGesture();
+  const scene = currentScene.value;
+  const text = speechTextForScene(scene);
   if (!text) {
     narrationError.value = 'This slide has no narration.';
     return;
   }
-  speakText(text, { cancel: true });
+  listenCurrentSceneByReveal(scene, token);
 }
 
 function startLiveNarration() {
+  sceneNarrationSeq += 1;
+  resetNarrationForUserGesture();
   if (!deck.value) return;
   if (!narrationPreviewSupported.value) {
     narrationError.value = 'Edge TTS preview is available in the Slidey web viewer and VS Code preview.';
@@ -765,6 +986,8 @@ watch(() => {
   const state = deck.value && deck.value.state;
   return state ? `${activeDeckId.value}:${state.sceneIndex}:${state.pos}` : '';
 }, () => {
+  if (sceneNarrationAdvanceInProgress) return;
+  sceneNarrationSeq += 1;
   clearLiveNarrationTimer();
   resetVideoCueState();
   stopNarrationAudioOnly();

@@ -136,7 +136,20 @@ onUnmounted(() => {
         :title="liveTitle"
         @click="onLiveNarration"
       >{{ liveLabel }}</button>
-      <span v-if="narration.error" class="slidey-narration-error" :title="narration.error">!</span>
+      <span
+        v-if="narration.error"
+        class="slidey-narration-error"
+        tabindex="0"
+        role="status"
+        :title="`Narration error: ${narration.error}`"
+        :aria-label="`Narration error: ${narration.error}`"
+      >
+        !
+        <span class="slidey-narration-error-popover">
+          <strong>Narration error:</strong>
+          <span>{{ narration.error }}</span>
+        </span>
+      </span>
     </div>
     <div class="slidey-hint">⏮ ⏭ / ← → / click to navigate</div>
   </div>
@@ -209,6 +222,7 @@ body.slidey-video-full .slidey-hud {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  position: relative;
 }
 .slidey-narration-btn {
   min-width: 66px;
@@ -236,6 +250,7 @@ body.slidey-video-full .slidey-hud {
   cursor: default;
 }
 .slidey-narration-error {
+  position: relative;
   width: 18px;
   height: 18px;
   display: grid;
@@ -245,5 +260,42 @@ body.slidey-video-full .slidey-hud {
   color: #ffb4ad;
   font-size: 12px;
   font-weight: bold;
+  cursor: help;
+  outline: none;
+}
+.slidey-narration-error:focus-visible {
+  box-shadow: 0 0 0 2px rgba(218, 54, 51, 0.45);
+}
+.slidey-narration-error-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 1001;
+  display: none;
+  width: min(420px, calc(100vw - 44px));
+  padding: 10px 12px;
+  border: 1px solid rgba(248, 81, 73, 0.55);
+  border-radius: 6px;
+  background: rgba(22, 27, 34, 0.98);
+  color: #ffd6d2;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+}
+.slidey-narration-error-popover strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #ffb4ad;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.slidey-narration-error:hover .slidey-narration-error-popover,
+.slidey-narration-error:focus .slidey-narration-error-popover {
+  display: block;
 }
 </style>
