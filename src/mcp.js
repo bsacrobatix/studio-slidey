@@ -461,30 +461,51 @@ async function loadRenderPage(spec, specPath, sceneIndex, stepIndex) {
 }
 
 // Video scenes are not rendered through the Vue bundle (it excludes the rrweb
-// web player; live render rasterizes natively). Emit a representative poster
-// still instead — the frame a reviewer actually QAs — mirroring the PNG
-// exporter (src/png.js). rrweb-log sources seek-rasterize a single frame; MP4
-// `src` sources grab a frame ~10% in. Returns null if the source is missing so
-// the caller can fall back to the (placeholder) Vue render.
+// web player). Instead we drive the REAL clip headlessly and screenshot a frame:
+// an rrweb source seeks its Replayer to `atSec` (a genuine reconstructed DOM
+// frame, not a placeholder); an MP4 `src` grabs a frame ~10% in. `atSec` is
+// clamped to the clip duration so a caller can scrub the whole replay without a
+// browser. Returns null if the source is missing so the caller can fall back to
+// the Vue render.
 async function renderVideoPoster(args, spec, specPath, sceneIndex, scene) {
   const executableError = browserExecutableError();
   if (executableError) throw new Error(executableError);
   const { width = 1920, height = 1080 } = (spec.meta && spec.meta.resolution) || {};
   const tmpPng = path.join(tempRoot(), `slidey-mcp-poster-${process.pid}-${sceneIndex}.png`);
   const specDir = path.dirname(specPath || '.');
+  // atSecond (explicit scrub) overrides the scene start; both default to the
+  // exporter's "~10% in" representative frame when unset.
+  const requested = typeof args.atSecond === 'number' ? args.atSecond : scene.start;
+  let atSec = requested;
+  let durationSec = null;
+  let note = 'real rrweb replay frame, seeked headlessly (the interactive bundle plays the full clip in-browser)';
   try {
     if (scene.rrweb) {
       const rrwebPath = path.resolve(specDir, scene.rrweb);
       if (!fs.existsSync(rrwebPath)) return null;
+      const { loadRrweb } = require('./rrweb-format');
       const { extractRrwebPoster } = require('./rrweb-render');
-      await extractRrwebPoster(rrwebPath, tmpPng, { width, height, fit: scene.fit || 'contain', atSec: scene.start || undefined });
+      // Clamp the requested seek into the clip so an out-of-range atSecond yields
+      // the last frame rather than an error.
+      try {
+        const meta = loadRrweb(rrwebPath);
+        if (meta && typeof meta.durationMs === 'number') {
+          durationSec = meta.durationMs / 1000;
+          if (typeof requested === 'number') atSec = Math.max(0, Math.min(requested, durationSec));
+        }
+      } catch (_) { /* duration is best-effort; render still proceeds */ }
+      await extractRrwebPoster(rrwebPath, tmpPng, { width, height, fit: scene.fit || 'contain', atSec: atSec || undefined });
     } else if (scene.src) {
       const v = require('./video');
       const src = path.resolve(specDir, scene.src);
       if (!fs.existsSync(src)) return null;
       const dur = v.probeDuration(src);
-      const at = Math.max(0, scene.start || 0) + Math.min(1, (dur || 0) * 0.1);
-      v.extractPoster({ src, outPng: tmpPng, width, height, fit: scene.fit || 'contain', atSec: at });
+      durationSec = dur || null;
+      atSec = typeof requested === 'number'
+        ? Math.max(0, Math.min(requested, dur || requested))
+        : Math.max(0, scene.start || 0) + Math.min(1, (dur || 0) * 0.1);
+      note = 'real video frame extracted at the requested time (the interactive bundle plays the full clip)';
+      v.extractPoster({ src, outPng: tmpPng, width, height, fit: scene.fit || 'contain', atSec });
     } else {
       return null;
     }
@@ -497,8 +518,10 @@ async function renderVideoPoster(args, spec, specPath, sceneIndex, scene) {
             path: args.path,
             sceneIndex,
             poster: true,
-            note: 'video scene rendered as a native poster still (the Vue bundle excludes the live rrweb player)',
+            note,
             source: scene.rrweb || scene.src,
+            atSec: atSec || 0,
+            durationSec,
             width,
             height,
           }, null, 2),
@@ -579,6 +602,27 @@ async function renderHtml(args) {
   } finally {
     await closeBrowser(session.browser);
   }
+}
+
+// bundleSpec renders a spec to a single self-contained interactive HTML deck by
+// running the same `web/build-single.mjs` builder the `slidey bundle` CLI uses
+// (which inlines JS/CSS/assets, including the rrweb clip, and embeds the spec as
+// window.__SLIDEY_SPEC__). Validates first unless skipValidate is set, so the
+// MCP never ships a deck with blank slides. Returns the written .html path.
+function bundleSpec(absSpec, spec, absOut, { skipValidate = false } = {}) {
+  if (!skipValidate) {
+    const validation = validateSpec(spec, { specPath: absSpec });
+    if (!validation.valid) {
+      const problems = (validation.errors || []).join('\n');
+      const err = new Error(`spec is invalid (${validation.count || (validation.errors || []).length} problem(s)) — refusing to bundle a deck that won't render correctly; fix these or pass skipValidate=true:\n${problems}`);
+      err.validation = validation;
+      throw err;
+    }
+  }
+  const script = path.join(ROOT_DIR, 'web', 'build-single.mjs');
+  fs.mkdirSync(path.dirname(absOut), { recursive: true });
+  require('child_process').execFileSync(process.execPath, [script, absSpec, absOut], { stdio: 'pipe' });
+  return absOut;
 }
 
 function captureConsole(fn) {
@@ -735,12 +779,22 @@ const TOOLS = [
   },
   {
     name: 'slidey_render_png',
-    description: 'Render a particular scene/reveal step as a PNG image using the real Slidey Vue render bundle.',
+    description: 'Render a particular scene/reveal step as a PNG image using the real Slidey Vue render bundle. For a video/rrweb scene, returns a REAL replay frame seeked headlessly via rrweb (pass atSecond to scrub to any moment).',
     inputSchema: toolInputSchema({
       path: { type: 'string' },
       sceneIndex: { type: 'integer', minimum: 0 },
       stepIndex: { type: 'integer', minimum: 0, description: 'Reveal step index. Omit for final step of the scene.' },
+      atSecond: { type: 'number', minimum: 0, description: 'For a video/rrweb scene: replay time (seconds) to seek to before screenshotting. Omit to use the scene start. Clamped to the clip duration.' },
     }, ['path', 'sceneIndex']),
+  },
+  {
+    name: 'slidey_bundle',
+    description: 'Render a spec to a single self-contained, interactive HTML deck (the rrweb replay plays in-browser, no external assets). Validates first, then writes the .html. This is the MCP equivalent of `slidey bundle` — no CLI needed.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string', description: 'Workspace-relative (or absolute) .slidey.json spec to bundle.' },
+      out: { type: 'string', description: 'Output .html path. Defaults to the spec path with a .html extension.' },
+      skipValidate: { type: 'boolean', description: 'Bundle even if validation reports problems (default false).' },
+    }, ['path']),
   },
   {
     name: 'slidey_render_html',
@@ -1002,6 +1056,21 @@ async function callTool(name, args = {}) {
 
     case 'slidey_render_html':
       return await renderHtml(args);
+
+    case 'slidey_bundle': {
+      const { abs, spec } = readSpecFile(args.path);
+      const absOut = args.out
+        ? safeResolve(args.out)
+        : abs.replace(/\.slidey\.json$/i, '.html').replace(/\.json$/i, '.html');
+      const written = bundleSpec(abs, spec, absOut, { skipValidate: !!args.skipValidate });
+      return okResult({
+        path: relPath(abs),
+        bundled: relPath(written),
+        bytes: fs.statSync(written).size,
+        selfContained: true,
+        note: 'Single-file interactive deck — open in a browser or host as-is; the rrweb replay plays inline.',
+      });
+    }
 
     case 'slidey_check': {
       const { spec } = readSpecFile(args.path);

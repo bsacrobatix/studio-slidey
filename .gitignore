@@ -21,6 +21,7 @@ audio/
 .DS_Store
 *.swp
 *~
+.vscode-test/
 
 # Kitsoki local runtime
 .kitsoki.local.yaml

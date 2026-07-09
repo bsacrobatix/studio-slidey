@@ -74,7 +74,7 @@ function wrapMcpProcess(child, opts = {}) {
     }
   });
 
-  function send(method, params = {}) {
+  function send(method, params = {}, timeoutMs = 5000) {
     const id = nextId++;
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
     if (requestTransport === 'framed') {
@@ -86,7 +86,7 @@ function wrapMcpProcess(child, opts = {}) {
       pending.set(id, { resolve, reject });
       setTimeout(() => {
         if (pending.delete(id)) reject(new Error(`timed out waiting for ${method}`));
-      }, 5000).unref();
+      }, timeoutMs).unref();
     });
   }
 
@@ -411,4 +411,60 @@ test('project MCP config starts Slidey from the repo root', async (t) => {
   const names = tools.result.tools.map((tool) => tool.name);
   assert.ok(names.includes('slidey_workspace_tree'));
   assert.ok(names.includes('slidey_doctor'));
+});
+
+test('slidey_bundle produces a self-contained interactive deck over MCP', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-bundle-'));
+  fs.writeFileSync(path.join(root, 'deck.slidey.json'), JSON.stringify({
+    meta: { title: 'Bundle test', mode: 'pitch' },
+    scenes: [
+      { type: 'title', title: 'Hello', subtitle: 'self-contained' },
+      { type: 'cta', wordmark: 'slidey', tagline: 'no CLI needed' },
+    ],
+  }, null, 2) + '\n');
+
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+  await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+
+  // The render_png schema advertises the atSecond scrub control.
+  const tools = await server.send('tools/list');
+  const png = tools.result.tools.find((tl) => tl.name === 'slidey_render_png');
+  assert.ok(png && png.inputSchema.properties.atSecond, 'render_png should expose atSecond');
+  assert.ok(tools.result.tools.some((tl) => tl.name === 'slidey_bundle'), 'slidey_bundle should be listed');
+
+  // Bundling a vite deck takes a few seconds; allow generous headroom.
+  const res = await server.send('tools/call', {
+    name: 'slidey_bundle',
+    arguments: { path: 'deck.slidey.json', out: 'deck.html' },
+  }, 120000);
+  assert.ifError(res.error);
+  const payload = JSON.parse(res.result.content[0].text);
+  assert.equal(payload.selfContained, true);
+  assert.equal(payload.bundled, 'deck.html');
+
+  const html = fs.readFileSync(path.join(root, 'deck.html'), 'utf8');
+  assert.ok(html.length > 100000, `bundle should inline assets (got ${html.length} bytes)`);
+  assert.ok(html.includes('__SLIDEY_SPEC__'), 'bundle should embed the spec');
+});
+
+test('slidey_bundle refuses an invalid spec unless skipValidate', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-bundle-bad-'));
+  // A table scene with raw-array rows + no variant is the classic won't-render case.
+  fs.writeFileSync(path.join(root, 'bad.slidey.json'), JSON.stringify({
+    meta: { title: 'Bad', mode: 'pitch' },
+    scenes: [{ type: 'table', rows: [['a', 'b']] }],
+  }, null, 2) + '\n');
+
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+  await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+
+  const res = await server.send('tools/call', {
+    name: 'slidey_bundle',
+    arguments: { path: 'bad.slidey.json', out: 'bad.html' },
+  }, 30000);
+  // Invalid spec → tool error, no html written.
+  assert.ok(res.error || (res.result && res.result.isError), 'invalid spec should not bundle');
+  assert.ok(!fs.existsSync(path.join(root, 'bad.html')), 'no deck should be written for an invalid spec');
 });

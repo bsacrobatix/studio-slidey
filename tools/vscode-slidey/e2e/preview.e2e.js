@@ -11,6 +11,7 @@ const { launchOptions } = require('../../../src/browser');
 const { mkdtemp } = require('../../../src/temp-path');
 const {
   handleApiRequest,
+  handleOpenReference,
   handleSpecWrite,
   readSpec,
   writeSpecDocument,
@@ -49,6 +50,7 @@ function fakeWebviewFor(origin) {
 function servePreview() {
   let origin = '';
   const vscode = fakeVscodeFor();
+  const openRequests = [];
   const server = http.createServer((req, res) => {
     if (req.url === '/' || req.url === '/index.html') {
       const webview = fakeWebviewFor(origin);
@@ -78,12 +80,18 @@ window.__slideyAcquireVsCodeApi = () => ({
       req.on('data', (chunk) => chunks.push(chunk));
       req.on('end', () => {
         const msg = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        const result = handleApiRequest({
-          root: ROOT,
-          openFile: path.relative(ROOT, EXAMPLE).split(path.sep).join('/'),
-          webview: fakeWebviewFor(origin),
-          vscode,
-        }, msg);
+        let result;
+        if (msg.type === 'slidey.openReference') {
+          openRequests.push(JSON.parse(msg.body || '{}'));
+          result = { status: 200, body: { ok: true } };
+        } else {
+          result = handleApiRequest({
+            root: ROOT,
+            openFile: path.relative(ROOT, EXAMPLE).split(path.sep).join('/'),
+            webview: fakeWebviewFor(origin),
+            vscode,
+          }, msg);
+        }
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ type: 'slidey.response', id: msg.id, status: result.status, body: result.body }));
       });
@@ -103,7 +111,7 @@ window.__slideyAcquireVsCodeApi = () => ({
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address();
       origin = `http://127.0.0.1:${port}`;
-      resolve({ server, url: origin });
+      resolve({ server, url: origin, openRequests });
     });
   });
 }
@@ -213,10 +221,72 @@ test('VS Code preview API exposes the Edge TTS narration route', () => {
   assert.match(got.body.error, /narration text is empty/);
 });
 
+test('handleOpenReference opens workspace files in VS Code and rejects escapes', async (t) => {
+  const dir = mkdtemp('slidey-vscode-open-');
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const abs = path.join(dir, 'sample.js');
+  const patchAbs = path.join(dir, 'change.patch');
+  fs.writeFileSync(abs, 'one\ntwo\nthree\n', 'utf8');
+  fs.writeFileSync(patchAbs, 'diff --git a/a b/a\n-old\n+new\n', 'utf8');
+
+  const calls = { shown: null, opened: null };
+  const fakeDoc = {
+    uri: { fsPath: abs },
+    lineCount: 3,
+    lineAt: (line) => ({ range: { end: { line, character: ['one', 'two', 'three'][line].length } } }),
+  };
+  const vscode = {
+    Uri: { file: (f) => ({ fsPath: f }) },
+    ViewColumn: { Active: -1 },
+    Position: function (line, character) { this.line = line; this.character = character; },
+    Range: function (start, end) { this.start = start; this.end = end; },
+    workspace: {
+      openTextDocument: async (uri) => {
+        if (uri.fsPath === abs) return fakeDoc;
+        if (uri.fsPath === patchAbs) return { ...fakeDoc, uri, lineCount: 3 };
+        throw new Error(`unexpected openTextDocument path: ${uri.fsPath}`);
+      },
+    },
+    window: {
+      showTextDocument: async (_doc, opts) => { calls.shown = opts; },
+    },
+    commands: {
+      executeCommand: async (_cmd, uri) => { calls.opened = uri.fsPath; },
+    },
+  };
+
+  const ok = await handleOpenReference({ root: dir, vscode }, {
+    method: 'POST',
+    url: '/api/open-reference',
+    body: JSON.stringify({ src: 'sample.js', kind: 'code', lineStart: 2, lineEnd: 3 }),
+  });
+  assert.equal(ok.status, 200);
+  assert.equal(calls.shown.selection.start.line, 1);
+  assert.equal(calls.shown.selection.end.line, 2);
+  assert.equal(calls.opened, null);
+
+  calls.shown = null;
+  const diff = await handleOpenReference({ root: dir, vscode }, {
+    method: 'POST',
+    url: '/api/open-reference',
+    body: JSON.stringify({ src: 'change.patch', kind: 'diff' }),
+  });
+  assert.equal(diff.status, 200);
+  assert.equal(calls.shown.preview, false);
+  assert.equal(calls.opened, null);
+
+  const outside = await handleOpenReference({ root: dir, vscode }, {
+    method: 'POST',
+    url: '/api/open-reference',
+    body: JSON.stringify({ src: '../outside.js', kind: 'code' }),
+  });
+  assert.equal(outside.status, 404);
+});
+
 test('VS Code preview webview opens the real Slidey viewer and selected deck', async (t) => {
   assert.ok(fs.existsSync(path.join(DIST, 'index.html')), 'dist/index.html must exist; run npm run build:web first');
 
-  const { server, url } = await servePreview();
+  const { server, url, openRequests } = await servePreview();
   t.after(() => server.close());
 
   const browser = await puppeteer.launch(launchOptions({ width: 1440, height: 900 }));
@@ -253,4 +323,12 @@ test('VS Code preview webview opens the real Slidey viewer and selected deck', a
   assert.equal(state.hasReload, true, 'embedded preview must show the reload button');
   assert.match(state.title, /Hello, Slidey|Slidey/);
   assert.match(state.title, /Declarative videos from a JSON spec/);
+
+  const opened = await page.evaluate(() => {
+    if (typeof window.slideyOpenReference !== 'function') return false;
+    return window.slideyOpenReference({ src: 'examples/hello.slidey.json', kind: 'json', lineStart: 2 })
+      .then(() => true);
+  });
+  assert.equal(opened, true, 'embedded preview exposes direct open-reference bridge');
+  assert.deepEqual(openRequests, [{ src: 'examples/hello.slidey.json', kind: 'json', lineStart: 2 }]);
 });

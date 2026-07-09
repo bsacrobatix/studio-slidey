@@ -259,6 +259,53 @@ async function handleSpecWrite({ root, vscode }, request) {
   }
 }
 
+async function handleOpenReference({ root, vscode }, request) {
+  const workspaceRoot = path.resolve(root);
+  let payload;
+  try {
+    payload = JSON.parse(request.body || '{}');
+  } catch (err) {
+    return response(400, { error: `invalid JSON body: ${err.message}` });
+  }
+  const rel = typeof payload.src === 'string' ? payload.src : '';
+  const abs = safeResolve(workspaceRoot, rel);
+  if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+    return response(404, { error: `not found: ${rel}` });
+  }
+
+  const uri = vscode.Uri.file(abs);
+  const lineStart = Number(payload.lineStart);
+  const lineEnd = Number(payload.lineEnd || payload.lineStart);
+  const kind = typeof payload.kind === 'string' ? payload.kind : '';
+  const preferText = ['code', 'diff', 'markdown', 'json', 'text', 'file'].includes(kind) || Number.isFinite(lineStart);
+
+  try {
+    if (preferText) {
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const opts = { preview: false, viewColumn: vscode.ViewColumn.Active };
+      if (Number.isFinite(lineStart) && lineStart > 0) {
+        const startLine = Math.max(0, Math.min(doc.lineCount - 1, Math.floor(lineStart) - 1));
+        const endLine = Math.max(startLine, Math.min(doc.lineCount - 1, Math.floor(Number.isFinite(lineEnd) && lineEnd > 0 ? lineEnd : lineStart) - 1));
+        opts.selection = new vscode.Range(
+          new vscode.Position(startLine, 0),
+          doc.lineAt(endLine).range.end,
+        );
+      }
+      await vscode.window.showTextDocument(doc, opts);
+    } else {
+      await vscode.commands.executeCommand('vscode.open', uri);
+    }
+    return response(200, { ok: true });
+  } catch (err) {
+    try {
+      await vscode.commands.executeCommand('vscode.open', uri);
+      return response(200, { ok: true });
+    } catch (_) {
+      return response(400, { error: String(err.message || err) });
+    }
+  }
+}
+
 // Replace the file's contents with the pretty-printed spec. When the real
 // `vscode` API is present we route through a WorkspaceEdit + document.save() so
 // the write is a normal editor edit (undoable, integrated with the dirty flag).
@@ -303,6 +350,29 @@ function webviewBridgeScript() {
     }));
   });
   const nativeFetch = window.fetch.bind(window);
+  window.slideyOpenReference = (payload) => {
+    const id = nextId++;
+    const promise = new Promise((resolve, reject) => {
+      pending.set(id, {
+        resolve: (response) => {
+          if (response.ok) resolve(response);
+          else reject(new Error('Slidey reference open failed'));
+        },
+        reject
+      });
+      setTimeout(() => {
+        if (!pending.has(id)) return;
+        pending.delete(id);
+        reject(new Error('Timed out waiting for Slidey reference open'));
+      }, 15000);
+    });
+    vscode.postMessage({
+      type: 'slidey.openReference',
+      id,
+      body: JSON.stringify(payload || {})
+    });
+    return promise;
+  };
   window.fetch = (input, init = {}) => {
     const raw = typeof input === 'string' ? input : (input && input.url) || '';
     const url = new URL(raw, window.location.href);
@@ -377,13 +447,18 @@ async function openPreview(vscode, context, uri) {
 
   panel.webview.html = rewriteViewerHtml(fs.readFileSync(index, 'utf8'), panel.webview, vscode);
   panel.webview.onDidReceiveMessage(async (msg) => {
-    if (!msg || msg.type !== 'slidey.fetch') return;
-    const request = { url: msg.url, method: msg.method || 'GET', body: msg.body };
+    if (!msg || (msg.type !== 'slidey.fetch' && msg.type !== 'slidey.openReference')) return;
+    const request = msg.type === 'slidey.openReference'
+      ? { url: '/api/open-reference', method: 'POST', body: msg.body }
+      : { url: msg.url, method: msg.method || 'GET', body: msg.body };
     let result;
-    const isSpecWrite = request.method === 'POST'
-      && new URL(request.url, 'https://slidey.local').pathname === '/api/spec';
+    const route = new URL(request.url, 'https://slidey.local').pathname;
+    const isSpecWrite = request.method === 'POST' && route === '/api/spec';
+    const isOpenReference = request.method === 'POST' && route === '/api/open-reference';
     if (isSpecWrite) {
       result = await handleSpecWrite({ root, vscode }, request);
+    } else if (isOpenReference) {
+      result = await handleOpenReference({ root, vscode }, request);
     } else {
       result = handleApiRequest({ root, openFile, webview: panel.webview, vscode }, request);
     }
@@ -403,6 +478,7 @@ module.exports = {
   deactivate,
   buildTree,
   handleApiRequest,
+  handleOpenReference,
   handleSpecWrite,
   writeSpecDocument,
   previewTitle,
