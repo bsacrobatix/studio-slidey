@@ -299,6 +299,7 @@ function estimateScene(scene, opts = {}) {
       }
       case 'thread':       return hold('thread_hold',      scene.hold);
       case 'cards':        return scene.hold ?? T.cards_hold ?? T.thread_hold;
+      case 'personas':     return scene.hold ?? T.cards_hold ?? T.thread_hold;
       case 'objectives':   return scene.hold ?? T.objectives_hold ?? T.cards_hold;
       case 'evidence':     return scene.hold ?? T.evidence_hold ?? T.cards_hold;
       case 'code':         return scene.hold ?? T.code_hold ?? T.narrative_hold;
@@ -410,6 +411,17 @@ function estimateScene(scene, opts = {}) {
       // for >6-item grids (otherwise narration desyncs by 10f per extra card).
       for (let i = 0; i < n; i++) f += T[`cards_item_${i}`] ?? 20;
       if (scene.caption) f += T.cards_caption;
+      f += scene.hold ?? T.cards_hold ?? T.thread_hold;
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'personas': {
+      const n = (scene.variant === 'use-cases' ? (scene.cases || []) : (scene.personas || [])).length;
+      let f = 0;
+      if (scene.title) f += 20;
+      for (let i = 0; i < n; i++) f += 20;
+      if (scene.caption) f += 20;
       f += scene.hold ?? T.cards_hold ?? T.thread_hold;
       f += T.inter_scene;
       return f;

@@ -25,6 +25,8 @@ test('raw rrweb log is exposed as a read-only one-scene deck', () => {
     assert.equal(spec.meta.title, 'agent actions');
     assert.equal(spec.scenes.length, 1);
     assert.equal(spec.scenes[0].type, 'video');
+    assert.equal(spec.scenes[0].mode, 'fullscreen');
+    assert.equal(spec.scenes[0].cinematic, false);
     assert.equal(spec.scenes[0].rrweb, 'agent-actions.rrweb.json');
     assert.equal(spec.scenes[0].chapters, 'auto');
     assert.equal(readSpecOrRrweb(file).scenes[0].rrweb, 'agent-actions.rrweb.json');

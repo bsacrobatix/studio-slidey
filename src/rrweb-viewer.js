@@ -34,7 +34,7 @@ function rrwebSpecForFile(filePath) {
   const title = titleFromPath(filePath);
   const scene = {
     type: 'video',
-    mode: 'embedded',
+    mode: 'fullscreen',
     rrweb: path.basename(filePath),
     chapters: 'auto',
     cinematic: false,
