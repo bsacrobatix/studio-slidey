@@ -39,6 +39,9 @@ export function stepsForScene(scene) {
       // Rendered as a single poster page in PDF/PNG export (the MP4 itself is
       // only produced for video output). No progressive reveal.
       return [];
+    case 'reference':
+      return [...(s.title ? ['reference_title'] : []), 'reference_frame',
+        ...(s.caption ? ['reference_caption'] : [])];
     case 'narrative':
       return ['narrative_eyebrow', 'narrative_body', ...(s.lede ? ['narrative_lede'] : [])];
     case 'diagram':
@@ -204,5 +207,6 @@ export function applyShow(scene, opts) {
     // PDF/PNG export handle video scenes natively). Guard so render adapters
     // without showVideo (export contexts) don't throw.
     case 'video':        if (slidey.showVideo) slidey.showVideo(scene, o.rrweb || null); break;
+    case 'reference':    if (slidey.showReference) slidey.showReference(scene); break;
   }
 }

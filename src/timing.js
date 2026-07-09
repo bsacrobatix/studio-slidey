@@ -135,6 +135,12 @@ const TIMING = {
   code_notes:          30,
   code_hold:          180,  // 6.0 s
 
+  // ── Reference preview scene ─────────────────────────────────────
+  reference_title:     20,
+  reference_frame:     40,
+  reference_caption:   30,
+  reference_hold:     180,
+
   // ── MCP drive scene ─────────────────────────────────────────────
   mcpdrive_prompt:     20,
   mcpdrive_calls:      34,
@@ -303,6 +309,7 @@ function estimateScene(scene, opts = {}) {
       case 'objectives':   return scene.hold ?? T.objectives_hold ?? T.cards_hold;
       case 'evidence':     return scene.hold ?? T.evidence_hold ?? T.cards_hold;
       case 'code':         return scene.hold ?? T.code_hold ?? T.narrative_hold;
+      case 'reference':    return scene.hold ?? T.reference_hold ?? T.code_hold ?? T.narrative_hold;
       case 'table':        return scene.hold ?? T.table_hold ?? T.trace_hold;
       case 'chart':        return scene.hold ?? T.chart_hold ?? T.diagramsvg_hold;
       case 'image':        return scene.hold ?? T.image_hold ?? T.diagramsvg_hold;
@@ -455,6 +462,16 @@ function estimateScene(scene, opts = {}) {
       let f = T.code_header + T.code_body;
       if (Array.isArray(scene.annotations) && scene.annotations.length) f += T.code_notes;
       f += scene.hold ?? T.code_hold ?? T.narrative_hold;
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'reference': {
+      let f = 0;
+      if (scene.title) f += T.reference_title;
+      f += T.reference_frame;
+      if (scene.caption) f += T.reference_caption;
+      f += scene.hold ?? T.reference_hold ?? T.code_hold ?? T.narrative_hold;
       f += T.inter_scene;
       return f;
     }

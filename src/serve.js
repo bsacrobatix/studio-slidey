@@ -18,7 +18,7 @@
  *   POST /api/spec?path=<rel>  → save a JSON spec back to disk
  *   POST /api/clone-spec?path=<rel> → copy a read-only report deck into editable form
  *   GET /api/stat?path=<rel>   → { mtimeMs }  (poll target for live on-disk reload)
- *   GET /workspace/<rel>       → raw workspace file (spec-relative gif/img assets)
+ *   GET /workspace/<rel>       → raw workspace file (spec-relative assets/references)
  *   *                          → static from dist/ with index.html SPA fallback
  */
 
@@ -31,6 +31,7 @@ const { normalizeDeckDefinitions, SOURCE_DECK_ID } = require('./collections');
 const { handleNarrationPreviewRequest } = require('./narration-preview');
 const { versionOf } = require('./spec-version');
 const { attachRuntimeThemePacks, stripRuntimeThemePacks } = require('./theme-packs');
+const { applyLocale } = require('./localization');
 
 const ROOT_DIR = path.resolve(__dirname, '..');      // repo root (has dist/, package.json)
 const DIST_DIR = path.join(ROOT_DIR, 'dist');         // `npm run build:web` output
@@ -192,12 +193,29 @@ const MIME = {
   '.mjs':  'text/javascript; charset=utf-8',
   '.css':  'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.jsonl':'application/jsonl; charset=utf-8',
+  '.md':   'text/markdown; charset=utf-8',
+  '.markdown': 'text/markdown; charset=utf-8',
+  '.mmd':  'text/plain; charset=utf-8',
+  '.txt':  'text/plain; charset=utf-8',
+  '.log':  'text/plain; charset=utf-8',
+  '.diff': 'text/x-diff; charset=utf-8',
+  '.patch':'text/x-diff; charset=utf-8',
+  '.py':   'text/x-python; charset=utf-8',
+  '.go':   'text/x-go; charset=utf-8',
+  '.ts':   'text/typescript; charset=utf-8',
+  '.tsx':  'text/tsx; charset=utf-8',
+  '.jsx':  'text/jsx; charset=utf-8',
   '.svg':  'image/svg+xml',
   '.png':  'image/png',
   '.jpg':  'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.gif':  'image/gif',
   '.webp': 'image/webp',
+  '.mp4':  'video/mp4',
+  '.m4v':  'video/mp4',
+  '.mov':  'video/quicktime',
+  '.webm': 'video/webm',
   '.woff': 'font/woff',
   '.woff2':'font/woff2',
   '.ttf':  'font/ttf',
@@ -325,6 +343,14 @@ function openBrowser(url) {
   } catch (_) { /* non-fatal: user can open the printed URL */ }
 }
 
+function openSystemPath(absFile) {
+  const cmd = process.platform === 'darwin' ? 'open'
+            : process.platform === 'win32'  ? 'cmd'
+            : 'xdg-open';
+  const args = process.platform === 'win32' ? ['/c', 'start', '', absFile] : [absFile];
+  spawn(cmd, args, { stdio: 'ignore', detached: true }).unref();
+}
+
 // ── server ──────────────────────────────────────────────────────────────────
 
 /**
@@ -374,14 +400,16 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
 
     if (pathname === '/api/spec' && req.method === 'GET') {
       const rel = url.searchParams.get('path') || '';
+      const locale = url.searchParams.get('locale') || '';
       const abs = safeResolve(workspaceRoot, rel);
       if (!abs || !fs.existsSync(abs)) return sendJSON(res, 404, { error: `not found: ${rel}` });
       try {
         const bytes = fs.readFileSync(abs);
         const mtimeMs = fs.statSync(abs).mtimeMs;
-        const parsedSpec = /\.jsonl$/i.test(abs)
+        let parsedSpec = /\.jsonl$/i.test(abs)
           ? require('./trace').buildSpecFromFile(abs)
           : readSpecOrRrweb(abs);
+        if (locale) parsedSpec = applyLocale(parsedSpec, locale, { specPath: abs });
         const spec = attachRuntimeThemePacks(parsedSpec, abs, { workspaceRoot });
         const dir = path.dirname(rel).replace(/\\/g, '/');
         const editable = isEditableSpec(abs);
@@ -486,6 +514,21 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
         : fs.readFileSync(source, 'utf8');
       fs.writeFileSync(finalAbs, body, 'utf8');
       return sendJSON(res, 200, { source: rel, path: finalRel, mtimeMs: fs.statSync(finalAbs).mtimeMs, editable: isEditableSpec(finalAbs) });
+    }
+
+    if (pathname === '/api/open-reference' && req.method === 'POST') {
+      try {
+        const payload = JSON.parse(await readBody(req, 128 * 1024) || '{}');
+        const rel = typeof payload.src === 'string' ? payload.src : '';
+        const abs = safeResolve(workspaceRoot, rel);
+        if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+          return sendJSON(res, 404, { error: `not found: ${rel}` });
+        }
+        openSystemPath(abs);
+        return sendJSON(res, 200, { ok: true });
+      } catch (err) {
+        return sendJSON(res, 400, { error: String(err.message || err) });
+      }
     }
 
     // Lightweight mtime probe so the viewer can detect on-disk edits without

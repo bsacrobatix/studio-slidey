@@ -149,6 +149,10 @@ export const PITCH_REVEALS = {
   book_item_1:  ['book-item-1'],
   book_item_2:  ['book-item-2'],
   book_caption: ['book-caption'],
+  // ── Reference preview ──
+  reference_title:   ['reference-title'],
+  reference_frame:   ['reference-frame'],
+  reference_caption: ['reference-caption'],
 };
 
 // API/request-mode ids cleared on a scene reset (verbatim from _resetScene).

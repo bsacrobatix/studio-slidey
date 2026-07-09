@@ -91,9 +91,12 @@ Slidey specs use the `.slidey.json` extension (this is what the file-tree sideba
 and the VS Code extension auto-discover), and `.readonly.slidey.json` is the
 authoritative, non-editable variant for reports/artifacts.
 `examples/hello.slidey.json` is the
-smallest starting point; `examples/kitsoki-pitch.slidey.json` and
-`examples/layout-gallery.slidey.json` exercise every scene type. All are safe to
-delete or copy as templates.
+smallest starting point; `examples/kitsoki-pitch.slidey.json` is a fuller pitch
+example, and `examples/layout-gallery.slidey.json` exercises the authoring
+layout gallery. `examples/embed-qa.slidey.json` is the single manual-QA deck for
+inline references and embeddable media. Keep `examples/embed-qa.slidey.json` up
+to date whenever Slidey adds a new reference kind, plugin viewer, media source,
+or embeddable scene source. All examples are safe to delete or copy as templates.
 
 ### Collections, synced subset decks, and drill-down navigation
 
@@ -263,6 +266,56 @@ the deck. Output defaults to `dist-web-single/<spec>.html`. (The orchestrator is
 [`web/build-single.mjs`](web/build-single.mjs), built via the `webfile` Vite
 target; it folds the app's JS + CSS inline the same way the render harness does
 and injects the spec as `window.__SLIDEY_SPEC__`.)
+
+The interactive viewer can also inspect scene references inline. Add
+`references` to any scene as a path, object, or list:
+
+```json
+{
+  "type": "code",
+  "variant": "source",
+  "title": "Renderer hook",
+  "code": "await render(page, scene, ctx)",
+  "references": [
+    { "label": "Implementation", "src": "src/renderer.js", "kind": "code" },
+    "docs/design-notes.md"
+  ]
+}
+```
+
+References resolve relative to the spec. Built-in viewers cover Markdown,
+highlighted text/code/JSON, unified diffs (`.diff`/`.patch`), images, and
+MP4/WebM videos; unknown types still open as text or in a new tab. Existing media scenes (`image`, `image-compare`,
+`video`) automatically expose their own media as inspectable reference chips in
+the web viewer.
+
+Use a `reference` scene when the slide should show an excerpt or media preview
+that opens into the full modal:
+
+```json
+{
+  "type": "reference",
+  "title": "Design notes",
+  "reference": {
+    "label": "Full Markdown",
+    "src": "docs/design-notes.md",
+    "kind": "markdown",
+    "section": "Runtime contract"
+  }
+}
+```
+
+For source files, add `lines: [start, end]` (or `lineStart` / `lineEnd`) to show
+and highlight the linked range while keeping the modal pointed at the full file.
+`code` scenes can also set `sourceRef` so clicking the code block opens the full
+source. For proposed code changes, use `kind: "diff"` or a `.diff`/`.patch`
+reference; the modal button is labelled `View Diff` and routes through the host
+open behavior.
+
+Manual QA for this surface should use `examples/embed-qa.slidey.json`; it covers
+Markdown, code, diff patches, JSON/text/logs, image/image-compare, Mermaid graph
+source, MP4, and rrweb fixtures in one deck. Keep it updated whenever a new
+embed type, reference kind, plugin viewer, or host open behavior is added.
 
 ## Visualizing a kitsoki session trace
 
@@ -465,8 +518,8 @@ sampling (≈8/658 on the sample deck — on par with the legacy renderer).
 Internally, scene types fall into two families the template toggles between: a
 *slides* family (`title`, `narrative`, `diagram`, `diagram-svg`, `mermaid`,
 `trace`, `transcript`, `thread`, `stat`, `cta`, `terminal-gif`, `cards`,
-`objectives`, `evidence`, `code`, `table`, `chart`, `image`, `image-compare`,
-`book`, `video`, `personas`) and an
+`objectives`, `evidence`, `code`, `reference`, `table`, `chart`, `image`,
+`image-compare`, `book`, `video`, `personas`) and an
 *api* family (`request`). The
 spec's optional `meta.mode` selects the default; you rarely set it by hand. (In
 the code this distinction still carries its original `pitch`/`api` names — e.g.

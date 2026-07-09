@@ -126,6 +126,9 @@ export function installAdapter() {
     // loaded log. Headless render + PDF/PNG export handle video scenes natively.
     showVideo(scene, data) { store.showVideo(scene, data); },
     hideVideo() { store.hidePitch(); store.rrwebEvents = []; store.rrwebChapters = []; },
+
+    showReference(scene) { store.showScene('reference', scene); },
+    hideReference() { store.hidePitch(); },
   };
 
   // Settle barrier: flush Vue's async DOM patch before the renderer captures, so

@@ -29,7 +29,7 @@ const { resolveDeckSpec } = require('../src/collections.js');
 const rawArgs = process.argv.slice(2);
 const positionals = [];
 for (let i = 0; i < rawArgs.length; i++) {
-  if (rawArgs[i] === '--deck') {
+  if (rawArgs[i] === '--deck' || rawArgs[i] === '--asset-base') {
     i++;
     continue;
   }
@@ -37,6 +37,8 @@ for (let i = 0; i < rawArgs.length; i++) {
   positionals.push(rawArgs[i]);
 }
 const [specArg, outArg] = positionals;
+const assetBaseIdx = rawArgs.indexOf('--asset-base');
+const assetBaseArg = assetBaseIdx !== -1 ? rawArgs[assetBaseIdx + 1] : null;
 if (!specArg) {
   console.error('Usage: node web/build-single.mjs <spec.json> [out.html] [--deck <id>]');
   process.exit(1);
@@ -71,7 +73,7 @@ const bundledSpec = attachRuntimeThemePacks(spec, specPath);
 // Embed local image/gif assets the spec references (resolved relative to the
 // spec file) as data URIs, so portable single-file decks render with no
 // external files. Missing assets are left as-is — the viewer degrades visibly.
-const specDir = dirname(specPath);
+const specDir = assetBaseArg ? resolve(assetBaseArg) : dirname(specPath);
 const assetMime = {
   '.gif': 'image/gif',
   '.png': 'image/png',

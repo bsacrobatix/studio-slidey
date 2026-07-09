@@ -56,6 +56,7 @@ const SCENE_MODULES = {
   book:           require('./scenes/book'),
   meme:           require('./scenes/meme'),
   video:          require('./scenes/video'),
+  reference:      require('./scenes/reference'),
 };
 
 function inferMode(spec) {

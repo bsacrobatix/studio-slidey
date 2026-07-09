@@ -29,6 +29,7 @@ const { estimateBoundaries } = require('./timing');
 const { validateSpec }       = require('./validate');
 const { resolveDeckSpec }    = require('./collections');
 const { attachRuntimeThemePacks, stripRuntimeThemePacks } = require('./theme-packs');
+const { applyLocale, attachLocaleRef, extractLocale, readDeck } = require('./localization');
 
 function generateFrames(...args) {
   return require('./renderer').generateFrames(...args);
@@ -54,6 +55,8 @@ const auditOpt      = auditIdx !== -1 ? args[auditIdx + 1] : null;
 const wantsAudit    = auditIdx !== -1;
 const skipRender    = args.includes('--skip-render');
 const noGaps        = args.includes('--no-gaps');
+const localeIdx     = args.indexOf('--locale');
+const localeOpt     = localeIdx !== -1 ? args[localeIdx + 1] : null;
 
 // --schema: print the JSON Schema and exit (no input file required)
 if (wantsSchema) {
@@ -203,6 +206,84 @@ if (args[0] === 'convert') {
   }
 }
 
+// ── `slidey localize ...` — deterministic locale overlays ─────────────────
+if (args[0] === 'localize') {
+  const sub = args[1];
+  const opt = (flag) => {
+    const idx = args.indexOf(flag);
+    return idx !== -1 ? args[idx + 1] : null;
+  };
+  try {
+    if (sub === 'extract') {
+      const basePath = args[2];
+      const translatedPath = args[3];
+      const locale = opt('--locale');
+      const outPath = opt('--out');
+      if (!basePath || !translatedPath || !locale || !outPath) {
+        console.error('[slidey] usage: slidey localize extract <base.slidey.json> <translated.slidey.json> --locale <tag> --out <locale.slidey.locale.json>');
+        process.exit(1);
+      }
+      const baseAbs = path.resolve(basePath);
+      const translatedAbs = path.resolve(translatedPath);
+      const outAbs = path.resolve(outPath);
+      const overlay = extractLocale(readDeck(baseAbs), readDeck(translatedAbs), {
+        locale,
+        sourceLocale: opt('--source-locale') || 'en',
+      });
+      fs.mkdirSync(path.dirname(outAbs), { recursive: true });
+      fs.writeFileSync(outAbs, JSON.stringify(overlay, null, 2) + '\n', 'utf8');
+      console.log(`[slidey] Locale overlay: ${outAbs}`);
+      console.log(`[slidey] Entries: ${Object.keys(overlay.entries).length}  missing:${overlay.generatedFrom.missing.length} extra:${overlay.generatedFrom.extra.length}`);
+      if (overlay.generatedFrom.missing.length || overlay.generatedFrom.extra.length) process.exit(2);
+      process.exit(0);
+    }
+
+    if (sub === 'attach') {
+      const basePath = args[2];
+      const locale = opt('--locale');
+      const overlayPath = opt('--overlay');
+      const outPath = opt('--out') || basePath;
+      if (!basePath || !locale || !overlayPath) {
+        console.error('[slidey] usage: slidey localize attach <base.slidey.json> --locale <tag> --overlay <locale.slidey.locale.json> [--out <base.slidey.json>]');
+        process.exit(1);
+      }
+      const baseAbs = path.resolve(basePath);
+      const outAbs = path.resolve(outPath);
+      const overlayRel = path.relative(path.dirname(outAbs), path.resolve(overlayPath));
+      const spec = attachLocaleRef(readDeck(baseAbs), locale, overlayRel, {
+        label: opt('--label') || locale,
+        sourceLocale: opt('--source-locale') || undefined,
+      });
+      fs.mkdirSync(path.dirname(outAbs), { recursive: true });
+      fs.writeFileSync(outAbs, JSON.stringify(spec, null, 2) + '\n', 'utf8');
+      console.log(`[slidey] Locale reference attached: ${outAbs} -> ${locale} (${overlayRel.replace(/\\/g, '/')})`);
+      process.exit(0);
+    }
+
+    if (sub === 'build') {
+      const basePath = args[2];
+      const locale = opt('--locale');
+      const outPath = opt('--out');
+      if (!basePath || !locale || !outPath) {
+        console.error('[slidey] usage: slidey localize build <base.slidey.json> --locale <tag> --out <localized.slidey.json>');
+        process.exit(1);
+      }
+      const baseAbs = path.resolve(basePath);
+      const localized = applyLocale(readDeck(baseAbs), locale, { specPath: baseAbs });
+      const outAbs = path.resolve(outPath);
+      fs.mkdirSync(path.dirname(outAbs), { recursive: true });
+      fs.writeFileSync(outAbs, JSON.stringify(stripRuntimeThemePacks(localized), null, 2) + '\n', 'utf8');
+      console.log(`[slidey] Localized deck: ${outAbs}`);
+      process.exit(0);
+    }
+  } catch (err) {
+    console.error(`[slidey] ERROR localizing deck: ${err.message}`);
+    process.exit(1);
+  }
+  console.error('[slidey] usage: slidey localize <extract|attach|build> ...');
+  process.exit(1);
+}
+
 // ── `slidey validate <spec.json>` — schema + semantic check, no render ────
 // Exits non-zero on any problem so it can gate CI / pre-bundle. Catches specs
 // that PARSE as JSON but won't RENDER (e.g. a table scene with raw-array rows
@@ -226,6 +307,14 @@ if (args[0] === 'validate') {
   } catch (err) {
     console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
     process.exit(1);
+  }
+  if (localeOpt) {
+    try {
+      spec = applyLocale(spec, localeOpt, { specPath: absIn });
+    } catch (err) {
+      console.error(`[slidey] ERROR applying locale "${localeOpt}": ${err.message}`);
+      process.exit(1);
+    }
   }
   spec = attachRuntimeThemePacks(spec, absIn);
   const resolvedDeck = resolveDeckSpec(spec, { deckId: deckLocal || 'source' });
@@ -266,17 +355,35 @@ if (args[0] === 'bundle') {
     console.error(`[slidey] ERROR: input file not found: ${absIn}`);
     process.exit(1);
   }
+  let bundleInput = inPath;
+  let localizedBundleDir = null;
+  let localizedBundleSpec = null;
+  if (localeOpt) {
+    try {
+      localizedBundleSpec = applyLocale(JSON.parse(fs.readFileSync(absIn, 'utf8')), localeOpt, { specPath: absIn });
+      localizedBundleDir = mkdtemp('slidey-locale-');
+      bundleInput = path.join(localizedBundleDir, path.basename(absIn));
+      fs.writeFileSync(bundleInput, JSON.stringify(stripRuntimeThemePacks(localizedBundleSpec), null, 2) + '\n', 'utf8');
+    } catch (err) {
+      console.error(`[slidey] ERROR applying locale "${localeOpt}": ${err.message}`);
+      process.exit(1);
+    }
+  }
   // Validate BEFORE bundling: a spec can parse as JSON yet contain scenes that
   // silently fail to render (the classic case: a table with raw-array rows and
   // no `variant`, which the viewer skips). Catch it here instead of shipping an
   // HTML deck with blank slides. Pass --skip-validate to bypass intentionally.
   if (!args.includes('--skip-validate')) {
     let spec;
-    try {
-      spec = require('./rrweb-viewer').readSpecOrRrweb(absIn);
-    } catch (err) {
-      console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
-      process.exit(1);
+    if (localizedBundleSpec) {
+      spec = localizedBundleSpec;
+    } else {
+      try {
+        spec = require('./rrweb-viewer').readSpecOrRrweb(absIn);
+      } catch (err) {
+        console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
+        process.exit(1);
+      }
     }
     spec = attachRuntimeThemePacks(spec, absIn);
     const deckIdxLocal = args.indexOf('--deck');
@@ -301,12 +408,15 @@ if (args[0] === 'bundle') {
   }
   const script = path.join(__dirname, '..', 'web', 'build-single.mjs');
   try {
-    const buildArgs = [script, inPath, outPath];
+    const buildArgs = [script, bundleInput, outPath];
     const deckIdxLocal = args.indexOf('--deck');
     if (deckIdxLocal !== -1 && args[deckIdxLocal + 1]) buildArgs.push('--deck', args[deckIdxLocal + 1]);
+    if (localizedBundleSpec) buildArgs.push('--asset-base', path.dirname(absIn));
     require('child_process').execFileSync(process.execPath, buildArgs, { stdio: 'inherit' });
+    if (localizedBundleDir) fs.rmSync(localizedBundleDir, { recursive: true, force: true });
     process.exit(0);
   } catch (err) {
+    if (localizedBundleDir) fs.rmSync(localizedBundleDir, { recursive: true, force: true });
     process.exit(err.status || 1);
   }
 }
@@ -426,6 +536,7 @@ const VALUE_FLAGS = new Set([
   '--fps', '--frames-dir', '--capture-log', '--scenes', '--context',
   '--pdf-raster-quality', '--pdf-raster-scale', '--port', '--pace', '--format',
   '--out-dir', '--extract-dir', '--theme', '--label', '--adapter', '--deck',
+  '--locale',
 ]);
 function positionalArgs(argv) {
   const out = [];
@@ -486,6 +597,8 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '    node index.js convert <input.md> [output.slidey.json]  convert Markdown/Marp slides to Slidey JSON',
     '    node index.js bundle <input.json|input.rrweb.json> <output.html>',
     '                                                          build a self-contained interactive HTML deck/viewer',
+    '    node index.js localize extract <base> <translated> --locale <tag> --out <overlay>',
+    '    node index.js localize build <base> --locale <tag> --out <localized>',
     '    node index.js drawio <input...> --out-dir <dir>       convert Draw.io PNG/XML to themed SVG',
     '    node index.js capture <tour.json> <out.mp4>         record a demo MP4 + chapter sidecar from a tour',
     '    node index.js doctor                                verify export dependencies',
@@ -513,6 +626,7 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '  Render options:',
     '    --fps <n>                  Frames per second (default: 30)',
     '    --context key=value        Override a template variable (repeatable)',
+    '    --locale <tag>             Apply a deterministic locale overlay before validate/list/render/bundle',
     '    --keep-frames              Keep temp frame directory after render',
     '    --frames-dir <path>        Use this directory for frames instead of a temp dir',
     '    --capture-log <file>       Write live HTTP responses to JSON (for playback freeze)',
@@ -821,6 +935,25 @@ async function main() {
     }
   }
 
+  if (localeOpt && !fromTrace) {
+    try {
+      spec = applyLocale(spec, localeOpt, { specPath: absInput });
+      console.log(`[slidey] Locale: ${localeOpt}`);
+    } catch (err) {
+      console.error(`[slidey] ERROR applying locale "${localeOpt}": ${err.message}`);
+      process.exit(1);
+    }
+  } else if (localeOpt && fromTrace) {
+    console.error('[slidey] ERROR: --locale is only supported for JSON deck specs, not generated trace decks');
+    process.exit(1);
+  }
+
+  if (!spec.scenes || !Array.isArray(spec.scenes) || spec.scenes.length === 0) {
+    console.error('[slidey] ERROR: spec must have a non-empty "scenes" array');
+    process.exit(1);
+  }
+  spec = attachRuntimeThemePacks(spec, absInput);
+
   const resolvedDeck = resolveDeckSpec(spec, { deckId: deckOpt });
   for (const line of resolvedDeck.warnings || []) console.error(`[slidey] COLLECTION WARNING: ${line}`);
   if (resolvedDeck.errors && resolvedDeck.errors.length) {
@@ -832,12 +965,6 @@ async function main() {
     console.log(`[slidey] Deck   : ${resolvedDeck.deckId} (${resolvedDeck.spec.scenes.length}/${(spec.scenes || []).length} source scenes)`);
   }
   spec = resolvedDeck.spec;
-
-  if (!spec.scenes || !Array.isArray(spec.scenes) || spec.scenes.length === 0) {
-    console.error('[slidey] ERROR: spec must have a non-empty "scenes" array');
-    process.exit(1);
-  }
-  spec = attachRuntimeThemePacks(spec, absInput);
 
   // ── JSON Schema validation (always; exits on failure) ─────────────────────
   {

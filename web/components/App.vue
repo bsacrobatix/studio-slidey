@@ -4,14 +4,15 @@
 // single-file build) → ?spec=<url> query param → workspace mode (slidey CLI
 // viewer: /api/config + file-tree sidebar) → ./spec.json → a drop/file-picker
 // overlay.
-import { computed, ref, shallowRef, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { computed, provide, ref, shallowRef, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import DeckHost from './DeckHost.vue';
 import NavController from './NavController.vue';
 import FileTree from './FileTree.vue';
 import SceneEditor from './SceneEditor.vue';
 import RrwebPlayer from '../rrweb/RrwebPlayer.vue';
+import ReferenceViewer from './ReferenceViewer.vue';
 import { store } from '../store.js';
-import { createDeck } from '../useDeck.js';
+import { createDeck, resolveAssetHref } from '../useDeck.js';
 import { installEmbedAnnotate } from '../embed-annotate.js';
 import { installInlineEdit } from '../inline-edit.js';
 import { initialViewFromSearch } from '../initial-view.js';
@@ -23,6 +24,7 @@ import {
   speechTextForScene,
   timedNarrationCues,
 } from '../narration.mjs';
+import { normalizeReference, normalizeReferences } from '../reference-viewer.js';
 
 const deck = shallowRef(null);
 const currentSpec = ref(null);
@@ -49,9 +51,11 @@ const suppressDeckNavClick = ref(false);
 const schema = shallowRef(null);
 const sessionSpec = ref(null);         // snapshot of the latest loaded/reloaded spec
 const activeSpecBaseUrl = ref('');     // base URL for currently open workspace spec
+const activeSpecDir = ref('');         // POSIX workspace-relative dir for host-open actions
 const activeSpecEditable = ref(true);
 const cloning = ref(false);
 const cloneError = ref('');
+const activeReference = ref(null);
 const collection = shallowRef(null);
 const activeDeckId = ref(SOURCE_DECK_ID);
 const compactViewport = ref(false);
@@ -758,7 +762,6 @@ watch(() => {
     nextTick(runLiveNarrationForCurrent);
   }
 });
-
 // Live on-disk reload: poll the open spec's mtime and offer a reload when it
 // changes underneath us. A failed reload never tears down the session — it
 // surfaces a transient message and leaves the current deck on screen.
@@ -776,6 +779,13 @@ let latestVersion = '';              // most recent content version observed on 
 let pollTimer = null;
 let errTimer = null;
 const POLL_MS = 1500;
+const activeLocale = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get('locale') || '';
+  } catch (_) {
+    return '';
+  }
+})();
 
 function inferMode(spec) {
   if (spec.meta && spec.meta.mode) return spec.meta.mode;
@@ -793,7 +803,7 @@ function cloneSpec(raw) {
 }
 
 function applySpecMeta(data, rel) {
-  activeSpecEditable.value = isEditableResponse(data, rel);
+  activeSpecEditable.value = activeLocale ? false : isEditableResponse(data, rel);
   cloneError.value = '';
   if (!activeViewEditable.value && isEditMode.value) setViewerMode('browse');
 }
@@ -865,6 +875,10 @@ async function loadSpec(spec, baseUrl, restore, opts = {}) {
   error.value = '';
 }
 
+function setActiveSpecDir(dir) {
+  activeSpecDir.value = String(dir || '').replace(/^\/+|\/+$/g, '');
+}
+
 async function fetchSpec(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} fetching ${url}`);
@@ -882,13 +896,15 @@ async function loadSchema() {
 async function openPath(rel, restore, deckId) {
   try {
     loading.value = true;
-    const res = await fetch(`/api/spec?path=${encodeURIComponent(rel)}`);
+    const localeParam = activeLocale ? `&locale=${encodeURIComponent(activeLocale)}` : '';
+    const res = await fetch(`/api/spec?path=${encodeURIComponent(rel)}${localeParam}`);
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || `${res.status} loading ${rel}`);
     applySpecMeta(data, rel);
     // Spec-relative gif/img assets resolve under /workspace/<dir>/ in the CLI
     // viewer, or through a VS Code webview resource URI when embedded there.
     const base = data.assetBase || new URL(`/workspace/${data.dir ? data.dir + '/' : ''}`, window.location.href).href;
+    setActiveSpecDir(data.dir);
     await loadSpec(data.spec, base, restore, { deckId, resetSession: true });
     activePath.value = rel;
     // Fresh file → reset the live-reload watch to this version.
@@ -1014,11 +1030,13 @@ async function reloadActive() {
   const cur = deck.value && deck.value.state;
   const restore = cur ? { sceneIndex: cur.sceneIndex, stepIndex: cur.stepIndex } : null;
   try {
-    const res = await fetch(`/api/spec?path=${encodeURIComponent(rel)}`);
+    const localeParam = activeLocale ? `&locale=${encodeURIComponent(activeLocale)}` : '';
+    const res = await fetch(`/api/spec?path=${encodeURIComponent(rel)}${localeParam}`);
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || `${res.status} loading ${rel}`);
     applySpecMeta(data, rel);
     const base = data.assetBase || new URL(`/workspace/${data.dir ? data.dir + '/' : ''}`, window.location.href).href;
+    setActiveSpecDir(data.dir);
     await loadSpec(data.spec, base, restore, { deckId: activeDeckId.value, resetSession: true });   // swaps deck.value only on success
     loadedMtime = latestMtime = data.mtimeMs || latestMtime;
     loadedVersion = latestVersion = data.version || latestVersion;
@@ -1044,6 +1062,7 @@ async function onFile(e) {
   try {
     const spec = JSON.parse(await file.text());
     await loadSpec(spec, '', null, { deckId: deckIdFromSearch(), resetSession: true }); // no base URL → relative gif assets won't resolve
+    setActiveSpecDir('');
   } catch (err) { error.value = String(err.message || err); }
 }
 
@@ -1133,6 +1152,91 @@ async function onOpenRrweb(e) {
     };
   }
 }
+
+const sceneReferences = computed(() => {
+  const sc = store.scene || {};
+  return normalizeReferences(sc).map(resolveReference);
+});
+
+function openReference(ref) {
+  const normalized = normalizeReference(ref);
+  activeReference.value = normalized ? resolveReference(normalized) : ref;
+}
+
+function closeReference() {
+  activeReference.value = null;
+}
+
+function isLocalViewerHost() {
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+}
+
+function hostOpenSource(src) {
+  const raw = String(src || '');
+  if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('/')) return raw;
+  const dir = activeSpecDir.value;
+  if (!dir) return raw;
+  const parts = `${dir}/${raw}`.split('/');
+  const out = [];
+  for (const part of parts) {
+    if (!part || part === '.') continue;
+    if (part === '..') out.pop();
+    else out.push(part);
+  }
+  return out.join('/');
+}
+
+async function openReferenceExternal(ref) {
+  const normalized = normalizeReference(ref);
+  const resolved = normalized ? resolveReference(normalized) : ref;
+  const fallbackHref = resolved && resolved.href;
+  const payload = resolved && resolved.src
+    ? {
+        src: hostOpenSource(resolved.src),
+        lineStart: resolved.lineStart,
+        lineEnd: resolved.lineEnd,
+        kind: resolved.kind,
+      }
+    : null;
+
+  if (embedded.value && payload && typeof window.slideyOpenReference === 'function') {
+    try {
+      await window.slideyOpenReference(payload);
+      return;
+    } catch (_) {
+      // Fall back to browser navigation below.
+    }
+  }
+
+  if (workspace.value && !embedded.value && isLocalViewerHost() && payload) {
+    try {
+      const res = await fetch('/api/open-reference', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return;
+    } catch (_) {
+      // Fall back to browser navigation below.
+    }
+  }
+
+  if (fallbackHref) window.open(fallbackHref, '_blank', 'noopener,noreferrer');
+}
+
+function resolveReference(ref) {
+  if (!ref) return ref;
+  return {
+    ...ref,
+    href: ref.inline ? '' : resolveAssetHref(ref.src, activeSpecBaseUrl.value, window.location.href),
+  };
+}
+
+provide('slideyReferences', {
+  open: openReference,
+  resolve: resolveReference,
+});
 
 // ── Sidebar resize ──────────────────────────────────────────────────────────
 function startResize(e) {
@@ -1668,6 +1772,21 @@ onUnmounted(() => {
     </section>
   </nav>
 
+  <div v-if="deck && sceneReferences.length" class="slidey-reference-rail" aria-label="Scene references">
+    <button
+      v-for="ref in sceneReferences"
+      :key="`${ref.kind}:${ref.src}:${ref.label}`"
+      type="button"
+      class="slidey-reference-chip"
+      :class="{ 'is-auto': ref.auto }"
+      :title="`Open ${ref.label}`"
+      @click.stop="openReference(ref)"
+    >
+      <span class="slidey-reference-kind">{{ ref.kind }}</span>
+      <span class="slidey-reference-label">{{ ref.label }}</span>
+    </button>
+  </div>
+
   <!-- Save conflict: the file changed on disk (e.g. an AI edit) while you had
        unsaved changes. Resolve by keeping yours or taking the on-disk version —
        neither side is discarded without a choice. -->
@@ -1694,6 +1813,8 @@ onUnmounted(() => {
       >Use on-disk</button>
     </div>
   </div>
+
+  <ReferenceViewer :reference="activeReference" :close="closeReference" :open-external="openReferenceExternal" />
 
   <DeckHost />
   <NavController

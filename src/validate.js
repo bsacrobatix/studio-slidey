@@ -8,7 +8,7 @@ const { linkTargetForItem, normalizeDeckDefinitions, normalizeSections, resolveD
 const VALID_TYPES = [
   'title', 'narrative', 'diagram', 'diagram-svg', 'mermaid', 'trace', 'transcript',
   'thread', 'stat', 'cta', 'terminal-gif', 'kitsoki-tui', 'cards', 'objectives', 'code', 'table', 'chart',
-  'mcp-drive', 'evidence', 'image', 'image-compare', 'book', 'meme', 'request', 'video',
+  'mcp-drive', 'evidence', 'image', 'image-compare', 'book', 'meme', 'video', 'reference', 'request',
 ];
 
 let _validate;

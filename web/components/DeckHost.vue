@@ -31,6 +31,7 @@ import BookScene from './BookScene.vue';
 import MemeScene from './MemeScene.vue';
 import VideoScene from './VideoScene.vue';
 import PersonasScene from './PersonasScene.vue';
+import ReferencePreviewScene from './ReferencePreviewScene.vue';
 
 const PITCH_COMPONENTS = {
   narrative: NarrativeScene,
@@ -57,6 +58,7 @@ const PITCH_COMPONENTS = {
   meme: MemeScene,
   video: VideoScene,
   personas: PersonasScene,
+  reference: ReferencePreviewScene,
 };
 
 // Toggle body classes for mode, mirroring slidey.setMode. body.instant is owned

@@ -117,6 +117,45 @@ const COMMON = {
   skipTitle: { type: 'boolean', description: 'Suppress repeated scene title chrome when supported by the renderer' },
 };
 
+const REFERENCE = {
+  type: 'object',
+  additionalProperties: true,
+  description: 'Workspace file or media reference opened in the interactive viewer overlay. Markdown, source files, diffs, JSON/text, images, and videos are handled by built-in viewers; plugins can key off `kind`.',
+  properties: {
+    src: { type: 'string', description: 'Path or URL to inspect. Relative paths resolve against the slidey spec.' },
+    path: { type: 'string', description: 'Alias for src, for tool-generated specs.' },
+    href: { type: 'string', description: 'Alias for src, for externally generated refs.' },
+    label: { type: 'string', description: 'Short label shown in the reference chip and modal title.' },
+    kind: { type: 'string', description: 'Optional media kind override such as markdown, code, diff, json, text, image, video, mermaid, graph, or file.' },
+    lang: { type: 'string', description: 'Optional language tag for code/text rendering.' },
+    lines: {
+      type: 'array',
+      items: { type: 'integer', minimum: 1 },
+      minItems: 1,
+      maxItems: 2,
+      description: 'Optional 1-based line range preview/highlight, e.g. [12, 24].',
+    },
+    lineStart: { type: 'integer', minimum: 1, description: 'Optional first 1-based line to preview/highlight.' },
+    lineEnd: { type: 'integer', minimum: 1, description: 'Optional last 1-based line to preview/highlight.' },
+    section: { type: 'string', description: 'Optional Markdown heading text to preview on-slide.' },
+    heading: { type: 'string', description: 'Alias for section.' },
+  },
+};
+
+COMMON.references = {
+  oneOf: [
+    REFERENCE,
+    { type: 'string' },
+    {
+      type: 'array',
+      items: {
+        oneOf: [REFERENCE, { type: 'string' }],
+      },
+    },
+  ],
+  description: 'Files or media linked to this scene for inline inspection in the web viewer.',
+};
+
 const CARDS_ITEM = {
   type: 'object',
   properties: {
@@ -286,6 +325,29 @@ const SCHEMA = {
           type: 'object',
           description: 'Template variable values; referenced in scenes as {{varName}} (Postman-compatible)',
           additionalProperties: { type: 'string' },
+        },
+        locale: {
+          type: 'string',
+          description: 'Source locale tag for this canonical deck, e.g. "en". Resolved localized decks set this to the selected locale.',
+        },
+        locales: {
+          type: 'object',
+          description: 'Deterministic locale overlays available for this deck. Keys are locale tags; values are overlay paths or { label, path } objects resolved relative to the spec.',
+          additionalProperties: {
+            oneOf: [
+              { type: 'string' },
+              {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  label: { type: 'string', description: 'Human label for the locale, e.g. "Thai".' },
+                  path: { type: 'string', description: 'Locale overlay JSON path, relative to the deck spec.' },
+                  file: { type: 'string', description: 'Alias for path.' },
+                  src: { type: 'string', description: 'Alias for path.' },
+                },
+              },
+            ],
+          },
         },
         personas: {
           type: 'array',
@@ -870,6 +932,8 @@ const SCHEMA = {
               title: { type: 'string', description: 'Filename shown in the chrome bar' },
               lang: { type: 'string', description: 'Language tag shown at right of the bar, e.g. "javascript"' },
               code: { type: 'string', description: 'The artifact body (\\n-separated lines)' },
+              sourceRef: { ...REFERENCE, description: 'Full source reference opened when clicking the code scene in the interactive viewer. Use lines/lineStart/lineEnd to highlight the linked range.' },
+              reference: { ...REFERENCE, description: 'Alias for sourceRef.' },
               highlight: {
                 type: 'array',
                 items: { type: 'integer', minimum: 1 },
@@ -889,6 +953,21 @@ const SCHEMA = {
               call: { type: 'string', description: 'Function invocation expression (function-io variant)' },
               returns: { type: 'string', description: 'Return value display (function-io variant)' },
               tree: { type: 'string', description: 'Indented file tree text (tree variant)' },
+              caption: { type: 'string' },
+              ...COMMON,
+            },
+          },
+          // ── reference preview ─────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type'],
+            description: 'On-slide preview of a referenced file or media asset. Click the preview in the interactive viewer to open the full reference modal.',
+            properties: {
+              type: { const: 'reference' },
+              title: { type: 'string', description: 'Title shown above the preview.' },
+              reference: REFERENCE,
+              ref: REFERENCE,
+              previewLines: { type: 'integer', minimum: 1, description: 'Fallback number of lines to show when no line range or Markdown section is specified.' },
               caption: { type: 'string' },
               ...COMMON,
             },
@@ -1179,6 +1258,7 @@ const SCHEMA = {
               cinematic: { type: 'boolean', description: 'Embedded-scene web viewer choreography: expand to fullscreen during playback. Defaults true; set false to keep the player inline.' },
               introMs: { type: 'integer', minimum: 0, description: 'Milliseconds to hold the embedded thumbnail before cinematic expansion.' },
               fit: { type: 'string', enum: ['contain', 'cover'], description: '"contain" (default) letterboxes on the deck background; "cover" crops to fill.' },
+              cinematic: { type: 'boolean', description: 'Embedded viewer only: set false to keep the video inline instead of expanding fullscreen before playback.' },
               start: { type: 'number', minimum: 0, description: 'Trim start (seconds into the source).' },
               end: { type: 'number', minimum: 0, description: 'Trim end (seconds into the source).' },
               speed: { type: 'number', exclusiveMinimum: 0, description: 'Playback speed multiplier (>1 faster).' },
