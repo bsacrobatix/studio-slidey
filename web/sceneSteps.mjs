@@ -51,6 +51,15 @@ export function stepsForScene(scene) {
       return [...(s.skipTitle ? [] : ['diagramsvg_title']),
         ...range((s.panels || []).length, 'diagramsvg_panel_'),
         ...(s.caption ? ['diagramsvg_caption'] : [])];
+    case 'graph': {
+      const path = Array.isArray(s.path) && s.path.length ? s.path : (Array.isArray(s.focus) ? s.focus : []);
+      return [
+        ...(s.title ? ['graph_title'] : []),
+        'graph_frame',
+        ...range(path.length, 'graph_focus_'),
+        ...(s.caption ? ['graph_caption'] : []),
+      ];
+    }
     case 'mermaid':
       return [...(s.title ? ['mermaid_title'] : []), 'mermaid_frame',
         ...(s.caption ? ['mermaid_caption'] : [])];
@@ -183,6 +192,7 @@ export function applyShow(scene, opts) {
     case 'narrative':    slidey.showNarrative(scene); break;
     case 'diagram':      slidey.showDiagram(scene); break;
     case 'diagram-svg':  slidey.showDiagramSvg(scene); break;
+    case 'graph':        slidey.showGraph(scene); break;
     case 'mermaid':      slidey.showMermaid(scene); break;
     case 'terminal-gif': slidey.showTerminalGif(scene, o.gifDataUri || ''); break;
     case 'kitsoki-tui':  slidey.showKitsokiTui(scene); break;

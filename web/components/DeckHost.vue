@@ -10,6 +10,7 @@ import { themeConfig } from '../theme.js';
 import NarrativeScene from './NarrativeScene.vue';
 import DiagramScene from './DiagramScene.vue';
 import DiagramSvgScene from './DiagramSvgScene.vue';
+import GraphScene from './GraphScene.vue';
 import MermaidScene from './MermaidScene.vue';
 import TerminalGifScene from './TerminalGifScene.vue';
 import KitsokiTuiScene from './KitsokiTuiScene.vue';
@@ -37,6 +38,7 @@ const PITCH_COMPONENTS = {
   narrative: NarrativeScene,
   diagram: DiagramScene,
   'diagram-svg': DiagramSvgScene,
+  graph: GraphScene,
   mermaid: MermaidScene,
   'terminal-gif': TerminalGifScene,
   'kitsoki-tui': KitsokiTuiScene,

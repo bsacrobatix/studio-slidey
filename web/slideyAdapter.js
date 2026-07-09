@@ -41,6 +41,9 @@ export function installAdapter() {
     showDiagramSvg(scene) { store.showScene('diagram-svg', scene); },
     hideDiagramSvg() { store.hidePitch(); },
 
+    showGraph(scene) { store.showScene('graph', scene); },
+    hideGraph() { store.hidePitch(); },
+
     showMermaid(scene) { store.showScene('mermaid', scene); },
     hideMermaid() { store.hidePitch(); },
 

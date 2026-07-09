@@ -37,6 +37,9 @@ export const PITCH_REVEALS = {
   diagramsvg_panel_1:  ['diagramsvg-panel-1'],
   diagramsvg_panel_2:  ['diagramsvg-panel-2'],
   diagramsvg_caption:  ['diagramsvg-caption'],
+  graph_title:         ['graph-title'],
+  graph_frame:         ['graph-frame'],
+  graph_caption:       ['graph-caption'],
   mermaid_title:       ['mermaid-title'],
   mermaid_frame:       ['mermaid-frame'],
   mermaid_caption:     ['mermaid-caption'],
@@ -188,6 +191,8 @@ export const store = reactive({
   // Transcript: index of the turn card currently on screen (the scene shows one
   // card at a time; the renderers advance it via the transcript_card_<n> step).
   transcriptCard: 0,
+  // Graph scene: index into scene.path/focus for the node currently centered.
+  graphFocus: -1,
   // visibility / reveal sets
   visible: new Set(),
   revealed: new Set(),
@@ -341,10 +346,17 @@ export const store = reactive({
     this.revealed = new Set();
     this.revealAll = false;
     this.transcriptCard = 0;
+    this.graphFocus = -1;
     for (const step of steps || []) {
       const m = /^transcript_card_(\d+)$/.exec(step);
       if (m) {
         this.transcriptCard = parseInt(m[1], 10);
+        continue;
+      }
+      const g = /^graph_focus_(\d+)$/.exec(step);
+      if (g) {
+        this.graphFocus = parseInt(g[1], 10);
+        this.revealed.add('graph-frame');
         continue;
       }
       if (step === 'reveal_all') {
@@ -363,6 +375,7 @@ export const store = reactive({
     this.scene = scene;
     this.sceneType = type;
     this.transcriptCard = 0;     // start a transcript at its first turn card
+    this.graphFocus = -1;
   },
   // video (live rrweb player in the interactive viewer): the loaded rrweb log
   // (events + derived chapters) is held here for VideoScene → RrwebPlayer.
@@ -378,6 +391,12 @@ export const store = reactive({
   setState(step) {
     const m = /^transcript_card_(\d+)$/.exec(step);
     if (m) { this.transcriptCard = parseInt(m[1], 10); return; }
+    const g = /^graph_focus_(\d+)$/.exec(step);
+    if (g) {
+      this.graphFocus = parseInt(g[1], 10);
+      this.revealed.add('graph-frame');
+      return;
+    }
     if (step === 'reveal_all') { this.revealAll = true; return; }
     const ids = PITCH_REVEALS[step];
     if (ids) { ids.forEach(id => this.revealed.add(id)); return; }

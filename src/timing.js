@@ -70,6 +70,22 @@ const TIMING = {
   diagramsvg_caption:  30,
   diagramsvg_hold:    210,  // 7.0 s default dwell
 
+  // ── Cytoscape graph scene ────────────────────────────────────────────────
+  graph_title:         18,
+  graph_frame:         36,
+  graph_focus_0:       48,
+  graph_focus_1:       48,
+  graph_focus_2:       48,
+  graph_focus_3:       48,
+  graph_focus_4:       48,
+  graph_focus_5:       48,
+  graph_focus_6:       48,
+  graph_focus_7:       48,
+  graph_focus_8:       48,
+  graph_focus_9:       48,
+  graph_caption:       28,
+  graph_hold:         180,
+
   // ── Mermaid scene ───────────────────────────────────────────────────────
   mermaid_title:       20,
   mermaid_frame:       30,
@@ -294,6 +310,7 @@ function estimateScene(scene, opts = {}) {
       case 'narrative':    return hold('narrative_hold',   scene.hold);
       case 'diagram':      return hold('diagram_hold',     scene.hold);
       case 'diagram-svg':  return hold('diagramsvg_hold',  scene.hold);
+      case 'graph':        return hold('graph_hold',       scene.hold);
       case 'mermaid':      return hold('mermaid_hold',     scene.hold);
       case 'terminal-gif': return hold('termgif_hold',     scene.hold);
       case 'kitsoki-tui':  return hold('kitsokitui_hold',  scene.hold);
@@ -352,6 +369,19 @@ function estimateScene(scene, opts = {}) {
       for (let i = 0; i < panels; i++) f += T[`diagramsvg_panel_${i}`] ?? 30;
       if (scene.caption) f += T.diagramsvg_caption;
       f += hold('diagramsvg_hold', scene.hold);
+      f += T.inter_scene;
+      return f;
+    }
+
+    case 'graph': {
+      const path = Array.isArray(scene.path) && scene.path.length
+        ? scene.path
+        : (Array.isArray(scene.focus) ? scene.focus : []);
+      let f = scene.title ? T.graph_title : 0;
+      f += T.graph_frame;
+      for (let i = 0; i < path.length; i++) f += T[`graph_focus_${i}`] ?? 48;
+      if (scene.caption) f += T.graph_caption;
+      f += hold('graph_hold', scene.hold);
       f += T.inter_scene;
       return f;
     }

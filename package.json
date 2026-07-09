@@ -48,6 +48,7 @@
   ],
   "dependencies": {
     "ajv": "^8.20.0",
+    "cytoscape": "^3.34.0",
     "dagre": "^0.8.5",
     "jsonpath-plus": "^10.4.0",
     "mermaid": "^11.7.0",

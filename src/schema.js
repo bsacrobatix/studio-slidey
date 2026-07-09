@@ -284,6 +284,75 @@ const EDGE = {
   },
 };
 
+const GRAPH_NODE = {
+  type: 'object',
+  required: ['id'],
+  additionalProperties: true,
+  properties: {
+    id: { type: 'string', description: 'Unique node identifier referenced by graph edges and focus path entries' },
+    label: { type: 'string', description: 'Primary text shown inside the Cytoscape node' },
+    sub: { type: 'string', description: 'Secondary line shown under the node label and in the focus card' },
+    kind: { type: 'string', description: 'Semantic node type such as requirement, dependency, environment, application, substrate, or proof' },
+    weight: { type: 'number', description: 'Relative importance used by layouts and emphasis' },
+    color: { type: 'string', description: 'CSS color for the node fill' },
+    textColor: { type: 'string', description: 'CSS color for the node label' },
+    w: { type: 'number', description: 'Node width in Cytoscape layout units' },
+    h: { type: 'number', description: 'Node height in Cytoscape layout units' },
+    width: { type: 'number', description: 'Alias for w' },
+    height: { type: 'number', description: 'Alias for h' },
+    x: { type: 'number', description: 'Pinned x coordinate for layout:"preset"' },
+    y: { type: 'number', description: 'Pinned y coordinate for layout:"preset"' },
+    position: {
+      type: 'object',
+      description: 'Pinned Cytoscape position for layout:"preset"',
+      properties: {
+        x: { type: 'number' },
+        y: { type: 'number' },
+      },
+    },
+    classes: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }], description: 'Extra Cytoscape classes' },
+    className: { type: 'string', description: 'Extra Cytoscape class string' },
+  },
+};
+
+const GRAPH_EDGE = {
+  type: 'object',
+  required: ['from', 'to'],
+  additionalProperties: true,
+  properties: {
+    id: { type: 'string', description: 'Stable edge id, useful for focus-path edge highlighting' },
+    from: { type: 'string', description: 'Source node id' },
+    to: { type: 'string', description: 'Target node id' },
+    label: { type: 'string', description: 'Text shown along the edge' },
+    weight: { type: 'number', description: 'Line thickness / influence weight' },
+    influence: { type: 'number', description: 'Alias for weight' },
+    color: { type: 'string', description: 'CSS line and arrow color' },
+    curve: { type: 'string', enum: ['bezier', 'unbundled-bezier', 'haystack', 'segments', 'taxi', 'straight'], description: 'Cytoscape curve-style for this edge' },
+    kind: { type: 'string', description: 'Semantic edge type' },
+    classes: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }], description: 'Extra Cytoscape classes' },
+    className: { type: 'string', description: 'Extra Cytoscape class string' },
+  },
+};
+
+const GRAPH_FOCUS = {
+  oneOf: [
+    { type: 'string', description: 'Node id to center on this reveal' },
+    {
+      type: 'object',
+      required: ['node'],
+      additionalProperties: true,
+      properties: {
+        node: { type: 'string', description: 'Node id to center on this reveal' },
+        note: { type: 'string', description: 'Focus-card explanation for this navigation step' },
+        edge: { type: 'string', description: 'Edge id to highlight on this step' },
+        edges: { type: 'array', items: { type: 'string' }, description: 'Edge ids to highlight on this step' },
+        zoom: { type: 'number', exclusiveMinimum: 0, description: 'Camera zoom for this focus step' },
+        durationMs: { type: 'integer', minimum: 0, description: 'Camera animation duration for this focus step' },
+      },
+    },
+  ],
+};
+
 const SCHEMA = {
   $schema: 'http://json-schema.org/draft-07/schema#',
   title: 'Slidey Spec',
@@ -587,6 +656,45 @@ const SCHEMA = {
                   },
                 },
               },
+              caption: { type: 'string' },
+              ...COMMON,
+            },
+          },
+          // ── graph ─────────────────────────────────────────────────────────
+          {
+            type: 'object',
+            required: ['type', 'nodes'],
+            description: 'Cytoscape.js graph viewer. Reveals can navigate a path by centering one node at a time.',
+            properties: {
+              type: { const: 'graph' },
+              title: { type: 'string' },
+              layout: {
+                type: 'string',
+                enum: ['preset', 'cose', 'breadthfirst', 'circle', 'concentric', 'grid', 'random'],
+                description: 'Initial Cytoscape layout. Use preset with node x/y or position for hand-tuned investor diagrams.',
+              },
+              focusLayout: {
+                type: 'string',
+                enum: ['preset', 'cose', 'breadthfirst', 'circle', 'concentric', 'grid', 'random'],
+                description: 'Optional layout to rerun while navigating focus steps; omit to keep the initial layout and animate camera movement.',
+              },
+              nodes: { type: 'array', minItems: 1, items: GRAPH_NODE, description: 'Graph nodes rendered by Cytoscape' },
+              edges: { type: 'array', items: GRAPH_EDGE, description: 'Directed graph edges rendered by Cytoscape' },
+              path: { type: 'array', items: GRAPH_FOCUS, description: 'Per-reveal navigation path; each item centers a node and can add explanatory focus text' },
+              focus: { type: 'array', items: GRAPH_FOCUS, description: 'Alias for path' },
+              roots: { type: 'array', items: { type: 'string' }, description: 'Root node ids for breadthfirst layout' },
+              directed: { type: 'boolean', description: 'Treat edges as directed in layouts that support it; default true' },
+              padding: { type: 'number', minimum: 0, description: 'Viewport padding when fitting the graph' },
+              spacingFactor: { type: 'number', exclusiveMinimum: 0, description: 'Cytoscape breadthfirst spacing factor' },
+              idealEdgeLength: { type: 'number', exclusiveMinimum: 0, description: 'Cytoscape cose ideal edge length' },
+              nodeOverlap: { type: 'number', minimum: 0, description: 'Cytoscape cose node overlap value' },
+              minNodeSpacing: { type: 'number', minimum: 0, description: 'Cytoscape concentric minimum node spacing' },
+              randomize: { type: 'boolean', description: 'Allow randomized cose layout starts; default false for deterministic render output' },
+              focusZoom: { type: 'number', exclusiveMinimum: 0, description: 'Default camera zoom for focus-path reveals' },
+              animationMs: { type: 'integer', minimum: 0, description: 'Default Cytoscape camera/layout animation duration' },
+              nodeFontSize: { type: 'number', minimum: 1, description: 'Node label font size in pixels' },
+              edgeFontSize: { type: 'number', minimum: 1, description: 'Edge label font size in pixels' },
+              interactive: { type: 'boolean', description: 'Enable mouse pan/zoom in the live viewer; exports remain deterministic' },
               caption: { type: 'string' },
               ...COMMON,
             },
