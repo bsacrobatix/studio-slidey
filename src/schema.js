@@ -3,9 +3,114 @@
 // JSON Schema for a slidey spec.
 // Exported for --schema (LLM/tooling) and used by --validate and startup validation.
 
+const LIBRARY_LINK = {
+  type: 'object',
+  additionalProperties: true,
+  properties: {
+    label: { type: 'string', description: 'Button text for a navigation link shown in the interactive viewer' },
+    title: { type: 'string', description: 'Alternate navigation label' },
+    deck: { type: 'string', description: 'Target deck id inside library.decks' },
+    deckId: { type: 'string', description: 'Alias for deck' },
+    scene: { type: 'string', description: 'Optional target source scene id in the destination deck' },
+    sceneId: { type: 'string', description: 'Alias for scene' },
+    targetScene: { type: 'string', description: 'Alias for scene' },
+    section: { type: 'string', description: 'Optional target section id in the destination deck' },
+    sectionId: { type: 'string', description: 'Alias for section' },
+  },
+};
+
+const LIBRARY_SELECTOR = {
+  type: 'object',
+  additionalProperties: true,
+  properties: {
+    ids: { type: 'array', items: { type: 'string' }, description: 'Include scenes with these ids' },
+    sceneIds: { type: 'array', items: { type: 'string' }, description: 'Alias for ids' },
+    tags: { type: 'array', items: { type: 'string' }, description: 'Include scenes with any of these tags' },
+    anyTags: { type: 'array', items: { type: 'string' }, description: 'Alias for tags' },
+    allTags: { type: 'array', items: { type: 'string' }, description: 'Require every listed tag' },
+    excludeTags: { type: 'array', items: { type: 'string' }, description: 'Omit scenes with any of these tags' },
+    sections: { type: 'array', items: { type: 'string' }, description: 'Include scenes in these sections' },
+    types: { type: 'array', items: { type: 'string' }, description: 'Include scenes with these scene types' },
+    deck: { type: 'string', description: 'Restrict a subset selector to scenes from this deck, within the subset parent scope' },
+    decks: { type: 'array', items: { type: 'string' }, description: 'Restrict a subset selector to scenes from these decks, within the subset parent scope' },
+    fromDeck: { type: 'string', description: 'Alias for deck in subset selectors' },
+  },
+};
+
+const LIBRARY_DECK = {
+  type: 'object',
+  required: ['id'],
+  additionalProperties: true,
+  properties: {
+    id: { type: 'string', description: 'Stable deck id used by --deck, the viewer deck picker, and navigation links' },
+    deckType: { type: 'string', enum: ['hierarchy', 'subset'], description: 'hierarchy decks are separate child presentations with local scenes; subset decks are synced views of scenes from their parent deck and descendants' },
+    kind: { type: 'string', description: 'Alias for deckType; accepted values include deck/hierarchy and subset/view' },
+    title: { type: 'string', description: 'Deck title shown in the picker and applied to meta.title for this view' },
+    purpose: { type: 'string', description: 'Purpose label, e.g. executive, workshop, training, sales' },
+    theme: { type: 'string', description: 'Theme label used to describe this subset deck' },
+    audience: { type: 'string', description: 'Audience label for this subset deck' },
+    description: { type: 'string' },
+    parent: { type: 'string', description: 'Parent deck id for hierarchical navigation and sidebar nesting' },
+    meta: { type: 'object', additionalProperties: true, description: 'Metadata merged into the resolved deck' },
+    scenes: {
+      type: 'array',
+      description: 'For subset decks: synced scene refs by id/index or objects like {fromDeck, ref, overrides}; refs can only target the subset parent deck or descendants. For hierarchy decks: inline scene objects that belong to this child deck.',
+      items: {
+        oneOf: [
+          { type: 'string' },
+          { type: 'integer', minimum: 0 },
+          {
+            type: 'object',
+            additionalProperties: true,
+            properties: {
+              ref: { type: 'string' },
+              scene: { type: 'string' },
+              id: { type: 'string' },
+              fromDeck: { type: 'string', description: 'Origin deck id for a subset scene ref' },
+              sourceDeck: { type: 'string', description: 'Alias for fromDeck' },
+              select: LIBRARY_SELECTOR,
+              overrides: { type: 'object', additionalProperties: true },
+            },
+          },
+        ],
+      },
+    },
+    select: LIBRARY_SELECTOR,
+    selector: LIBRARY_SELECTOR,
+    exclude: LIBRARY_SELECTOR,
+    children: {
+      oneOf: [
+        { type: 'array', items: { type: 'object', additionalProperties: true } },
+        { type: 'object', additionalProperties: { type: 'object', additionalProperties: true } },
+      ],
+      description: 'Nested hierarchy child decks and scoped subset views; children inherit this deck as parent unless parent is set explicitly',
+    },
+  },
+};
+
 const COMMON = {
   _comment: { type: 'string', description: 'Optional human comment; ignored by the renderer' },
-  narration: { type: 'string', description: 'Text synthesized to speech audio via edge-tts' },
+  id: { type: 'string', description: 'Stable scene id for library subset decks and hierarchical navigation links' },
+  tags: { type: 'array', items: { type: 'string' }, description: 'Scene tags used by library deck selectors' },
+  section: { type: 'string', description: 'Section id used by collection navigation and subset selectors' },
+  sections: { type: 'array', items: { type: 'string' }, description: 'Additional section ids represented by this scene; useful when one parent slide links to multiple child decks' },
+  purpose: { type: 'string', description: 'Scene-level purpose tag used by subset deck selectors' },
+  theme: { type: 'string', description: 'Scene-level theme tag used by subset deck selectors' },
+  links: { type: 'array', items: LIBRARY_LINK, description: 'Interactive navigation links to other decks or sections in the same library' },
+  nav: {
+    oneOf: [
+      { type: 'array', items: LIBRARY_LINK },
+      {
+        type: 'object',
+        additionalProperties: true,
+        properties: {
+          links: { type: 'array', items: LIBRARY_LINK },
+        },
+      },
+    ],
+    description: 'Alternate navigation-link container for hierarchical deck navigation',
+  },
+  narration: { type: 'string', description: 'Text spoken by Edge TTS in the live viewer / VS Code preview and synthesized into MP4 exports' },
   hold: { type: 'integer', minimum: 0, description: 'Extra frames to hold after the last reveal step' },
   instant: { type: 'boolean', description: 'Reveal the whole scene at once (no progressive build / no title-only first page) — one PDF page / nav advance for the scene' },
   seamless: { type: 'boolean', description: 'Keep diagram continuity across adjacent scenes when supported by the renderer' },
@@ -23,6 +128,15 @@ const CARDS_ITEM = {
     linesHtml: { type: 'array', items: { type: 'string' }, description: 'Sanitized inline HTML for imported Markdown bullet lines' },
     icon: { type: 'string', description: 'Icon prefix (icon-row variant)' },
     style: { type: 'string', enum: ['primary', 'secondary', 'default'], description: 'Accent tint' },
+    deck: { type: 'string', description: 'Make this card clickable and navigate to this library deck id' },
+    deckId: { type: 'string', description: 'Alias for deck' },
+    targetDeck: { type: 'string', description: 'Alias for deck' },
+    scene: { type: 'string', description: 'Optional destination scene id' },
+    sceneId: { type: 'string', description: 'Alias for scene' },
+    targetScene: { type: 'string', description: 'Alias for scene' },
+    section: { type: 'string', description: 'Optional destination section id' },
+    sectionId: { type: 'string', description: 'Alias for section' },
+    link: LIBRARY_LINK,
   },
 };
 
@@ -96,6 +210,15 @@ const NODE = {
     slot: { type: 'string', enum: ['top', 'right', 'bottom', 'left', 'top-right', 'bottom-right', 'bottom-left', 'top-left'], description: 'Position around a diagram-svg panel with layout:"cycle"' },
     cycle: { type: 'boolean', description: 'Set false to exclude this node from layout:"cycle" placement' },
     style: { type: 'string', enum: ['primary', 'secondary'], description: 'Node colour accent' },
+    deck: { type: 'string', description: 'Make this diagram node clickable and navigate to this library deck id' },
+    deckId: { type: 'string', description: 'Alias for deck' },
+    targetDeck: { type: 'string', description: 'Alias for deck' },
+    scene: { type: 'string', description: 'Optional destination scene id' },
+    sceneId: { type: 'string', description: 'Alias for scene' },
+    targetScene: { type: 'string', description: 'Alias for scene' },
+    section: { type: 'string', description: 'Optional destination section id' },
+    sectionId: { type: 'string', description: 'Alias for section' },
+    link: LIBRARY_LINK,
   },
 };
 
@@ -154,7 +277,7 @@ const SCHEMA = {
             rate: { type: 'string', description: 'Speech rate offset, e.g. "+0%" or "+10%"' },
             pronunciations: {
               type: 'object',
-              description: 'Map of term → phonetic respelling, applied whole-word and case-insensitively to the SPOKEN narration only (the text shown in specs/--list is unchanged). Fixes TTS mispronunciations of brand names, acronyms, and jargon. e.g. { "Anthropic": "an-THROP-ik", "SDLC": "S D L C", "kitsoki": "kit-SOH-kee" }',
+              description: 'Map of term → phonetic respelling, applied whole-word and case-insensitively to the SPOKEN narration only (the text shown in specs/--list is unchanged). Fixes TTS mispronunciations of brand names, acronyms, and jargon. Use lower-case pronounceable syllables for words; use spaced capitals only for acronyms you want spelled out. Avoid uncommon tokens like "soh" that some voices spell out. e.g. { "Anthropic": "an throp ik", "SDLC": "S D L C", "kitsoki": "kit so key" }',
               additionalProperties: { type: 'string' },
             },
           },
@@ -208,6 +331,58 @@ const SCHEMA = {
             },
           ],
           description: 'Optional deck theme; imported Marp themes are preserved here when supported',
+        },
+      },
+    },
+    library: {
+      type: 'object',
+      additionalProperties: true,
+      description: 'Collection metadata. Source scenes remain in scenes[] for the root deck and synced subset views; hierarchy decks are separate child presentations with local scenes.',
+      properties: {
+        title: { type: 'string', description: 'Collection/library title' },
+        sourceTitle: { type: 'string', description: 'Label for the full source deck in the viewer picker' },
+        defaultDeck: { type: 'string', description: 'Default library deck id when no --deck/query deck is provided' },
+        activeDeck: { type: 'string', description: 'Alias for defaultDeck' },
+        meta: { type: 'object', additionalProperties: true, description: 'Metadata merged into every resolved child deck' },
+        decks: {
+          oneOf: [
+            { type: 'array', items: LIBRARY_DECK },
+            { type: 'object', additionalProperties: { type: 'object', additionalProperties: true } },
+          ],
+          description: 'Named collection decks. Use deckType "hierarchy" with inline scenes for child presentations, or deckType "subset" with scenes/select for synced source views.',
+        },
+        sections: {
+          oneOf: [
+            {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['id'],
+                additionalProperties: true,
+                properties: {
+                  id: { type: 'string' },
+                  title: { type: 'string' },
+                  deck: { type: 'string', description: 'Deck opened from source scenes with this section id' },
+                  parent: { type: 'string', description: 'Parent section id' },
+                  cta: { type: 'string', description: 'Link label shown on matching summary scenes' },
+                },
+              },
+            },
+            {
+              type: 'object',
+              additionalProperties: {
+                type: 'object',
+                additionalProperties: true,
+                properties: {
+                  title: { type: 'string' },
+                  deck: { type: 'string' },
+                  parent: { type: 'string' },
+                  cta: { type: 'string' },
+                },
+              },
+            },
+          ],
+          description: 'Section map for automatic hierarchical navigation links.',
         },
       },
     },

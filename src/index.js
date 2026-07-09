@@ -24,9 +24,10 @@ const os   = require('os');
 const { mkdtemp } = require('./temp-path');
 
 const { framesToVideo }     = require('./assembler');
-const { generateAll: generateNarration, applyPronunciations, edgeTtsAvailable } = require('./narration');
+const { generateAll: generateNarration, applyPronunciations, edgeTtsAvailable, DEFAULT_VOICE } = require('./narration');
 const { estimateBoundaries } = require('./timing');
 const { validateSpec }       = require('./validate');
+const { resolveDeckSpec }    = require('./collections');
 
 function generateFrames(...args) {
   return require('./renderer').generateFrames(...args);
@@ -208,9 +209,11 @@ if (args[0] === 'convert') {
 if (args[0] === 'validate') {
   const inPath = args[1];
   if (!inPath) {
-    console.error('[slidey] usage: slidey validate <spec.json>');
+    console.error('[slidey] usage: slidey validate <spec.json> [--deck <id>]');
     process.exit(1);
   }
+  const deckIdxLocal = args.indexOf('--deck');
+  const deckLocal = deckIdxLocal !== -1 ? args[deckIdxLocal + 1] : null;
   const absIn = path.resolve(inPath);
   if (!fs.existsSync(absIn)) {
     console.error(`[slidey] ERROR: input file not found: ${absIn}`);
@@ -223,14 +226,28 @@ if (args[0] === 'validate') {
     console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
     process.exit(1);
   }
-  const { valid, errors, warnings, count } = validateSpec(spec, { specPath: absIn });
+  const resolvedDeck = resolveDeckSpec(spec, { deckId: deckLocal || 'source' });
+  for (const line of resolvedDeck.warnings || []) console.warn(`[slidey] warning:${line}`);
+  if (resolvedDeck.errors && resolvedDeck.errors.length) {
+    console.error(`[slidey] INVALID: ${resolvedDeck.errors.length} collection problem(s) in ${absIn}`);
+    for (const line of resolvedDeck.errors) console.error(`  ${line}`);
+    process.exit(1);
+  }
+  spec = resolvedDeck.spec;
+  const { valid, errors, warnings, count } = validateSpec(spec, {
+    specPath: absIn,
+    skipLibrary: resolvedDeck.isCollection && !resolvedDeck.isSource,
+  });
   for (const line of warnings || []) console.warn(`[slidey] warning:${line}`);
   if (!valid) {
     console.error(`[slidey] INVALID: ${count} problem(s) in ${absIn}`);
     for (const line of errors) console.error(line);
     process.exit(1);
   }
-  console.log(`[slidey] OK: ${absIn} (${(spec.scenes || []).length} scene(s))`);
+  const countLabel = resolvedDeck.isCollection && !resolvedDeck.isSource
+    ? `deck ${resolvedDeck.deckId}, ${(spec.scenes || []).length} scene(s)`
+    : `${(spec.scenes || []).length} scene(s)`;
+  console.log(`[slidey] OK: ${absIn} (${countLabel})`);
   process.exit(0);
 }
 
@@ -259,7 +276,19 @@ if (args[0] === 'bundle') {
       console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
       process.exit(1);
     }
-    const { valid, errors, warnings, count } = validateSpec(spec, { specPath: absIn });
+    const deckIdxLocal = args.indexOf('--deck');
+    const deckLocal = deckIdxLocal !== -1 ? args[deckIdxLocal + 1] : null;
+    const resolvedDeck = resolveDeckSpec(spec, { deckId: deckLocal });
+    if (resolvedDeck.errors && resolvedDeck.errors.length) {
+      console.error(`[slidey] ERROR: ${absIn} has collection errors:`);
+      for (const line of resolvedDeck.errors) console.error(`  ${line}`);
+      process.exit(1);
+    }
+    spec = resolvedDeck.spec;
+    const { valid, errors, warnings, count } = validateSpec(spec, {
+      specPath: absIn,
+      skipLibrary: resolvedDeck.isCollection && !resolvedDeck.isSource,
+    });
     for (const line of warnings || []) console.warn(`[slidey] warning:${line}`);
     if (!valid) {
       console.error(`[slidey] ERROR: ${absIn} is invalid (${count} problem(s)) — refusing to bundle a deck that won't render correctly. Fix these or pass --skip-validate:`);
@@ -269,7 +298,10 @@ if (args[0] === 'bundle') {
   }
   const script = path.join(__dirname, '..', 'web', 'build-single.mjs');
   try {
-    require('child_process').execFileSync(process.execPath, [script, inPath, outPath], { stdio: 'inherit' });
+    const buildArgs = [script, inPath, outPath];
+    const deckIdxLocal = args.indexOf('--deck');
+    if (deckIdxLocal !== -1 && args[deckIdxLocal + 1]) buildArgs.push('--deck', args[deckIdxLocal + 1]);
+    require('child_process').execFileSync(process.execPath, buildArgs, { stdio: 'inherit' });
     process.exit(0);
   } catch (err) {
     process.exit(err.status || 1);
@@ -390,7 +422,7 @@ if (args[0] === 'drawio') {
 const VALUE_FLAGS = new Set([
   '--fps', '--frames-dir', '--capture-log', '--scenes', '--context',
   '--pdf-raster-quality', '--pdf-raster-scale', '--port', '--pace', '--format',
-  '--out-dir', '--extract-dir', '--theme', '--label', '--adapter',
+  '--out-dir', '--extract-dir', '--theme', '--label', '--adapter', '--deck',
 ]);
 function positionalArgs(argv) {
   const out = [];
@@ -406,6 +438,8 @@ const anyAction = wantsList || wantsCheck || wantsValidate || wantsAudit;
 const noOpen    = args.includes('--no-open');
 const portIdx   = args.indexOf('--port');
 const portOpt   = portIdx !== -1 ? parseInt(args[portIdx + 1], 10) : 4321;
+const deckIdx   = args.indexOf('--deck');
+const deckOpt   = deckIdx !== -1 ? args[deckIdx + 1] : null;
 if (!wantsHelp && !anyAction && args[0] !== 'capture') {
   const pos = positionalArgs(args);
   let viewerRoot = null, openFile = null;
@@ -428,6 +462,7 @@ if (!wantsHelp && !anyAction && args[0] !== 'capture') {
     require('./serve').startViewer({
       root: viewerRoot,
       openFile,
+      deckId: deckOpt,
       port: Number.isInteger(portOpt) ? portOpt : 4321,
       open: !noOpen,
     });
@@ -457,6 +492,7 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '  Viewer options:',
     '    --port <n>                 Viewer port (default: 4321; auto-increments if taken)',
     '    --no-open                  Do not launch the browser; just print the URL',
+    '    --deck <id>                Open a named library deck when the spec is a collection',
     '',
     '  Draw.io options:',
     '    --out-dir <dir>            Directory for generated SVG files',
@@ -481,6 +517,9 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '                               Spec: comma-separated indices and/or ranges,',
     '                               e.g.  --scenes 4     --scenes 0,3-5,7',
     '                               Selected scenes are still combined into one MP4.',
+    '    --deck <id>                For a collection spec, render a named library deck',
+    '                               instead of the source deck. Subset decks are resolved',
+    '                               from the same source scenes at render time.',
     '    --list                     Print the scene index + duration table; no render.',
     '    --estimate                 Like --list, plus narration audio-length estimates',
     '                               and overrun warnings. Catches budget issues',
@@ -779,6 +818,18 @@ async function main() {
     }
   }
 
+  const resolvedDeck = resolveDeckSpec(spec, { deckId: deckOpt });
+  for (const line of resolvedDeck.warnings || []) console.error(`[slidey] COLLECTION WARNING: ${line}`);
+  if (resolvedDeck.errors && resolvedDeck.errors.length) {
+    console.error(`[slidey] COLLECTION ERROR: ${resolvedDeck.errors.length} problem(s) found in ${path.basename(absInput)}\n`);
+    for (const line of resolvedDeck.errors) console.error(`  ${line}`);
+    process.exit(1);
+  }
+  if (resolvedDeck.isCollection && !resolvedDeck.isSource) {
+    console.log(`[slidey] Deck   : ${resolvedDeck.deckId} (${resolvedDeck.spec.scenes.length}/${(spec.scenes || []).length} source scenes)`);
+  }
+  spec = resolvedDeck.spec;
+
   if (!spec.scenes || !Array.isArray(spec.scenes) || spec.scenes.length === 0) {
     console.error('[slidey] ERROR: spec must have a non-empty "scenes" array');
     process.exit(1);
@@ -786,7 +837,10 @@ async function main() {
 
   // ── JSON Schema validation (always; exits on failure) ─────────────────────
   {
-    const { valid, errors, warnings, count } = validateSpec(spec, { specPath: absInput });
+    const { valid, errors, warnings, count } = validateSpec(spec, {
+      specPath: absInput,
+      skipLibrary: resolvedDeck.isCollection && !resolvedDeck.isSource,
+    });
     if (warnings && warnings.length) {
       for (const line of warnings) console.error(`[slidey] VALIDATION WARNING: ${line.trim()}`);
     }

@@ -95,6 +95,122 @@ smallest starting point; `examples/kitsoki-pitch.slidey.json` and
 `examples/layout-gallery.slidey.json` exercise every scene type. All are safe to
 delete or copy as templates.
 
+### Collections, synced subset decks, and drill-down navigation
+
+A `.slidey.json` file can also be a **library**. The root `scenes[]` are the
+full source deck and can be used for synced subset views. `library.decks` can
+also contain hierarchy decks: separate child presentations with their own local
+slides and parent/child navigation. In the viewer sidebar, a collection spec
+expands like a folder: source deck, hierarchy children, grandchildren, and a
+separate Subsets group.
+
+```json
+{
+  "meta": { "title": "Tree of Life taxonomy", "mode": "pitch" },
+  "library": {
+    "sourceTitle": "Tree of Life",
+    "defaultDeck": "source",
+    "decks": [
+      {
+        "id": "bacteria",
+        "deckType": "hierarchy",
+        "title": "Bacteria",
+        "scenes": [
+          { "id": "bacteria-intro", "type": "title", "title": "Bacteria" },
+          {
+            "id": "bacteria-lineages",
+            "type": "cards",
+            "variant": "grid",
+            "title": "Major bacterial lineages",
+            "links": [
+              { "deck": "proteobacteria", "label": "Open Proteobacteria" },
+              { "deck": "cyanobacteria", "label": "Open Cyanobacteria" }
+            ],
+            "cards": [
+              { "label": "Proteobacteria" },
+              { "label": "Cyanobacteria" }
+            ]
+          }
+        ],
+        "children": [
+          {
+            "id": "proteobacteria",
+            "deckType": "hierarchy",
+            "title": "Proteobacteria",
+            "scenes": [
+              { "id": "proteobacteria-intro", "type": "title", "title": "Proteobacteria" }
+            ]
+          },
+          {
+            "id": "cyanobacteria",
+            "deckType": "hierarchy",
+            "title": "Cyanobacteria",
+            "scenes": [
+              { "id": "cyanobacteria-intro", "type": "title", "title": "Cyanobacteria" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "eukarya",
+        "deckType": "hierarchy",
+        "title": "Eukarya",
+        "children": [
+          { "id": "animals", "deckType": "hierarchy", "title": "Animals", "scenes": [{ "id": "animals-intro", "type": "title", "title": "Animals" }] },
+          { "id": "plants", "deckType": "hierarchy", "title": "Plants", "scenes": [{ "id": "plants-intro", "type": "title", "title": "Plants" }] },
+          { "id": "fungi", "deckType": "hierarchy", "title": "Fungi", "scenes": [{ "id": "fungi-intro", "type": "title", "title": "Fungi" }] }
+        ],
+        "scenes": [
+          { "id": "eukarya-intro", "type": "title", "title": "Eukarya" }
+        ]
+      },
+      {
+        "id": "intro-biology",
+        "deckType": "subset",
+        "title": "Intro biology subset",
+        "purpose": "classroom",
+        "theme": "overview",
+        "select": { "tags": ["intro"] }
+      }
+    ],
+    "sections": [
+      { "id": "bacteria", "title": "Bacteria", "deck": "bacteria" },
+      { "id": "proteobacteria", "title": "Proteobacteria", "parent": "bacteria", "deck": "proteobacteria" },
+      { "id": "cyanobacteria", "title": "Cyanobacteria", "parent": "bacteria", "deck": "cyanobacteria" },
+      { "id": "eukarya", "title": "Eukarya", "deck": "eukarya" }
+    ]
+  },
+  "scenes": [
+    { "id": "intro", "type": "title", "title": "Tree of Life", "tags": ["intro"] },
+    {
+      "id": "three-domains",
+      "type": "cards",
+      "variant": "grid",
+      "title": "Three domains",
+      "tags": ["intro"],
+      "links": [
+        { "deck": "bacteria", "label": "Open Bacteria" },
+        { "deck": "eukarya", "label": "Open Eukarya" }
+      ],
+      "cards": [
+        { "label": "Bacteria" },
+        { "label": "Archaea" },
+        { "label": "Eukarya" }
+      ]
+    }
+  ]
+}
+```
+
+Open the viewer directly with `slidey deck.slidey.json --deck eukarya`, or
+append `?deck=eukarya` to a hosted viewer URL. Render/export commands also
+accept `--deck eukarya`. In the web viewer, subset decks are read-only
+resolved views; edit the source deck and every subset follows. Hierarchy decks
+are separate presentations and show normal slide counts, not “3 of 5” subset
+counts. Summary scenes can link to deeper decks with
+`links: [{ "label": "Open Animals", "deck": "animals" }]`, or by matching
+`scene.section` to `library.sections[].deck`.
+
 ### Install as a CLI & open a folder/file
 
 ```sh

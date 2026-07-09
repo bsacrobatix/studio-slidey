@@ -3,6 +3,7 @@
 const fs = require('fs');
 const { SCHEMA } = require('./schema');
 const { resolveAsset } = require('./assets');
+const { linkTargetForItem, normalizeDeckDefinitions, normalizeSections, resolveDeckSpec, SOURCE_DECK_ID } = require('./collections');
 
 const VALID_TYPES = [
   'title', 'narrative', 'diagram', 'diagram-svg', 'mermaid', 'trace', 'transcript',
@@ -72,6 +73,7 @@ function validateSemantics(spec, opts = {}) {
   });
 
   validateRequiredScenes(spec, errors);
+  if (!opts.skipLibrary) validateLibrary(spec, errors, warnings);
   return { errors, warnings };
 }
 
@@ -93,6 +95,101 @@ function validateRequiredScenes(spec, errors) {
     if (Number.isInteger(req.max) && count > req.max) {
       errors.push(`  meta.required_scenes[${i}]: allows at most ${req.max} scene(s) of type "${req.type}" (found ${count})`);
     }
+  });
+}
+
+function validateLibrary(spec, errors, warnings) {
+  if (!spec || !spec.library || typeof spec.library !== 'object') return;
+
+  const rawDecks = spec.library.decks || [];
+  const rawList = Array.isArray(rawDecks)
+    ? rawDecks
+    : Object.entries(rawDecks).map(([id, value]) => ({ id, ...(value || {}) }));
+  const seen = new Set([SOURCE_DECK_ID]);
+  rawList.forEach((deck, i) => {
+    if (!deck || typeof deck !== 'object') return;
+    const id = deck.id != null ? String(deck.id) : '';
+    if (!id) {
+      errors.push(`  library.decks[${i}]: missing required field "id"`);
+      return;
+    }
+    if (seen.has(id)) errors.push(`  library.decks[${i}]: duplicate deck id "${id}"`);
+    seen.add(id);
+  });
+
+  const decks = normalizeDeckDefinitions(spec);
+  const deckIds = new Set(decks.map(deck => deck.id));
+  decks
+    .filter(deck => !deck.source)
+    .forEach(deck => {
+      const resolved = resolveDeckSpec(spec, { deckId: deck.id });
+      for (const line of resolved.errors || []) errors.push(`  ${line}`);
+      for (const line of resolved.warnings || []) warnings.push(`  ${line}`);
+      if (deck.parent && !deckIds.has(deck.parent)) {
+        errors.push(`  library.decks["${deck.id}"]: unknown parent deck "${deck.parent}"`);
+      }
+    });
+
+  for (const section of normalizeSections(spec)) {
+    if (section.deck && !deckIds.has(section.deck)) {
+      errors.push(`  library.sections["${section.id}"]: unknown deck "${section.deck}"`);
+    }
+  }
+
+  const checkLinks = (links, owner, prefix) => {
+    if (!links) return;
+    const list = Array.isArray(links)
+      ? links
+      : typeof links === 'object' ? Object.values(links) : [];
+    list.forEach((link, i) => {
+      if (!link || typeof link !== 'object') return;
+      const target = linkTargetForItem(link);
+      const deck = target && target.deck;
+      if (deck && !deckIds.has(deck)) {
+        errors.push(`  ${owner} — ${prefix}[${i}]: unknown deck "${deck}"`);
+      }
+    });
+  };
+  const checkItemLinks = (items, owner, prefix) => {
+    if (!Array.isArray(items)) return;
+    items.forEach((item, i) => {
+      const link = linkTargetForItem(item);
+      if (link && link.deck && !deckIds.has(link.deck)) {
+        errors.push(`  ${owner} — ${prefix}[${i}]: unknown deck "${link.deck}"`);
+      }
+    });
+  };
+  const checkSceneItemLinks = (scene, owner) => {
+    checkItemLinks(scene.cards, owner, 'cards');
+    if (Array.isArray(scene.panels)) {
+      scene.panels.forEach((panel, panelIdx) => {
+        checkItemLinks(panel && panel.nodes, owner, `panels[${panelIdx}].nodes`);
+      });
+    }
+  };
+
+  (Array.isArray(spec.scenes) ? spec.scenes : []).forEach((scene, sceneIdx) => {
+    if (!scene || typeof scene !== 'object') return;
+    const owner = `Scene ${sceneIdx}`;
+    checkLinks(scene.links, owner, 'links');
+    checkLinks(scene.children, owner, 'children');
+    if (scene.nav) checkLinks(scene.nav.links || scene.nav, owner, 'nav.links');
+    if (scene.navigation) checkLinks(scene.navigation.links || scene.navigation, owner, 'navigation.links');
+    checkSceneItemLinks(scene, owner);
+  });
+
+  decks
+    .filter(deck => deck.deckType === 'hierarchy' && deck.raw && Array.isArray(deck.raw.scenes))
+    .forEach(deck => {
+      deck.raw.scenes.forEach((scene, sceneIdx) => {
+        if (!scene || typeof scene !== 'object') return;
+        const owner = `library.decks["${deck.id}"].scenes[${sceneIdx}]`;
+        checkLinks(scene.links, owner, 'links');
+        checkLinks(scene.children, owner, 'children');
+        if (scene.nav) checkLinks(scene.nav.links || scene.nav, owner, 'nav.links');
+        if (scene.navigation) checkLinks(scene.navigation.links || scene.navigation, owner, 'navigation.links');
+        checkSceneItemLinks(scene, owner);
+      });
   });
 }
 
