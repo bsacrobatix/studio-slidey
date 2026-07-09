@@ -95,19 +95,23 @@ if (args[0] === 'docs') {
   }
 }
 
-// ── `slidey doctor` — verify the headless browser can launch and screenshot ─
+// ── `slidey doctor` — verify the local export toolchain is ready ───────────
 if (args[0] === 'doctor') {
   (async () => {
-    const { doctor } = require('./browser');
-    const result = await doctor();
-    console.log(`[slidey] Browser: ${result.executablePath}`);
-    if (result.ok) {
-      console.log('[slidey] ✓ browser launch and screenshot succeeded');
-      process.exit(0);
+    const { formatDoctorReport, runSetupDoctor } = require('./setup-doctor');
+    const voiceIdx = args.indexOf('--voice');
+    const result = await runSetupDoctor({
+      browser: !args.includes('--no-browser'),
+      narration: !args.includes('--no-narration'),
+      ttsSample: !args.includes('--no-tts-sample') && !args.includes('--no-narration'),
+      voice: voiceIdx !== -1 ? args[voiceIdx + 1] : undefined,
+    });
+    if (args.includes('--json')) {
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    } else {
+      console.log(formatDoctorReport(result));
     }
-    console.error('[slidey] ERROR: browser launch failed');
-    console.error(result.error || 'unknown error');
-    process.exit(1);
+    process.exit(result.ok ? 0 : 1);
   })();
   return;
 }
@@ -446,7 +450,7 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '                                                          build a self-contained interactive HTML deck/viewer',
     '    node index.js drawio <input...> --out-dir <dir>       convert Draw.io PNG/XML to themed SVG',
     '    node index.js capture <tour.json> <out.mp4>         record a demo MP4 + chapter sidecar from a tour',
-    '    node index.js doctor                                verify headless Chrome launch + screenshot',
+    '    node index.js doctor                                verify export dependencies',
     '    slidey docs                                          print the authoring guide (for LLMs/agents)',
     '    slidey skill install [skill-name|all] [--user|--project]  install bundled Slidey agent skills',
     '',
@@ -459,6 +463,13 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '    --extract-dir <dir>        Also write embedded Draw.io XML from PNG inputs',
     '    --theme <name>             SVG theme (default: rose-pine-moon)',
     '    --label <text>             Accessible SVG label for a single input',
+    '',
+    '  Doctor options:',
+    '    --no-narration             Check silent video/PDF/PNG setup only',
+    '    --no-tts-sample            Check edge-tts is installed without making a network TTS call',
+    '    --no-browser               Skip the headless browser launch check',
+    '    --voice <id>               Voice to test for the TTS sample (default en-AU-NatashaNeural)',
+    '    --json                     Print machine-readable doctor output',
     '',
     '  Render options:',
     '    --fps <n>                  Frames per second (default: 30)',

@@ -6,7 +6,8 @@ const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
-const { browserExecutableError, closeBrowser, launchOptions, doctor } = require('./browser');
+const { browserExecutableError, closeBrowser, launchOptions } = require('./browser');
+const { runSetupDoctor } = require('./setup-doctor');
 const { validateSpec } = require('./validate');
 const { SCHEMA } = require('./schema');
 const { sceneShowOpts } = require('./assets');
@@ -729,8 +730,13 @@ const TOOLS = [
   },
   {
     name: 'slidey_doctor',
-    description: 'Verify headless Chrome can launch and take a screenshot for Slidey rendering tools.',
-    inputSchema: toolInputSchema({}),
+    description: 'Verify the local Slidey export toolchain: packages, browser, ffmpeg/ffprobe, and optional Edge TTS narration.',
+    inputSchema: toolInputSchema({
+      narration: { type: 'boolean', description: 'Check narrated MP4 dependencies. Default true.' },
+      ttsSample: { type: 'boolean', description: 'Generate a tiny online Edge TTS sample. Default true when narration is true.' },
+      browser: { type: 'boolean', description: 'Launch the headless browser and take a screenshot. Default true.' },
+      voice: { type: 'string', description: 'Edge TTS voice to test. Default en-AU-NatashaNeural.' },
+    }),
   },
 ];
 
@@ -957,7 +963,12 @@ async function callTool(name, args = {}) {
     }
 
     case 'slidey_doctor':
-      return okResult(await doctor());
+      return okResult(await runSetupDoctor({
+        browser: args.browser !== false,
+        narration: args.narration !== false,
+        ttsSample: args.ttsSample !== false,
+        voice: args.voice,
+      }));
 
     default:
       throw new Error(`unknown tool: ${name}`);

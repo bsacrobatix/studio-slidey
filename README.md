@@ -39,16 +39,24 @@ This document is the **reference**: pipeline architecture and JSON schema.
 ## Requirements
 
 Three external prerequisites — only Node is needed for the schema/validation
-tooling; the other two are for actually rendering a video:
+tooling; `ffmpeg` is needed for MP4 export, and `edge-tts` is needed when a
+deck contains narration:
 
 | Prerequisite | Needed for | Check | Install |
 |---|---|---|---|
-| **Node ≥ 18** | everything (CLI, build, validation) | `node --version` | [nodejs.org](https://nodejs.org/) or `nvm install 18` |
+| **Node 20.19–22.x** | everything (CLI, build, validation) | `node --version` | [nodejs.org](https://nodejs.org/) or `nvm install 22` |
 | **ffmpeg** on `PATH` | video output only — muxes frames + audio into the MP4 | `ffmpeg -version` | `apt install ffmpeg` · `brew install ffmpeg` |
 | **edge-tts** on `PATH` | narration audio only | `edge-tts --version` | `pipx install edge-tts` (or `pip install edge-tts`) |
 
 Notes:
 
+- Run `slidey doctor` or `make doctor` after setup. By default it checks the
+  narrated-MP4 path: Node packages, render bundle, browser launch, `ffmpeg`,
+  `ffprobe`, `edge-tts`, and a tiny online TTS sample with
+  `en-AU-NatashaNeural`. Use `slidey doctor --no-narration` for PDF/PNG/silent
+  video environments, or `--no-tts-sample` when CI cannot make network calls.
+  Doctor does not install Homebrew/Python dependencies; it exits non-zero and
+  prints concrete `fix:` commands for anything missing.
 - **edge-tts** is a Python package and uses Microsoft's online TTS, so narrated
   renders need network access. It is only invoked when at least one scene
   carries a `narration` string — a spec with no narration renders silently
@@ -63,8 +71,11 @@ Notes:
 ## Quick start
 
 ```sh
+make setup                                            # npm install, build render bundle, run doctor
+# or manually:
 npm install
 npm run build:render                                  # build the Vue render bundle (required before video/PDF)
+npm run doctor                                        # verify narrated MP4 export dependencies
 
 node src/index.js examples/hello.slidey.json --validate     # check the spec is well-formed (no render, no deps)
 node src/index.js examples/hello.slidey.json --estimate     # scene/duration table, no render (~50ms)
@@ -224,6 +235,10 @@ capture on the fly via that scene's `capture` field). See `examples/demos/`.
 | `--check` | Validate `diagram-svg` scenes' declared geometry (node width/height fit, node overlap, slanted connectors from misaligned box centres, gate/label clearance between boxes) without rendering. Exits 1 on violations (CI-friendly) |
 | `--audit [FILE]` | Render every reveal step in headless Chrome and measure the *real* laid-out geometry — off-page content, box/SVG-node overflow, rendered overlap, unsubstituted template vars, tiny text. Writes findings JSON to `FILE` (or stdout); exits 1 on any error-severity finding. The deterministic half of the `slidey-visual-qa` skill |
 
+Run `slidey doctor` before a narrated MP4 export. Use `--no-narration` for
+PDF/PNG/silent-video machines, `--no-tts-sample` for offline CI, and
+`--voice <id>` to verify the exact Edge TTS voice a deck uses.
+
 ## Marp Replacement Matrix
 
 Marp is excellent for Markdown-first slide authoring: `---` separates slides,
@@ -293,7 +308,7 @@ authoring loop:
 - `slidey_render_png`, `slidey_render_html` — render a specific scene/reveal
   step through the real Vue render bundle and return an image or HTML snapshot.
 - `slidey_schema`, `slidey_docs`, `slidey_doctor` — expose the schema, bundled
-  authoring guide, and headless-browser health check.
+  authoring guide, and export setup check.
 
 The PNG/HTML/audit tools launch headless Chrome, so they need the same browser
 setup as PDF/PNG/video rendering. The MCP protocol itself uses stdout; Slidey
@@ -369,7 +384,7 @@ A spec is a JSON object with two top-level keys: `meta` (optional) and
 | `meta.resolution` | `{ width, height }`. Default 1920×1080. Changing this is unusual |
 | `meta.narration.voice` | edge-tts voice id. Default `en-AU-NatashaNeural` |
 | `meta.narration.rate` | edge-tts speech rate, e.g. `"+0%"`, `"-10%"` |
-| `meta.narration.pronunciations` | `{ "term": "respelling" }` map fixing TTS mispronunciations. Applied whole-word and case-insensitively to the **spoken** audio only (spec/`--list` text is unchanged). e.g. `{ "Anthropic": "an-THROP-ik", "SDLC": "S D L C" }` |
+| `meta.narration.pronunciations` | `{ "term": "respelling" }` map fixing TTS mispronunciations. Applied whole-word and case-insensitively to the **spoken** audio only (spec/`--list` text is unchanged). Use lower-case pronounceable syllables for words; use spaced capitals only for acronyms you want spelled out. Avoid uncommon tokens like `soh` that some voices spell out. e.g. `{ "Anthropic": "an throp ik", "SDLC": "S D L C", "Kitsoki": "kit so key" }` |
 | `meta.context` | Key/value template variables interpolated into scene fields. Overridden by `--context` CLI flags |
 | `meta.personas` | Deck-wide cast registry for `personas` scenes. Each entry has `id`, plus optional `name`, `role`, `intro`, `color`, and `glyph` |
 

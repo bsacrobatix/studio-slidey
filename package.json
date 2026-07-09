@@ -20,6 +20,7 @@
   },
   "scripts": {
     "test": "node --test",
+    "doctor": "node src/index.js doctor",
     "estimate": "node src/index.js examples/hello.slidey.json --estimate",
     "hello": "node src/index.js examples/hello.slidey.json hello.mp4",
     "build:render": "SLIDEY_TARGET=render vite build && node web/inline-render.mjs",
@@ -59,7 +60,7 @@
     "stylis": "4.3.6"
   },
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20.19.0 <23"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.4",

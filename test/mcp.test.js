@@ -319,13 +319,15 @@ test('MCP browser diagnostics return instead of hanging when Chrome cannot launc
 
   const doctor = await server.send('tools/call', {
     name: 'slidey_doctor',
-    arguments: {},
+    arguments: { narration: false, ttsSample: false },
   });
   assert.ifError(doctor.error);
   const payload = JSON.parse(doctor.result.content[0].text);
   assert.equal(payload.ok, false);
-  assert.equal(payload.executablePath, path.join(root, 'missing-chrome'));
-  assert.match(payload.error, /missing-chrome|ENOENT|not found|executable/i);
+  const browser = payload.checks.find((check) => check.id === 'browser');
+  assert.ok(browser);
+  assert.equal(browser.ok, false);
+  assert.match(browser.detail, /missing-chrome|ENOENT|not found|executable/i);
 });
 
 test('Codex MCP config starts Slidey and lists tools', async (t) => {

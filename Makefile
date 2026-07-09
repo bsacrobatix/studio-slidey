@@ -3,11 +3,19 @@ VSCODE_DIST    := $(VSCODE_DIR)/.slidey-dist
 VSCODE_RUNTIME := $(VSCODE_DIR)/.slidey-runtime/src
 NPM_USER_PREFIX ?= $(HOME)/.local
 
-.PHONY: test test-render test-vscode test-all ci \
+.PHONY: setup doctor test test-render test-vscode test-all ci \
         build-web vscode-stage vscode-package vscode-install-local vscode-clean \
         install
 
 # ── Installation ─────────────────────────────────────────────────────────────
+setup:
+	npm install
+	npm run build:render
+	$(MAKE) doctor
+
+doctor:
+	npm run doctor
+
 install:
 	@mkdir -p "$(NPM_USER_PREFIX)/bin" "$(NPM_USER_PREFIX)/lib"
 	npm install --global --prefix "$(NPM_USER_PREFIX)" .

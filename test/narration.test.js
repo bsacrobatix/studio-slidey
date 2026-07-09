@@ -8,12 +8,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { applyPronunciations, edgeTtsAvailable } = require('../src/narration');
+const { applyPronunciations, edgeTtsAvailable, generateOne, getAudioDuration } = require('../src/narration');
 
 const DICT = {
-  'Anthropic': 'an-THROP-ik',
+  'Anthropic': 'an throp ik',
   'SDLC': 'S D L C',
-  'kitsoki': 'kit-SOH-kee',
+  'kitsoki': 'kit so key',
   'API key': 'A P I key',
   'API': 'A P I',
   '.NET': 'dot net',
@@ -21,11 +21,11 @@ const DICT = {
 };
 
 test('replaces a whole-word term', () => {
-  assert.equal(applyPronunciations('Anthropic builds it.', DICT), 'an-THROP-ik builds it.');
+  assert.equal(applyPronunciations('Anthropic builds it.', DICT), 'an throp ik builds it.');
 });
 
 test('matching is case-insensitive', () => {
-  assert.equal(applyPronunciations('anthropic and ANTHROPIC', DICT), 'an-THROP-ik and an-THROP-ik');
+  assert.equal(applyPronunciations('anthropic and ANTHROPIC', DICT), 'an throp ik and an throp ik');
 });
 
 test('does not match inside a larger word', () => {
@@ -72,4 +72,30 @@ test('edgeTtsAvailable returns a boolean and never throws on a missing binary', 
     process.env.PATH = orig;
   }
   assert.strictEqual(typeof edgeTtsAvailable(), 'boolean');
+});
+
+test('generateOne explains how to fix a missing edge-tts binary', () => {
+  const orig = process.env.PATH;
+  try {
+    process.env.PATH = '/nonexistent-path-for-slidey-test';
+    assert.throws(
+      () => generateOne('hello', '/tmp/slidey-missing-edge.mp3', 'en-AU-NatashaNeural'),
+      /edge-tts failed.*edge-tts not found on PATH[\s\S]*pipx install edge-tts[\s\S]*slidey doctor --voice en-AU-NatashaNeural/
+    );
+  } finally {
+    process.env.PATH = orig;
+  }
+});
+
+test('getAudioDuration explains how to fix a missing ffprobe binary', () => {
+  const orig = process.env.PATH;
+  try {
+    process.env.PATH = '/nonexistent-path-for-slidey-test';
+    assert.throws(
+      () => getAudioDuration('/tmp/slidey-missing-audio.mp3'),
+      /ffprobe failed[\s\S]*ffprobe not found on PATH[\s\S]*brew install ffmpeg[\s\S]*slidey doctor/
+    );
+  } finally {
+    process.env.PATH = orig;
+  }
 });
