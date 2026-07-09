@@ -233,8 +233,8 @@ server and open the interactive viewer in your browser: pick any `.json` /
 ### Preview in VS Code
 
 Slidey also ships a local VS Code extension under `tools/vscode-slidey`. It opens
-`.slidey.json`, `.json`, and `.jsonl` specs in a webview preview tab using the
-same built web viewer as `slidey <file>`.
+`.slidey.json`, `.json`, `.jsonl`, and raw rrweb replay logs in a webview preview
+tab using the same built web viewer as `slidey <file>`.
 
 ```sh
 make vscode-install-local
@@ -248,11 +248,10 @@ extension package, creates a VSIX, and installs it into the local editor. Overri
 make vscode-install-local CODE_CLI=/path/to/code-compatible-cli
 ```
 
-Inside VS Code, run **Slidey: Preview Presentation** from the command palette, or
-use the editor-title / Explorer context menu on a `.slidey.json` or `.jsonl`
-file. The preview is read-only: edit the JSON in VS Code, and the webview reloads
-from disk. The extension auto-discovers `.slidey.json` decks and `.jsonl` traces;
-plain `.json` files can still be previewed explicitly.
+Inside VS Code, run **Slidey: Preview Deck or Replay** from the command palette,
+or use the editor-title / Explorer context menu on a `.slidey.json`, `*.rrweb.json`,
+`rrweb.json`, or `.jsonl` file. The extension auto-discovers deck files, rrweb
+logs, and `.jsonl` traces; plain `.json` files can still be previewed explicitly.
 
 The video and PDF pipelines load the built `dist-render/render.html`; rebuild it
 with `npm run build:render` whenever you change anything under `web/`. `npm run
@@ -888,8 +887,8 @@ Splices a product demo or recorded UI session into the deck. Pick **one** source
 `mode: "embedded"` insets the video in a slide with `eyebrow`/`title`/`caption`
 chrome instead of filling the frame (`fit: "contain"|"cover"`);
 `start`/`end`/`speed` trim and retime. `audio` can point at an mp3/m4a/wav/ogg
-file synced with rrweb playback in the web viewer; raw `*.rrweb.json` viewer
-inputs automatically pick up a sibling `*.mp3` when present. Deck-styled lower-third captions come from
+file synced with rrweb playback in the web viewer; raw `*.rrweb.json` or
+`rrweb.json` viewer inputs automatically pick up a sibling `*.mp3` when present. Deck-styled lower-third captions come from
 the chapter sidecar (`chapters`), `annotations` add timed callouts, and
 `narration` may be a string or time-keyed cues (`{at|chapter, text}`) so the
 voiceover tracks demo moments. The scene's duration equals the (trimmed) source

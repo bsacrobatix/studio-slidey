@@ -14,7 +14,7 @@
  *   GET /api/config            → { root, openFile }  (App.vue → workspace mode)
  *   GET /api/tree              → nested tree of *.slidey.json / *.readonly.slidey.json / *.jsonl under root
  *   GET /api/schema            → Slidey JSON Schema for editor metadata
- *   GET /api/spec?path=<rel>   → { spec, dir, mtimeMs, editable }  (.jsonl built via src/trace.js)
+ *   GET /api/spec?path=<rel>   → { spec, rrweb, dir, mtimeMs, editable }  (.jsonl built via src/trace.js)
  *   POST /api/spec?path=<rel>  → save a JSON spec back to disk
  *   POST /api/clone-spec?path=<rel> → copy a read-only report deck into editable form
  *   GET /api/stat?path=<rel>   → { mtimeMs }  (poll target for live on-disk reload)
@@ -26,7 +26,13 @@ const http = require('http');
 const fs   = require('fs');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
-const { isRrwebFile, rrwebSpecForFile, readSpecOrRrweb } = require('./rrweb-viewer');
+const {
+  isRrwebFile,
+  isRrwebSourceFile,
+  readSpecOrRrwebInfo,
+  rrwebSpecForFile,
+  readSpecOrRrweb,
+} = require('./rrweb-viewer');
 const { normalizeDeckDefinitions, SOURCE_DECK_ID } = require('./collections');
 const { handleNarrationPreviewRequest } = require('./narration-preview');
 const { versionOf } = require('./spec-version');
@@ -55,7 +61,9 @@ function isReadOnlySlideySpec(filePath) {
 }
 
 function isEditableSpec(filePath) {
-  return /\.json$/i.test(filePath) && !isReadOnlySlideySpec(filePath) && !isRrwebFile(filePath);
+  if (!/\.json$/i.test(filePath) || isReadOnlySlideySpec(filePath) || isRrwebFile(filePath)) return false;
+  if (/\.slidey\.json$/i.test(filePath)) return true;
+  return !isRrwebSourceFile(filePath);
 }
 
 function displayNameForSpec(name) {
@@ -406,15 +414,16 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
       try {
         const bytes = fs.readFileSync(abs);
         const mtimeMs = fs.statSync(abs).mtimeMs;
-        let parsedSpec = /\.jsonl$/i.test(abs)
-          ? require('./trace').buildSpecFromFile(abs)
-          : readSpecOrRrweb(abs);
-        if (locale) parsedSpec = applyLocale(parsedSpec, locale, { specPath: abs });
-        const spec = attachRuntimeThemePacks(parsedSpec, abs, { workspaceRoot });
+        let { spec, rrweb } = /\.jsonl$/i.test(abs)
+          ? { spec: require('./trace').buildSpecFromFile(abs), rrweb: false }
+          : readSpecOrRrwebInfo(abs);
+        if (locale) spec = applyLocale(spec, locale, { specPath: abs });
+        spec = attachRuntimeThemePacks(spec, abs, { workspaceRoot });
         const dir = path.dirname(rel).replace(/\\/g, '/');
-        const editable = isEditableSpec(abs);
+        const editable = !rrweb && isEditableSpec(abs);
         return sendJSON(res, 200, {
           spec,
+          rrweb,
           dir: dir === '.' ? '' : dir,
           mtimeMs,
           // Content version the editor hands back on save so a concurrent write
@@ -509,7 +518,7 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
       if (target === source) return sendJSON(res, 400, { error: 'clone target must differ from source' });
       const finalRel = uniqueRel(workspaceRoot, path.relative(workspaceRoot, target).replace(/\\/g, '/'));
       const finalAbs = safeResolve(workspaceRoot, finalRel);
-      const body = isRrwebFile(source)
+      const body = isRrwebSourceFile(source)
         ? JSON.stringify(rrwebSpecForFile(source), null, 2) + '\n'
         : fs.readFileSync(source, 'utf8');
       fs.writeFileSync(finalAbs, body, 'utf8');

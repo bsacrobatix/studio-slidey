@@ -7,15 +7,27 @@ const EXTENSION_ROOT = path.resolve(__dirname, '..');
 const CHECKOUT_ROOT = path.resolve(__dirname, '..', '..', '..');
 const PACKAGED_DIST_DIR = path.join(EXTENSION_ROOT, '.slidey-dist');
 const PACKAGED_RUNTIME_DIR = path.join(EXTENSION_ROOT, '.slidey-runtime', 'src');
+const CHECKOUT_DIST_DIR = path.join(CHECKOUT_ROOT, 'dist');
+const CHECKOUT_RUNTIME_DIR = path.join(CHECKOUT_ROOT, 'src');
 const PACKAGED_RUNTIME_READY = ['schema.js', 'trace.js', 'rrweb-viewer.js', 'narration.js', 'narration-preview.js']
   .every((name) => fs.existsSync(path.join(PACKAGED_RUNTIME_DIR, name)));
-const DIST_DIR = fs.existsSync(path.join(PACKAGED_DIST_DIR, 'index.html'))
-  ? PACKAGED_DIST_DIR
-  : path.join(CHECKOUT_ROOT, 'dist');
-const RUNTIME_SRC_DIR = PACKAGED_RUNTIME_READY
-  ? PACKAGED_RUNTIME_DIR
-  : path.join(CHECKOUT_ROOT, 'src');
-const { isRrwebFile, rrwebSpecForFile, readSpecOrRrweb } = require(path.join(RUNTIME_SRC_DIR, 'rrweb-viewer'));
+const CHECKOUT_RUNTIME_READY = ['schema.js', 'trace.js', 'rrweb-viewer.js', 'narration.js', 'narration-preview.js']
+  .every((name) => fs.existsSync(path.join(CHECKOUT_RUNTIME_DIR, name)));
+const DIST_DIR = fs.existsSync(path.join(CHECKOUT_DIST_DIR, 'index.html'))
+  ? CHECKOUT_DIST_DIR
+  : PACKAGED_DIST_DIR;
+const RUNTIME_SRC_DIR = CHECKOUT_RUNTIME_READY
+  ? CHECKOUT_RUNTIME_DIR
+  : PACKAGED_RUNTIME_READY
+    ? PACKAGED_RUNTIME_DIR
+    : CHECKOUT_RUNTIME_DIR;
+const {
+  isRrwebFile,
+  isRrwebSourceFile,
+  readSpecOrRrwebInfo,
+  rrwebSpecForFile,
+  readSpecOrRrweb,
+} = require(path.join(RUNTIME_SRC_DIR, 'rrweb-viewer'));
 const { handleNarrationPreviewRequest } = require(path.join(RUNTIME_SRC_DIR, 'narration-preview'));
 const SPEC_EXT = new Set(['.json', '.jsonl']);
 const READONLY_SUFFIX = '.readonly.slidey.json';
@@ -33,17 +45,23 @@ function isReadOnlySlideySpec(abs) {
 }
 
 function isEditableSpec(abs) {
-  return /\.json$/i.test(abs) && !isReadOnlySlideySpec(abs) && !isRrwebFile(abs);
+  if (!/\.json$/i.test(abs) || isReadOnlySlideySpec(abs) || isRrwebFile(abs)) return false;
+  if (/\.slidey\.json$/i.test(abs)) return true;
+  return !isRrwebSourceFile(abs);
 }
 
 function defaultCloneTarget(sourceRel) {
   const normalized = sourceRel.replace(/\\/g, '/');
   const dir = path.posix.dirname(normalized);
   const base = path.posix.basename(normalized);
-  const candidate = base
+  const editableBase = base
     .replace(/\.rrweb\.json$/i, '.slidey.json')
+    .replace(/^rrweb\.json$/i, 'rrweb.slidey.json')
     .replace(/\.readonly\.slidey\.json$/i, '.slidey.json')
     .replace(/\.jsonl$/i, '.slidey.json');
+  const candidate = /\.slidey\.json$/i.test(editableBase)
+    ? editableBase
+    : `${editableBase.replace(/\.json$/i, '')}.slidey.json`;
   return dir === '.' ? candidate : path.posix.join(dir, candidate);
 }
 
@@ -111,6 +129,13 @@ function readSpec(absFile) {
   return readSpecOrRrweb(absFile);
 }
 
+function readSpecInfo(absFile) {
+  if (/\.jsonl$/i.test(absFile)) {
+    return { spec: require(path.join(RUNTIME_SRC_DIR, 'trace')).buildSpecFromFile(absFile), rrweb: false };
+  }
+  return readSpecOrRrwebInfo(absFile);
+}
+
 function response(status, body) {
   return { status, body };
 }
@@ -155,14 +180,15 @@ function handleApiRequest({ root, openFile, webview, vscode }, request) {
     if (!abs || !fs.existsSync(abs)) return response(404, { error: `not found: ${rel}` });
     try {
       const stat = fs.statSync(abs);
-      const spec = readSpec(abs);
+      const { spec, rrweb } = readSpecInfo(abs);
       const dir = path.dirname(rel).replace(/\\/g, '/');
       return response(200, {
         spec,
+        rrweb,
         dir: dir === '.' ? '' : dir,
         assetBase: assetBaseFor(webview, vscode, abs),
         mtimeMs: stat.mtimeMs,
-        editable: isEditableSpec(abs) && !/\.jsonl$/i.test(abs),
+        editable: !rrweb && isEditableSpec(abs) && !/\.jsonl$/i.test(abs),
       });
     } catch (err) {
       return response(400, { error: String(err.message || err) });
@@ -200,7 +226,7 @@ function handleApiRequest({ root, openFile, webview, vscode }, request) {
     if (target === source) return response(400, { error: 'clone target must differ from source' });
     const finalRel = uniqueRel(workspaceRoot, path.relative(workspaceRoot, target).replace(/\\/g, '/'));
     const finalAbs = safeResolve(workspaceRoot, finalRel);
-    const body = isRrwebFile(source)
+    const body = isRrwebSourceFile(source)
       ? JSON.stringify(rrwebSpecForFile(source), null, 2) + '\n'
       : fs.readFileSync(source, 'utf8');
     fs.writeFileSync(finalAbs, body, 'utf8');

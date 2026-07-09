@@ -53,6 +53,16 @@ const sessionSpec = ref(null);         // snapshot of the latest loaded/reloaded
 const activeSpecBaseUrl = ref('');     // base URL for currently open workspace spec
 const activeSpecDir = ref('');         // POSIX workspace-relative dir for host-open actions
 const activeSpecEditable = ref(true);
+const directReplay = ref({
+  active: false,
+  loading: false,
+  error: '',
+  title: '',
+  ref: '',
+  href: '',
+  events: [],
+  chapters: [],
+});
 const cloning = ref(false);
 const cloneError = ref('');
 const activeReference = ref(null);
@@ -802,6 +812,24 @@ function cloneSpec(raw) {
   return JSON.parse(JSON.stringify(raw));
 }
 
+function emptyDirectReplay() {
+  return {
+    active: false,
+    loading: false,
+    error: '',
+    title: '',
+    ref: '',
+    href: '',
+    events: [],
+    chapters: [],
+  };
+}
+
+function resetDirectReplay() {
+  directReplay.value = emptyDirectReplay();
+  document.body.classList.remove('slidey-replay-mode');
+}
+
 function applySpecMeta(data, rel) {
   activeSpecEditable.value = activeLocale ? false : isEditableResponse(data, rel);
   cloneError.value = '';
@@ -835,6 +863,7 @@ function targetPosition(nextDeck, spec, target) {
 }
 
 async function loadSpec(spec, baseUrl, restore, opts = {}) {
+  resetDirectReplay();
   stopNarration({ pauseVideo: false });
   const resolved = resolveDeckSpec(spec, { deckId: opts.deckId });
   if (resolved.errors && resolved.errors.length) {
@@ -879,6 +908,72 @@ function setActiveSpecDir(dir) {
   activeSpecDir.value = String(dir || '').replace(/^\/+|\/+$/g, '');
 }
 
+function directReplayTitle(spec, scene, rel) {
+  return (spec && spec.meta && spec.meta.title)
+    || (scene && scene.title)
+    || String(rel || '').split('/').pop()
+    || 'Session replay';
+}
+
+async function loadDirectReplay(spec, baseUrl, rel, opts = {}) {
+  stopNarration({ pauseVideo: false });
+  const scene = spec && Array.isArray(spec.scenes) ? spec.scenes[0] || {} : {};
+  if (!scene.rrweb) throw new Error('rrweb replay spec did not include a replay source');
+  const href = new URL(scene.rrweb, baseUrl || window.location.href).href;
+
+  deck.value = null;
+  sourceSpec.value = spec;
+  currentSpec.value = spec;
+  collection.value = null;
+  activeDeckId.value = SOURCE_DECK_ID;
+  activeSpecBaseUrl.value = baseUrl || '';
+  store.setMeta((spec && spec.meta) || {});
+  store.setMode('pitch');
+  store.scene = null;
+  store.sceneType = null;
+  store.hidePitch();
+  store.rrwebEvents = [];
+  store.rrwebChapters = [];
+  if (opts.resetSession !== false) {
+    sessionSpec.value = cloneSpec(spec);
+    dirty.value = false;
+    resetLibraryNavigationTrail();
+  }
+  saveError.value = '';
+  document.body.classList.add('slidey-replay-mode');
+  directReplay.value = {
+    active: true,
+    loading: true,
+    error: '',
+    title: directReplayTitle(spec, scene, rel),
+    ref: rel || scene.rrweb,
+    href,
+    events: [],
+    chapters: [],
+  };
+
+  try {
+    const res = await fetch(href);
+    if (!res.ok) throw new Error(`${res.status} loading ${scene.rrweb}`);
+    const raw = await res.json();
+    const events = rrwebEventsFromPayload(raw);
+    if (events.length < 2) throw new Error('rrweb log has no replayable event stream');
+    directReplay.value = {
+      ...directReplay.value,
+      loading: false,
+      events,
+      chapters: rrwebChaptersFromPayload(raw, events),
+    };
+    error.value = '';
+  } catch (err) {
+    directReplay.value = {
+      ...directReplay.value,
+      loading: false,
+      error: String(err.message || err),
+    };
+  }
+}
+
 async function fetchSpec(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} fetching ${url}`);
@@ -905,7 +1000,11 @@ async function openPath(rel, restore, deckId) {
     // viewer, or through a VS Code webview resource URI when embedded there.
     const base = data.assetBase || new URL(`/workspace/${data.dir ? data.dir + '/' : ''}`, window.location.href).href;
     setActiveSpecDir(data.dir);
-    await loadSpec(data.spec, base, restore, { deckId, resetSession: true });
+    if (data.rrweb) {
+      await loadDirectReplay(data.spec, base, rel, { resetSession: true });
+    } else {
+      await loadSpec(data.spec, base, restore, { deckId, resetSession: true });
+    }
     activePath.value = rel;
     // Fresh file → reset the live-reload watch to this version.
     loadedMtime = latestMtime = data.mtimeMs || 0;
@@ -995,7 +1094,7 @@ function clearReloadError() {
 
 // Poll the open spec's mtime; flag it stale when the file changes on disk.
 async function pollMtime() {
-  if (!activePath.value || !deck.value) return;
+  if (!activePath.value || (!deck.value && !directReplay.value.active)) return;
   try {
     const r = await fetch(`/api/stat?path=${encodeURIComponent(activePath.value)}`);
     if (!r.ok) return;
@@ -1037,7 +1136,11 @@ async function reloadActive() {
     applySpecMeta(data, rel);
     const base = data.assetBase || new URL(`/workspace/${data.dir ? data.dir + '/' : ''}`, window.location.href).href;
     setActiveSpecDir(data.dir);
-    await loadSpec(data.spec, base, restore, { deckId: activeDeckId.value, resetSession: true });   // swaps deck.value only on success
+    if (data.rrweb) {
+      await loadDirectReplay(data.spec, base, rel, { resetSession: true });
+    } else {
+      await loadSpec(data.spec, base, restore, { deckId: activeDeckId.value, resetSession: true });   // swaps deck.value only on success
+    }
     loadedMtime = latestMtime = data.mtimeMs || latestMtime;
     loadedVersion = latestVersion = data.version || latestVersion;
     stale.value = false;
@@ -1480,6 +1583,7 @@ onUnmounted(() => {
   if (teardownAnnotate) teardownAnnotate();
   if (teardownInlineEdit) teardownInlineEdit();
   document.body.classList.remove('slidey-edit-mode', 'slidey-presentation-mode', 'slidey-browse-mode', 'slidey-present-mode');
+  document.body.classList.remove('slidey-replay-mode');
 });
 </script>
 
@@ -1546,7 +1650,7 @@ onUnmounted(() => {
 
   <!-- Embedded preview (VS Code): floating mode controls. In-place editing
        uses the same scene editor overlay as CLI + workspace. -->
-  <div v-if="embedded && deck" class="slidey-embedded-edit">
+  <div v-if="embedded && deck && !directReplay.active" class="slidey-embedded-edit">
     <div class="slidey-embedded-toggle" role="group" aria-label="Viewer mode">
       <button
         type="button"
@@ -1586,7 +1690,7 @@ onUnmounted(() => {
 
   <!-- Embedded preview: floating manual-reload button (deck also auto-reloads). -->
   <button
-    v-if="embedded && deck"
+    v-if="embedded && deck && !directReplay.active"
     class="slidey-embedded-reload"
     :class="{ spinning: reloading }"
     :disabled="reloading"
@@ -1816,9 +1920,22 @@ onUnmounted(() => {
 
   <ReferenceViewer :reference="activeReference" :close="closeReference" :open-external="openReferenceExternal" />
 
-  <DeckHost />
+  <div v-if="directReplay.active" class="slidey-replay-viewer" data-testid="rrweb-direct-viewer">
+    <div v-if="directReplay.loading" class="slidey-replay-message">Loading replay…</div>
+    <div v-else-if="directReplay.error" class="slidey-replay-message error">{{ directReplay.error }}</div>
+    <RrwebPlayer
+      v-else
+      data-testid="rrweb-direct-player"
+      :events="directReplay.events"
+      :chapters="directReplay.chapters"
+      :autoplay="false"
+      :controls="true"
+    />
+  </div>
+
+  <DeckHost v-if="!directReplay.active" />
   <NavController
-    v-if="deck"
+    v-if="deck && !directReplay.active"
     :key="activePath"
     :deck="deck"
     :is-inline-editing="isInlineEditing"
@@ -1903,7 +2020,7 @@ onUnmounted(() => {
   />
 
   <!-- Empty stage hint in workspace mode before a deck is chosen -->
-  <div v-if="workspace && !deck" class="slidey-stage-empty">
+  <div v-if="workspace && !deck && !directReplay.active" class="slidey-stage-empty">
     <p v-if="loading">Loading…</p>
     <template v-else>
       <p v-if="!embedded">Select a spec from the file tree.</p>
@@ -1952,6 +2069,60 @@ onUnmounted(() => {
 }
 .slidey-loader-tip { color: #484f58; margin-top: 20px; font-size: 15px; }
 .slidey-loader-tip code { color: #79c0ff; }
+
+.slidey-replay-viewer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--slidey-sidebar-w, 0px);
+  z-index: 2050;
+  box-sizing: border-box;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  background: #0d1117;
+  color: #e6edf3;
+  font-family: 'Courier New', monospace;
+}
+body.slidey-embedded .slidey-replay-viewer,
+body.slidey-workspace.slidey-present-mode .slidey-replay-viewer {
+  left: 0;
+}
+.slidey-replay-viewer .rrp {
+  width: 100%;
+  height: 100%;
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+}
+.slidey-replay-viewer .rrp-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  aspect-ratio: auto;
+  border: 0;
+  border-radius: 0;
+}
+.slidey-replay-viewer .rrp-ctl {
+  flex: none;
+  padding: 9px 12px;
+  border-top: 1px solid #30363d;
+  background: #0d1117;
+}
+.slidey-replay-viewer .rrp-chapter {
+  flex: none;
+  padding: 0 12px 9px;
+  background: #0d1117;
+}
+.slidey-replay-message {
+  width: 100%;
+  display: grid;
+  place-items: center;
+  color: #8b949e;
+  font-size: 18px;
+}
+.slidey-replay-message.error { color: #ff7b72; }
 
 .slidey-rrweb-modal {
   position: fixed;
