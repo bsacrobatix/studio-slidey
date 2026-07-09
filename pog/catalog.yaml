@@ -1,0 +1,273 @@
+schema: project-object-graph/seed-catalog/v0
+catalog:
+  id: slidey-catalog
+  title: slidey — product object graph
+  status: active
+  visibility: public
+  purpose: product-catalog
+  # Retrofit catalog for the semi-brownfield track: the shipped capabilities
+  # are mined from README.md; the planned features from ideas.md and
+  # docs/proposals/. Lint arrives with the repo's POG onboarding (wi-1-4).
+  source_window:
+    branch: main
+    sampled_at: "2026-07-05"
+    inputs:
+      - id: source-readme
+        kind: document
+        path: README.md
+      - id: source-ideas
+        kind: document
+        path: ideas.md
+      - id: source-tour-proposal
+        kind: document
+        path: docs/proposals/extensible-tour-engine.md
+
+type_registry:
+  - id: core-node
+    schema: graph-type/v0
+    extends: null
+    summary: Shared envelope for every slidey product graph node.
+    required_fields:
+      - id
+      - schema
+      - title
+      - status
+      - visibility
+      - sources
+      - edges
+  - id: product
+    schema: graph-type/v0
+    extends: core-node
+    summary: The product root node.
+  - id: feature
+    schema: graph-type/v0
+    extends: core-node
+    summary: A shipped or planned product capability.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: requirements
+        target_type: requirement
+        cardinality: many
+      - id: use_cases
+        target_type: use-case
+        cardinality: many
+  - id: requirement
+    schema: graph-type/v0
+    extends: core-node
+    summary: Durable, testable statement a feature must satisfy.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: required_by
+        target_type: feature
+        cardinality: many
+      - id: motivated_by
+        target_type: use-case
+        cardinality: many
+  - id: use-case
+    schema: graph-type/v0
+    extends: core-node
+    summary: An actor scenario that motivates features and requirements.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: exercises
+        target_type: feature
+        cardinality: many
+      - id: acceptance
+        target_type: requirement
+        cardinality: many
+
+nodes:
+  - schema: slidey/product/v0
+    id: product-slidey
+    title: slidey
+    status: active
+    visibility: public
+    summary: Deterministic, spec-driven declarative scene engine. A JSON spec
+      describes an ordered list of scenes; from that one spec slidey produces
+      video (MP4 with synthesized narration), vector PDF, and an interactive
+      web app — all sharing a single set of Vue 3 scene components so the
+      outputs never drift.
+    sources: [source-readme]
+    edges: {}
+
+  # --- features ------------------------------------------------------------
+  - schema: slidey/feature/v0
+    id: feature-video-render
+    title: Narrated video rendering
+    status: shipped
+    visibility: public
+    summary: Headless Chrome screenshots each frame, edge-tts synthesizes
+      narration, ffmpeg muxes to out.mp4 — no LLM in the rendering loop.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      requirements: [req-byte-identical-frames, req-no-llm-in-render]
+      use_cases: [uc-demo-video-from-manifest]
+  - schema: slidey/feature/v0
+    id: feature-vector-pdf
+    title: Vector PDF export
+    status: shipped
+    visibility: public
+    summary: One vector page per reveal step; text and SVG stay selectable,
+      with an optional raster mode for slow-repainting viewers.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      requirements: [req-pdf-selectable-text]
+      use_cases: [uc-handout-pdf]
+  - schema: slidey/feature/v0
+    id: feature-web-app
+    title: Interactive web deck
+    status: shipped
+    visibility: public
+    summary: The same scene components navigated by keyboard/click, built by
+      Vite into a self-contained web app.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      requirements: [req-single-spec-three-outputs]
+      use_cases: [uc-click-through-deck]
+  - schema: slidey/feature/v0
+    id: feature-embed-protocol
+    title: Embed protocol (embed:view / embed:annotate / embed:pick)
+    status: shipped
+    visibility: public
+    summary: Host pages drive scope/step and anchor picking — the protocol
+      sassfully uses as its first real host integration.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      use_cases: [uc-sassfully-host]
+  - schema: slidey/feature/v0
+    id: feature-subset-decks
+    title: Subset decks
+    status: proposed
+    visibility: public
+    summary: Mini-versions of a deck (e.g. a pitch cut) generated from the
+      same spec by selecting a scene subset.
+    sources: [source-ideas]
+    edges:
+      part_of: [product-slidey]
+  - schema: slidey/feature/v0
+    id: feature-deck-to-deck-nav
+    title: Deck-to-deck navigation
+    status: proposed
+    visibility: public
+    summary: An exec-summary deck links into detailed decks as a navigable
+      graph — nav history, TOC, and indexes so the user can always find the
+      way back up the chain.
+    sources: [source-ideas]
+    edges:
+      part_of: [product-slidey]
+  - schema: slidey/feature/v0
+    id: feature-extensible-tour-engine
+    title: Extensible tour engine
+    status: proposed
+    visibility: public
+    summary: Proposal to generalize the guided-tour machinery
+      (docs/proposals/extensible-tour-engine.md).
+    sources: [source-tour-proposal]
+    edges:
+      part_of: [product-slidey]
+
+  # --- requirements ----------------------------------------------------------
+  - schema: slidey/requirement/v0
+    id: req-single-spec-three-outputs
+    title: One spec drives all three outputs without drift
+    status: satisfied
+    visibility: public
+    summary: Video, PDF, and web app must render from the same spec through
+      the same Vue scene components, so the outputs can never disagree.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      required_by: [feature-video-render, feature-vector-pdf, feature-web-app]
+      motivated_by: [uc-demo-video-from-manifest]
+  - schema: slidey/requirement/v0
+    id: req-byte-identical-frames
+    title: Same bundle + same spec produce byte-identical frames
+    status: satisfied
+    visibility: public
+    summary: Rendering is deterministic — re-rendering an unchanged spec with
+      an unchanged bundle yields byte-identical frames.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      required_by: [feature-video-render]
+  - schema: slidey/requirement/v0
+    id: req-no-llm-in-render
+    title: No LLM in the rendering loop
+    status: satisfied
+    visibility: public
+    summary: The render pipeline is fully deterministic; language models may
+      author specs but never participate in producing frames from them.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      required_by: [feature-video-render]
+  - schema: slidey/requirement/v0
+    id: req-pdf-selectable-text
+    title: PDF pages keep text and SVG selectable
+    status: satisfied
+    visibility: public
+    summary: The default PDF export is vector — one page per reveal step with
+      selectable text — with rasterization only as an explicit opt-in.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      required_by: [feature-vector-pdf]
+
+  # --- use cases ---------------------------------------------------------------
+  - schema: slidey/use-case/v0
+    id: uc-demo-video-from-manifest
+    title: Demo video generated from a declarative manifest
+    status: supported
+    visibility: public
+    summary: An author writes a JSON spec and gets a narrated MP4 — the POG
+      program's demo-evidence renderer path.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      exercises: [feature-video-render]
+      acceptance: [req-byte-identical-frames, req-no-llm-in-render]
+  - schema: slidey/use-case/v0
+    id: uc-handout-pdf
+    title: Handout PDF from the same deck
+    status: supported
+    visibility: public
+    summary: The same spec produces a selectable, printable handout without a
+      separate authoring pass.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      exercises: [feature-vector-pdf]
+      acceptance: [req-pdf-selectable-text]
+  - schema: slidey/use-case/v0
+    id: uc-click-through-deck
+    title: Presenter clicks through the interactive deck
+    status: supported
+    visibility: public
+    summary: Keyboard/click navigation over the same scenes used by video and
+      PDF output.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      exercises: [feature-web-app]
+      acceptance: [req-single-spec-three-outputs]
+  - schema: slidey/use-case/v0
+    id: uc-sassfully-host
+    title: slidey hosts sassfully feedback via the embed protocol
+    status: supported
+    visibility: public
+    summary: A viewer anchors feedback at any visible point of a deck through
+      embed:view / embed:pick — sassfully's host-neutrality proof.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      exercises: [feature-embed-protocol]
