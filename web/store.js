@@ -193,6 +193,9 @@ export const store = reactive({
   transcriptCard: 0,
   // Graph scene: index into scene.path/focus for the node currently centered.
   graphFocus: -1,
+  // Graph scene (projection input mode): the resolved graph-projection v1 JSON
+  // for the current scene (null unless scene.projection was set and resolved).
+  graphProjectionData: null,
   // visibility / reveal sets
   visible: new Set(),
   revealed: new Set(),
@@ -340,6 +343,7 @@ export const store = reactive({
     this.bookCoverDataUris = [];
     this.memeDataUri = '';
     this.memeTemplate = null;
+    this.graphProjectionData = null;
   },
 
   setPitchSteps(steps) {
@@ -384,6 +388,13 @@ export const store = reactive({
     this.showScene('video', scene);
     this.rrwebEvents = (data && data.events) || [];
     this.rrwebChapters = (data && data.chapters) || [];
+  },
+  // graph (projection input mode): the resolved graph-projection JSON is held
+  // separately from `scene` (mirrors showVideo) so GraphScene.vue can render it
+  // through the shared renderer without waiting on a second fetch.
+  showGraph(scene, projectionData) {
+    this.showScene('graph', scene);
+    this.graphProjectionData = projectionData || null;
   },
   hidePitch() { this._resetPitch(); },
 

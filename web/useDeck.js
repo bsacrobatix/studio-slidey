@@ -146,6 +146,22 @@ export function createDeck(spec, specBaseUrl = '') {
     return Promise.all(books.map(book => ensureBookCover(book && book.cover)));
   }
 
+  // graph-projection loader for `graph` scenes with a `projection` path (mirrors
+  // ensureRrweb): fetch the projection JSON relative to the spec, once per src.
+  const graphProjectionCache = {};
+  async function ensureGraphProjection(sc) {
+    if (!sc.projection) return null;
+    if (graphProjectionCache[sc.projection]) return graphProjectionCache[sc.projection];
+    try {
+      const url = new URL(sc.projection, specBaseUrl || window.location.href).href;
+      const data = await (await fetch(url)).json();
+      graphProjectionCache[sc.projection] = data;
+      return data;
+    } catch (_) {
+      return null; // unresolvable (e.g. spec loaded via file picker) — scene shows a fallback
+    }
+  }
+
   // rrweb log loader for live `video` scenes (mirrors ensureGif): fetch the log
   // relative to the spec, parse to { events, chapters } for the RrwebPlayer.
   const rrwebCache = {};
@@ -191,6 +207,7 @@ export function createDeck(spec, specBaseUrl = '') {
     }
     if (sc.type === 'book') opts.bookCoverDataUris = await ensureBookCovers(sc);
     if (sc.type === 'video' && sc.rrweb) opts.rrweb = await ensureRrweb(sc);
+    if (sc.type === 'graph' && sc.projection) opts.projectionData = await ensureGraphProjection(sc);
 
     applyShow(sc, opts); // resets reveal state + injects scene content
     if (sc.type === 'request') {

@@ -192,7 +192,7 @@ export function applyShow(scene, opts) {
     case 'narrative':    slidey.showNarrative(scene); break;
     case 'diagram':      slidey.showDiagram(scene); break;
     case 'diagram-svg':  slidey.showDiagramSvg(scene); break;
-    case 'graph':        slidey.showGraph(scene); break;
+    case 'graph':        slidey.showGraph(scene, o.projectionData || null); break;
     case 'mermaid':      slidey.showMermaid(scene); break;
     case 'terminal-gif': slidey.showTerminalGif(scene, o.gifDataUri || ''); break;
     case 'kitsoki-tui':  slidey.showKitsokiTui(scene); break;

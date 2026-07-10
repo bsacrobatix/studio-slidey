@@ -15,6 +15,7 @@
     "./rrweb-format": "./src/rrweb-format.js",
     "./tour": "./src/tour/index.js",
     "./tour-adapter": "./src/tour/tour-adapter.js",
+    "./graph-projection": "./web/graph-projection/renderer.js",
     "./drawio": "./src/drawio.js",
     "./package.json": "./package.json"
   },

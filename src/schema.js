@@ -695,11 +695,13 @@ const SCHEMA = {
           // ── graph ─────────────────────────────────────────────────────────
           {
             type: 'object',
-            required: ['type', 'nodes'],
-            description: 'Cytoscape.js graph viewer. Reveals can navigate a path by centering one node at a time.',
+            required: ['type'],
+            description: 'Graph viewer. Default input mode is nodes/edges (Cytoscape.js; reveals can navigate a path by centering one node at a time). Set `projection` + `state` instead to render a graph-projection v1 JSON through the shared graph-projection renderer (rounded-rect nodes on a lane/row grid, per-state status overlays) — see ~/code/POG/.context/mockup-demo-tooling-contract.md #7.',
             properties: {
               type: { const: 'graph' },
               title: { type: 'string' },
+              projection: { type: 'string', description: 'Path (relative to the spec) to a graph-projection v1 JSON. When set, this scene renders that projection instead of nodes/edges/layout below; `state` selects which projection state to show.' },
+              state: { type: 'string', description: 'A key of the projection\'s `states` map (or a bare graph id), selecting which projection state/graph to render. Required (and only meaningful) when `projection` is set.' },
               layout: {
                 type: 'string',
                 enum: ['preset', 'cose', 'breadthfirst', 'circle', 'concentric', 'grid', 'random'],

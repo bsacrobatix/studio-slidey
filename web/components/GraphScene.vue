@@ -2,8 +2,16 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import cytoscape from 'cytoscape';
 import { store } from '../store.js';
+// Dependency-free shared renderer (also inlined verbatim into self-contained
+// mockup HTML, and require()-able from Node) — a side-effect import: it has no
+// top-level import/export syntax of its own, so this just runs it and picks up
+// the window.renderGraphProjection global it attaches. See the file header in
+// ~/code/slidey/web/graph-projection/renderer.js.
+import '../graph-projection/renderer.js';
 
 const scene = computed(() => store.scene || {});
+const isProjection = computed(() => !!scene.value.projection);
+const projectionSvg = ref(null);
 const cyRoot = ref(null);
 let cy = null;
 let lastNonce = 0;
@@ -493,11 +501,37 @@ function refreshViewport() {
   });
 }
 
+// ── Projection input mode ────────────────────────────────────────────────
+// scene.projection set: render a graph-projection v1 JSON through the shared,
+// dependency-free renderer instead of building a Cytoscape graph. No camera /
+// focus-path in this mode (path/focus are Cytoscape-only concepts).
+const projectionError = ref('');
+
+function renderProjection() {
+  projectionError.value = '';
+  if (!projectionSvg.value) return;
+  const data = store.graphProjectionData;
+  if (!data) {
+    projectionError.value = 'No projection data loaded for this scene (check scene.projection resolves).';
+    return;
+  }
+  if (typeof window.renderGraphProjection !== 'function') {
+    projectionError.value = 'graph-projection renderer not loaded.';
+    return;
+  }
+  try {
+    window.renderGraphProjection(projectionSvg.value, data, scene.value.state, scene.value.projectionOpts || {});
+  } catch (err) {
+    projectionError.value = String((err && err.message) || err);
+  }
+}
+
 watch(() => store.sceneNonce, async nonce => {
   if (nonce === lastNonce) return;
   lastNonce = nonce;
   await nextTick();
-  rebuild();
+  if (isProjection.value) renderProjection();
+  else rebuild();
 }, { immediate: true });
 
 watch(() => store.graphFocus, applyFocus);
@@ -505,7 +539,8 @@ watch(() => store.graphFocus, applyFocus);
 watch(() => store.isRevealed('graph-frame'), async shown => {
   if (!shown) return;
   await nextTick();
-  refreshViewport();
+  if (isProjection.value) renderProjection();
+  else refreshViewport();
 });
 
 onMounted(() => {
@@ -539,8 +574,10 @@ onBeforeUnmount(() => {
       class="graph-frame reveal"
       :class="{ shown: store.isRevealed('graph-frame') }"
     >
-      <div ref="cyRoot" class="graph-canvas"></div>
-      <div v-if="activeNode" class="graph-focus-card">
+      <div v-if="!isProjection" ref="cyRoot" class="graph-canvas"></div>
+      <svg v-else ref="projectionSvg" class="graph-canvas graph-canvas--projection" role="img"></svg>
+      <div v-if="isProjection && projectionError" class="graph-projection-error">{{ projectionError }}</div>
+      <div v-if="!isProjection && activeNode" class="graph-focus-card">
         <div class="graph-focus-label">{{ activeNode.label || activeNode.id }}</div>
         <div v-if="activeEntry?.note || activeNode.sub" class="graph-focus-note">{{ activeEntry?.note || activeNode.sub }}</div>
       </div>
@@ -584,6 +621,23 @@ onBeforeUnmount(() => {
 .graph-canvas {
   position: absolute;
   inset: 0;
+}
+
+.graph-canvas--projection {
+  width: 100%;
+  height: 100%;
+}
+
+.graph-projection-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--slidey-subtle, rgba(255,255,255,0.74));
+  font-size: 22px;
+  text-align: center;
+  padding: 24px;
 }
 
 .graph-focus-card {
