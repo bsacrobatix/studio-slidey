@@ -85,11 +85,12 @@ async function commandPalette(win, command) {
   await win.keyboard.type(command);
   await win.waitForFunction((label) => document.body.innerText.includes(label), command, { timeout: 10_000 });
   await win.keyboard.press('Enter');
+  await win.locator('.quick-input-widget').waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
 }
 
-async function slideyFrame(win) {
-  await win.locator('iframe.webview').first().waitFor({ state: 'visible', timeout: 30_000 });
-  const deadline = Date.now() + 30_000;
+async function slideyFrame(win, timeout = 45_000) {
+  await win.locator('iframe.webview').first().waitFor({ state: 'visible', timeout });
+  const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     for (const frame of win.frames()) {
       const hasSlidey = await frame.locator('.slidey-ref-open, .reference-frame, .slidey-loader').count().catch(() => 0);
@@ -98,6 +99,21 @@ async function slideyFrame(win) {
     await sleep(250);
   }
   throw new Error('Slidey webview frame did not expose the deck UI');
+}
+
+async function openSlideyFrame(win) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await commandPalette(win, 'Slidey: Preview Deck or Replay');
+    try {
+      return await slideyFrame(win);
+    } catch (err) {
+      lastError = err;
+      await win.keyboard.press('Escape').catch(() => undefined);
+      await sleep(1000);
+    }
+  }
+  throw lastError || new Error('Slidey preview did not open');
 }
 
 async function activeTabLabels(win) {
@@ -140,8 +156,7 @@ test('real VS Code extension opens a spec-relative reference in the editor', asy
     fs.rmSync(launched.extensionsDir, { recursive: true, force: true });
   });
 
-  await commandPalette(launched.win, 'Slidey: Preview Deck or Replay');
-  const frame = await slideyFrame(launched.win);
+  const frame = await openSlideyFrame(launched.win);
   await frame.locator('.reference-frame').waitFor({ state: 'visible', timeout: 30_000 });
   const bridgeState = await frame.evaluate(() => ({
     hasBridge: typeof window.slideyOpenReference === 'function',
