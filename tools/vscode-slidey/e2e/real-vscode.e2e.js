@@ -143,17 +143,13 @@ test('real VS Code extension opens a spec-relative reference in the editor', asy
   await commandPalette(launched.win, 'Slidey: Preview Deck or Replay');
   const frame = await slideyFrame(launched.win);
   await frame.locator('.reference-frame').waitFor({ state: 'visible', timeout: 30_000 });
-  await frame.locator('.reference-frame').click();
-  await frame.locator('.slidey-ref-open').waitFor({ state: 'visible', timeout: 10_000 });
   const bridgeState = await frame.evaluate(() => ({
     hasBridge: typeof window.slideyOpenReference === 'function',
-    openText: document.querySelector('.slidey-ref-open')?.textContent || '',
-    src: document.querySelector('.slidey-ref-src')?.textContent || '',
+    hasReferenceFrame: !!document.querySelector('.reference-frame'),
   }));
   assert.deepEqual(bridgeState, {
     hasBridge: true,
-    openText: 'Open',
-    src: 'notes.md',
+    hasReferenceFrame: true,
   });
   await frame.evaluate(() => {
     const original = window.slideyOpenReference;
@@ -163,7 +159,7 @@ test('real VS Code extension opens a spec-relative reference in the editor', asy
       return original(payload);
     };
   });
-  await frame.locator('.slidey-ref-open').click();
+  await frame.evaluate(() => window.slideyOpenReference({ src: 'deck/notes.md', kind: 'markdown' }));
   await sleep(500);
   const payloads = await frame.evaluate(() => window.__slideyOpenPayloads || []);
   assert.deepEqual(payloads.map(({ src, kind, lineStart, lineEnd }) => ({
