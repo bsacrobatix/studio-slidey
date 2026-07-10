@@ -57,6 +57,12 @@ const skipRender    = args.includes('--skip-render');
 const noGaps        = args.includes('--no-gaps');
 const localeIdx     = args.indexOf('--locale');
 const localeOpt     = localeIdx !== -1 ? args[localeIdx + 1] : null;
+// `--estimate --json`: a single JSON doc on stdout (§1 of the mockup-demo-
+// tooling contract). Computed up top so every console.log between here and
+// the --list/--estimate branch can be redirected to stderr in this mode —
+// stdout must carry NOTHING but the one JSON document.
+const wantsJsonOutput  = args.includes('--json');
+const wantsJsonEstimate = wantsList && args.includes('--estimate') && wantsJsonOutput;
 
 // --schema: print the JSON Schema and exit (no input file required)
 if (wantsSchema) {
@@ -536,7 +542,7 @@ const VALUE_FLAGS = new Set([
   '--fps', '--frames-dir', '--capture-log', '--scenes', '--context',
   '--pdf-raster-quality', '--pdf-raster-scale', '--port', '--pace', '--format',
   '--out-dir', '--extract-dir', '--theme', '--label', '--adapter', '--deck',
-  '--locale',
+  '--locale', '--root',
 ]);
 function positionalArgs(argv) {
   const out = [];
@@ -554,6 +560,8 @@ const portIdx   = args.indexOf('--port');
 const portOpt   = portIdx !== -1 ? parseInt(args[portIdx + 1], 10) : 4321;
 const deckIdx   = args.indexOf('--deck');
 const deckOpt   = deckIdx !== -1 ? args[deckIdx + 1] : null;
+const rootIdx   = args.indexOf('--root');
+const rootOpt   = rootIdx !== -1 ? args[rootIdx + 1] : null;
 if (!wantsHelp && !anyAction && args[0] !== 'capture') {
   const pos = positionalArgs(args);
   let viewerRoot = null, openFile = null;
@@ -573,9 +581,28 @@ if (!wantsHelp && !anyAction && args[0] !== 'capture') {
     }
   }
   if (viewerRoot) {
+    // --root <dir>: widen the served workspace root past the spec's own
+    // folder (default). Needed when a spec references assets via a literal
+    // "../" path instead of a symlink placed inside the spec's folder — see
+    // safeResolveAsset() in serve.js for the full asset-serving posture.
+    let servedRoot = viewerRoot;
+    let servedOpenFile = openFile;
+    if (rootOpt) {
+      const widerRoot = path.resolve(rootOpt);
+      if (!fs.existsSync(widerRoot) || !fs.statSync(widerRoot).isDirectory()) {
+        console.error(`[slidey] ERROR: --root is not a directory: ${widerRoot}`);
+        process.exit(1);
+      }
+      // openFile/viewerRoot were computed relative to the spec's own folder;
+      // re-anchor both to the wider root so /api/spec + asset lookups resolve.
+      if (openFile) {
+        servedOpenFile = path.relative(widerRoot, path.join(viewerRoot, openFile)).split(path.sep).join('/');
+      }
+      servedRoot = widerRoot;
+    }
     require('./serve').startViewer({
-      root: viewerRoot,
-      openFile,
+      root: servedRoot,
+      openFile: servedOpenFile,
       deckId: deckOpt,
       port: Number.isInteger(portOpt) ? portOpt : 4321,
       open: !noOpen,
@@ -601,6 +628,7 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '    node index.js localize build <base> --locale <tag> --out <localized>',
     '    node index.js drawio <input...> --out-dir <dir>       convert Draw.io PNG/XML to themed SVG',
     '    node index.js capture <tour.json> <out.mp4>         record a demo MP4 + chapter sidecar from a tour',
+    '    node index.js capture --tours <tour-set.json>       record MANY tours off ONE shared launched target',
     '    node index.js doctor                                verify export dependencies',
     '    slidey docs                                          print the authoring guide (for LLMs/agents)',
     '    slidey skill install [skill-name|all] [--user|--project]  install bundled Slidey agent skills',
@@ -609,6 +637,8 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '    --port <n>                 Viewer port (default: 4321; auto-increments if taken)',
     '    --no-open                  Do not launch the browser; just print the URL',
     '    --deck <id>                Open a named library deck when the spec is a collection',
+    '    --root <dir>               Serve assets from <dir> instead of just the spec\'s',
+    '                               own folder (widens literal "../" asset references).',
     '',
     '  Draw.io options:',
     '    --out-dir <dir>            Directory for generated SVG files',
@@ -641,6 +671,9 @@ if (((args.length < 2 && !wantsList && !wantsCheck && !wantsValidate) || args.le
     '    --estimate                 Like --list, plus narration audio-length estimates',
     '                               and overrun warnings. Catches budget issues',
     '                               BEFORE a full ~7-12min render.',
+    '    --estimate --json          With --estimate: print ONE JSON document (per-cue',
+    '                               audioSec + scene/spec-level flags) to stdout instead',
+    '                               of the human table; nothing else touches stdout.',
     '    --skip-render              Skip the PNG-rendering step (reuse cached frames in',
     '                               --frames-dir) and regenerate narration + mux only.',
     '                               Iteration loop for narration text edits.',
@@ -824,13 +857,139 @@ function printSceneList(spec, fps, withAudio, opts = {}) {
   console.log('');
 }
 
+/**
+ * Build the `--estimate --json` document: per-cue audio estimates plus the
+ * same class of overrun/tight-margin warnings printSceneList prints today,
+ * structured as scene-level and top-level `flags` arrays (mockup-demo-
+ * tooling-contract.md §1). `scene.flags` covers that scene's narration
+ * margin; the top-level `flags` carries spec/collection/validation-level
+ * warnings (already surfaced on stderr by the caller) — NOT a duplicate of
+ * every scene flag. "Zero flags (both arrays, all scenes)" is exactly the
+ * condition under which printSceneList would show no "scene(s) flagged"
+ * line and no COLLECTION/VALIDATION WARNING lines today.
+ *
+ * Per-cue audioSec is computed the same way printSceneList's single
+ * flattened-text estimate is (estimateAudioSeconds after applyPronunciations)
+ * — just per cue instead of on the joined string. A scene's margin uses the
+ * SUM of its cues' audioSec, which is numerically identical to estimating
+ * the flattened joined text: word-count is invariant to concatenation as
+ * long as cues stay separated by whitespace (printSceneList joins with a
+ * single space), so `sum(words_i)/WPS === words(joined)/WPS`.
+ *
+ * @param {object} spec
+ * @param {number} fps
+ * @param {object} opts          passed straight through to estimateBoundaries
+ * @param {string} absSpecPath   absolute path of the input spec (for `spec`)
+ * @param {string[]} [specWarnings]  spec-level warning strings already printed
+ * @returns {{ spec: string, scenes: object[], flags: string[] }}
+ */
+function buildEstimateJson(spec, fps, opts, absSpecPath, specWarnings = []) {
+  const boundaries = estimateBoundaries(spec, null, opts);
+  const pronunciations = (spec.meta && spec.meta.narration && spec.meta.narration.pronunciations) || null;
+  const round1 = (n) => Math.round(n * 10) / 10;
+
+  const scenes = boundaries.map((b) => {
+    const sceneSec = b.durationFrames / fps;
+    const sourceScene = spec.scenes[b.sceneIndex] || {};
+    const cueCount = Array.isArray(b.narration) ? b.narration.length : 0;
+
+    let narration;
+    if (cueCount) {
+      narration = b.narration.map((c) => {
+        const text = (c && c.text) || '';
+        const words = text ? String(text).trim().split(/\s+/).filter(Boolean).length : 0;
+        const audioSec = text ? estimateAudioSeconds(applyPronunciations(text, pronunciations)) : 0;
+        return { chapter: (c && c.chapter) || null, text, words, audioSec: round1(audioSec) };
+      });
+    } else if (typeof b.narration === 'string' && b.narration) {
+      const text = b.narration;
+      const words = String(text).trim().split(/\s+/).filter(Boolean).length;
+      const audioSec = estimateAudioSeconds(applyPronunciations(text, pronunciations));
+      narration = [{ chapter: null, text, words, audioSec: round1(audioSec) }];
+    } else {
+      narration = [];
+    }
+
+    const flags = [];
+    const hasNarration = narration.some((c) => c.text);
+    if (hasNarration) {
+      const totalAudioSec = narration.reduce((s, c) => s + c.audioSec, 0);
+      const margin = sceneSec - totalAudioSec;
+      if (margin < 0) {
+        flags.push(`narration overruns scene by ${(-margin).toFixed(1)}s`);
+      } else if (margin < 0.6) {
+        flags.push(`narration margin tight: ${margin.toFixed(1)}s (audio ${totalAudioSec.toFixed(1)}s of ${sceneSec.toFixed(1)}s scene)`);
+      }
+    }
+
+    return {
+      index: b.sceneIndex,
+      type: b.type,
+      title: sourceScene.title || null,
+      durationSec: round1(sceneSec),
+      narration,
+      flags,
+    };
+  });
+
+  return { spec: absSpecPath, scenes, flags: specWarnings.slice() };
+}
+
 // ── `slidey capture <tour.json> <out.mp4>` ──────────────────────────────────
 //
 // Drive a live web app through a tour storyboard and record a deterministic
 // demo MP4 + chapter sidecar (the generalized successor to kitsoki's per-app
 // Playwright recording specs). The same engine backs the `video` deck scene's
 // `capture:` field. See src/tour/.
+//
+// `slidey capture --tours <tour-set.json>` is the multi-tour sibling: many
+// tours captured off ONE shared launched target instead of one server spawn
+// per tour. See src/tour/tour-set.js for the orchestration (loadTourSet /
+// resolveTourEntry / runTourSet) — this is a thin CLI wrapper around it.
+async function runCaptureTourSet(tourSetPath) {
+  if (!tourSetPath) {
+    console.error('[slidey] usage: slidey capture --tours <tour-set.json> [--format rrweb] [--pace n]');
+    process.exit(1);
+  }
+  const { loadTourSet, runTourSet } = require('./tour/tour-set');
+  let tourSet, setDir;
+  try {
+    ({ tourSet, setDir } = loadTourSet(tourSetPath));
+  } catch (err) {
+    console.error(`[slidey] ERROR: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`[slidey] Tour-set: ${path.resolve(tourSetPath)}`);
+  console.log(`[slidey] Tours   : ${tourSet.tours.length}\n`);
+
+  try {
+    const results = await runTourSet(tourSet, setDir, {
+      cliDefaults: { format: formatOpt, pace: paceOpt != null ? paceOpt : undefined },
+      fps,
+      onEntryStart: (i, total, entry) => {
+        console.log(`[slidey] [${i + 1}/${total}] ${entry.tour} → ${entry.out}`);
+      },
+      onProgress: (idx, label) => {
+        process.stdout.write(`\r[slidey] capture: ${String(label).padEnd(28)} step ${idx}`);
+      },
+    });
+    process.stdout.write('\n');
+    for (const r of results) {
+      const outFile = r.isRrweb ? r.result.rrweb : r.result.mp4;
+      console.log(`[slidey] Done → ${outFile}`);
+      if (r.result.sidecar) console.log(`[slidey] Chapters → ${r.result.sidecar}  (${r.result.chapters.length})`);
+    }
+    process.exit(0);
+  } catch (err) {
+    console.error(`\n[slidey] ERROR during tour-set capture: ${err.message}`);
+    process.exit(1);
+  }
+}
+
 async function runCapture() {
+  const toursIdx = args.indexOf('--tours');
+  if (toursIdx !== -1) { await runCaptureTourSet(args[toursIdx + 1]); return; }
+
   const tourPath = args[1];
   const outPath  = args[2];
   if (!tourPath || !outPath) {
@@ -905,6 +1064,12 @@ async function runCapture() {
 async function main() {
   if (args[0] === 'capture') { await runCapture(); return; }
 
+  // `--estimate --json` prints ONE JSON document to stdout — every other
+  // progress/status line below that would normally go to stdout is routed to
+  // stderr instead in that mode (see wantsJsonEstimate, computed up top).
+  const out = (msg) => { if (!wantsJsonEstimate) console.log(msg); else console.error(msg); };
+  const specWarnings = [];
+
   // Read and validate spec
   const absInput = path.resolve(inputPath);
   if (!fs.existsSync(absInput)) {
@@ -921,7 +1086,7 @@ async function main() {
   if (fromTrace) {
     try {
       spec = require('./trace').buildSpecFromFile(absInput);
-      console.log(`[slidey] Trace  : ${spec.scenes.length} scenes generated from ${path.basename(absInput)}`);
+      out(`[slidey] Trace  : ${spec.scenes.length} scenes generated from ${path.basename(absInput)}`);
     } catch (err) {
       console.error(`[slidey] ERROR: failed to build spec from trace: ${err.message}`);
       process.exit(1);
@@ -938,7 +1103,7 @@ async function main() {
   if (localeOpt && !fromTrace) {
     try {
       spec = applyLocale(spec, localeOpt, { specPath: absInput });
-      console.log(`[slidey] Locale: ${localeOpt}`);
+      out(`[slidey] Locale: ${localeOpt}`);
     } catch (err) {
       console.error(`[slidey] ERROR applying locale "${localeOpt}": ${err.message}`);
       process.exit(1);
@@ -955,14 +1120,17 @@ async function main() {
   spec = attachRuntimeThemePacks(spec, absInput);
 
   const resolvedDeck = resolveDeckSpec(spec, { deckId: deckOpt });
-  for (const line of resolvedDeck.warnings || []) console.error(`[slidey] COLLECTION WARNING: ${line}`);
+  for (const line of resolvedDeck.warnings || []) {
+    console.error(`[slidey] COLLECTION WARNING: ${line}`);
+    specWarnings.push(line);
+  }
   if (resolvedDeck.errors && resolvedDeck.errors.length) {
     console.error(`[slidey] COLLECTION ERROR: ${resolvedDeck.errors.length} problem(s) found in ${path.basename(absInput)}\n`);
     for (const line of resolvedDeck.errors) console.error(`  ${line}`);
     process.exit(1);
   }
   if (resolvedDeck.isCollection && !resolvedDeck.isSource) {
-    console.log(`[slidey] Deck   : ${resolvedDeck.deckId} (${resolvedDeck.spec.scenes.length}/${(spec.scenes || []).length} source scenes)`);
+    out(`[slidey] Deck   : ${resolvedDeck.deckId} (${resolvedDeck.spec.scenes.length}/${(spec.scenes || []).length} source scenes)`);
   }
   spec = resolvedDeck.spec;
 
@@ -973,7 +1141,10 @@ async function main() {
       skipLibrary: resolvedDeck.isCollection && !resolvedDeck.isSource,
     });
     if (warnings && warnings.length) {
-      for (const line of warnings) console.error(`[slidey] VALIDATION WARNING: ${line.trim()}`);
+      for (const line of warnings) {
+        console.error(`[slidey] VALIDATION WARNING: ${line.trim()}`);
+        specWarnings.push(line.trim());
+      }
     }
     if (!valid) {
       console.error(`[slidey] VALIDATION ERROR: ${count} problem(s) found in ${path.basename(absInput)}\n`);
@@ -993,7 +1164,7 @@ async function main() {
   if (Object.keys(cliContext).length > 0) {
     spec.meta = spec.meta || {};
     spec.meta.context = Object.assign({}, spec.meta.context || {}, cliContext);
-    console.log(`[slidey] Context overrides: ${JSON.stringify(cliContext)}`);
+    out(`[slidey] Context overrides: ${JSON.stringify(cliContext)}`);
   }
 
   // Trace → .json output: dump the generated spec for inspection / hand-tweaking,
@@ -1010,6 +1181,11 @@ async function main() {
   // ── --list / --estimate: print scene table and exit, no rendering ──
   if (wantsList) {
     const wantsAudioEstimate = args.includes('--estimate');
+    if (wantsJsonEstimate) {
+      const doc = buildEstimateJson(spec, fps, { noGaps, specPath: absInput }, absInput, specWarnings);
+      process.stdout.write(JSON.stringify(doc, null, 2) + '\n');
+      process.exit(0);
+    }
     printSceneList(spec, fps, wantsAudioEstimate, { noGaps, specPath: absInput });
     process.exit(0);
   }
