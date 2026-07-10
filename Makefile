@@ -18,6 +18,17 @@ doctor:
 
 install:
 	@mkdir -p "$(NPM_USER_PREFIX)/bin" "$(NPM_USER_PREFIX)/lib"
+	@set -eu; \
+	for entry in "slidey:src/index.js" "slidey-mcp:src/mcp.js"; do \
+		name="$${entry%%:*}"; \
+		rel="$${entry#*:}"; \
+		bin="$(NPM_USER_PREFIX)/bin/$$name"; \
+		target="$(CURDIR)/$$rel"; \
+		if [ -L "$$bin" ] && [ "$$(readlink "$$bin")" = "$$target" ]; then \
+			echo "[install] replacing existing $$bin -> $$target"; \
+			rm -f "$$bin"; \
+		fi; \
+	done
 	npm install --global --prefix "$(NPM_USER_PREFIX)" .
 	@echo "[install] installed slidey and slidey-mcp into $(NPM_USER_PREFIX)/bin"
 	@echo "[install] make sure $(NPM_USER_PREFIX)/bin is on PATH"

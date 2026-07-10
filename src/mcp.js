@@ -73,7 +73,15 @@ function parseArgs(argv) {
 
 const CONFIG = parseArgs(process.argv.slice(2));
 const BROWSER_TOOL_TIMEOUT_MS = Number(process.env.SLIDEY_MCP_BROWSER_TIMEOUT_MS || 30000);
-const BROWSER_TOOLS = new Set(['slidey_render_png', 'slidey_render_html', 'slidey_audit', 'slidey_doctor']);
+const BROWSER_TOOLS = new Set([
+  'slidey_render_png',
+  'slidey_render_html',
+  'slidey_audit',
+  'slidey_review_deck',
+  'slidey_contact_sheet',
+  'slidey_prepare_review_artifact',
+  'slidey_doctor',
+]);
 const LAYOUT_GALLERY_PATH = path.join(ROOT_DIR, 'examples', 'layout-gallery.slidey.json');
 
 function loadLayoutGuideDeck() {
@@ -644,6 +652,382 @@ function toolInputSchema(properties, required = []) {
   return { type: 'object', additionalProperties: false, properties, required };
 }
 
+function sceneTitle(scene = {}) {
+  return scene.title || scene.headline || scene.eyebrow || scene.label || scene.value || '';
+}
+
+function graphPathEntries(scene = {}) {
+  const raw = Array.isArray(scene.path) && scene.path.length ? scene.path : (Array.isArray(scene.focus) ? scene.focus : []);
+  return raw
+    .map((entry) => (typeof entry === 'string' ? { node: entry } : entry))
+    .filter((entry) => entry && typeof entry === 'object' && entry.node);
+}
+
+function graphEdgeId(edge, index) {
+  return String(edge.id || `${edge.from}-${edge.to}-${index}`);
+}
+
+function addIssue(issues, severity, kind, message, extra = {}) {
+  issues.push({ severity, kind, message, ...extra });
+}
+
+function graphAuditSpec(spec) {
+  const scenes = [];
+  let errors = 0;
+  let warnings = 0;
+  const graphScenes = (spec.scenes || [])
+    .map((scene, sceneIndex) => ({ scene, sceneIndex }))
+    .filter(({ scene }) => scene && scene.type === 'graph');
+
+  for (const { scene, sceneIndex } of graphScenes) {
+    const issues = [];
+    const nodes = Array.isArray(scene.nodes) ? scene.nodes : [];
+    const edges = Array.isArray(scene.edges) ? scene.edges : [];
+    const nodeIds = new Set(nodes.map((node) => String(node.id)));
+    const edgeIds = new Set(edges.map((edge, index) => graphEdgeId(edge, index)));
+    const degree = new Map(nodes.map((node) => [String(node.id), 0]));
+
+    for (const edge of edges) {
+      const from = String(edge.from || '');
+      const to = String(edge.to || '');
+      if (!nodeIds.has(from)) addIssue(issues, 'error', 'missing-edge-node', `edge from references missing node "${from}"`, { ref: `edges/${edge.id || `${from}-${to}`}` });
+      if (!nodeIds.has(to)) addIssue(issues, 'error', 'missing-edge-node', `edge to references missing node "${to}"`, { ref: `edges/${edge.id || `${from}-${to}`}` });
+      if (nodeIds.has(from)) degree.set(from, (degree.get(from) || 0) + 1);
+      if (nodeIds.has(to)) degree.set(to, (degree.get(to) || 0) + 1);
+      if (edge.label && !Number.isFinite(edge.labelMarginX) && !Number.isFinite(edge.labelMarginY) && !Number.isFinite(edge.labelX) && !Number.isFinite(edge.labelY)) {
+        addIssue(issues, 'warning', 'unanchored-edge-label', `edge "${edge.id || `${from}-${to}`}" has a label without explicit label offset`, {
+          ref: `edges/${edge.id || `${from}-${to}`}`,
+          suggestedPatch: [
+            { op: 'add', path: `/scenes/${sceneIndex}/edges/${edges.indexOf(edge)}/labelMarginY`, value: -28 },
+          ],
+        });
+      }
+      if ((edge.curve === 0 || edge.curve === null) || edge.controlPointDistances === 0 || edge.controlPointWeights === 0) {
+        addIssue(issues, 'warning', 'zero-curve-control', `edge "${edge.id || `${from}-${to}`}" has a zero/null curve control that may trigger Cytoscape warnings`, {
+          ref: `edges/${edge.id || `${from}-${to}`}`,
+          suggestedPatch: [
+            { op: 'replace', path: `/scenes/${sceneIndex}/edges/${edges.indexOf(edge)}/curve`, value: 'bezier' },
+          ],
+        });
+      }
+    }
+
+    for (const node of nodes) {
+      const id = String(node.id);
+      if ((degree.get(id) || 0) === 0 && nodes.length > 1) {
+        addIssue(issues, 'warning', 'disconnected-node', `node "${id}" has no incident edges`, { ref: `nodes/${id}` });
+      }
+      const label = `${node.label || node.id || ''} ${node.sub || ''}`.trim();
+      const width = Number(node.w || node.width || 210);
+      if (label.length > 28 && width < 260) {
+        addIssue(issues, 'warning', 'node-label-fit', `node "${id}" has long label text for a narrow default-sized node`, {
+          ref: `nodes/${id}`,
+          suggestedPatch: [
+            { op: 'add', path: `/scenes/${sceneIndex}/nodes/${nodes.indexOf(node)}/w`, value: 320 },
+          ],
+        });
+      }
+    }
+
+    const pathEntries = graphPathEntries(scene);
+    const focusedNodes = new Set(pathEntries.map((entry) => String(entry.node)));
+    pathEntries.forEach((entry, stepIndex) => {
+      const node = String(entry.node);
+      if (!nodeIds.has(node)) addIssue(issues, 'error', 'missing-focus-node', `focus step ${stepIndex} references missing node "${node}"`, { step: stepIndex, ref: `path/${stepIndex}` });
+      const refs = [entry.edge, ...(Array.isArray(entry.edges) ? entry.edges : [])].filter(Boolean).map(String);
+      for (const edgeId of refs) {
+        if (!edgeIds.has(edgeId)) addIssue(issues, 'error', 'missing-focus-edge', `focus step ${stepIndex} references missing edge "${edgeId}"`, { step: stepIndex, ref: `path/${stepIndex}` });
+      }
+      if (!entry.note && entry.view !== 'overview' && entry.overview !== true && entry.fit !== true) {
+        addIssue(issues, 'warning', 'missing-focus-note', `focus step ${stepIndex} for node "${node}" has no note`, { step: stepIndex, ref: `path/${stepIndex}` });
+      }
+    });
+
+    const importantNodes = [...degree.entries()].filter(([, count]) => count >= 3).map(([id]) => id);
+    for (const id of importantNodes) {
+      if (!focusedNodes.has(id)) addIssue(issues, 'warning', 'unfocused-important-node', `high-degree node "${id}" is not included in the focus path`, { ref: `nodes/${id}` });
+    }
+
+    if (nodes.length > 20) {
+      addIssue(issues, 'warning', 'dense-overview', `${nodes.length} nodes; overview may be unreadable without strong focus reveals`, { suggestedPatch: [{ op: 'add', path: `/scenes/${sceneIndex}/focusMode`, value: 'neighborhood' }] });
+    }
+    if (edges.length > Math.max(24, nodes.length * 1.4)) {
+      addIssue(issues, 'warning', 'dense-edge-bundle', `${edges.length} edges for ${nodes.length} nodes; overview edge bundles may hide labels`);
+    }
+    if (nodes.length > 8 && pathEntries.length < Math.ceil(nodes.length / 3)) {
+      addIssue(issues, 'warning', 'thin-focus-path', `${pathEntries.length} focus step(s) for ${nodes.length} nodes; dense graph likely needs more reveal interpretation`);
+    }
+
+    const overviewScore = issues.some((issue) => issue.kind === 'dense-overview' || issue.kind === 'dense-edge-bundle') ? 'needs_focus' : 'readable';
+    const revealScore = issues.some((issue) => issue.kind === 'missing-focus-node' || issue.kind === 'missing-focus-edge') ? 'broken'
+      : issues.some((issue) => issue.kind === 'missing-focus-note' || issue.kind === 'thin-focus-path') ? 'needs_work'
+        : 'readable';
+    errors += issues.filter((issue) => issue.severity === 'error').length;
+    warnings += issues.filter((issue) => issue.severity === 'warning').length;
+    scenes.push({
+      scene: sceneIndex,
+      title: sceneTitle(scene),
+      nodes: nodes.length,
+      edges: edges.length,
+      focusSteps: pathEntries.length,
+      overviewScore,
+      revealScore,
+      issues,
+    });
+  }
+
+  return {
+    status: errors ? 'failed' : warnings ? 'needs_work' : 'passed',
+    summary: { graphScenes: scenes.length, errors, warnings },
+    scenes,
+  };
+}
+
+async function narrationPlanForSpec(spec, specPath) {
+  const { stepsForScene } = await import(pathToFileURL(path.join(ROOT_DIR, 'web', 'sceneSteps.mjs')).href);
+  const scenes = [];
+  const issues = [];
+  for (const [sceneIndex, scene] of (spec.scenes || []).entries()) {
+    const steps = stepsForScene(scene);
+    const sceneNarration = Array.isArray(scene.narration)
+      ? scene.narration.map((cue) => cue && cue.text).filter(Boolean)
+      : (scene.narration ? [String(scene.narration)] : []);
+    const entries = [];
+    const pushEntry = (stepIndex, state, text, source, ref = null) => {
+      const normalized = String(text || '').trim();
+      entries.push({ stepIndex, state, source, ref, text: normalized, wordCount: normalized ? normalized.split(/\s+/).length : 0 });
+    };
+
+    if (scene.type === 'graph') {
+      const pathEntries = graphPathEntries(scene);
+      let stepIndex = 0;
+      if (scene.title) pushEntry(stepIndex++, 'graph_title', sceneNarration[0] || scene.title, sceneNarration[0] ? 'scene.narration' : 'title');
+      pushEntry(stepIndex++, 'graph_frame', sceneNarration[stepIndex - 1] || '', sceneNarration[stepIndex - 1] ? 'scene.narration' : 'none');
+      pathEntries.forEach((entry, focusIndex) => {
+        const fallback = entry.note || '';
+        pushEntry(stepIndex++, `graph_focus_${focusIndex}`, sceneNarration[stepIndex - 1] || fallback, sceneNarration[stepIndex - 1] ? 'scene.narration' : (fallback ? 'focus.note' : 'none'), `path/${focusIndex}`);
+        if (!entry.note) addIssue(issues, 'warning', 'missing-graph-focus-note', `scene ${sceneIndex} focus step ${focusIndex} has no focus note`, { scene: sceneIndex, step: focusIndex });
+      });
+      if (scene.caption) pushEntry(stepIndex++, 'graph_caption', scene.narrateCaption === false || scene.captionNarration === false ? '' : scene.caption, 'caption');
+    } else {
+      const pageSteps = steps.length ? steps : [null];
+      pageSteps.forEach((state, stepIndex) => {
+        const text = sceneNarration[stepIndex] || (stepIndex === 0 ? (scene.narration || '') : '');
+        pushEntry(stepIndex, state, text, text ? 'scene.narration' : 'none');
+      });
+    }
+
+    const repeated = new Set();
+    for (const entry of entries) {
+      if (entry.wordCount > 70) addIssue(issues, 'warning', 'long-reveal-narration', `scene ${sceneIndex} step ${entry.stepIndex} has ${entry.wordCount} narration words`, { scene: sceneIndex, step: entry.stepIndex });
+      if (entry.text) {
+        const key = entry.text.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+        if (repeated.has(key)) addIssue(issues, 'warning', 'repeated-narration', `scene ${sceneIndex} repeats narration text across reveal steps`, { scene: sceneIndex, step: entry.stepIndex });
+        repeated.add(key);
+      }
+    }
+    if (scene.caption && scene.narration && scene.caption === scene.narration) {
+      addIssue(issues, 'warning', 'caption-as-narration', `scene ${sceneIndex} caption exactly matches slide narration`, { scene: sceneIndex });
+    }
+    scenes.push({ scene: sceneIndex, title: sceneTitle(scene), type: scene.type, steps: entries });
+  }
+  return {
+    path: specPath ? relPath(specPath) : undefined,
+    status: issues.some((issue) => issue.severity === 'error') ? 'failed' : issues.length ? 'needs_work' : 'passed',
+    summary: { scenes: scenes.length, issues: issues.length },
+    issues,
+    scenes,
+  };
+}
+
+function summarizeSpec(spec) {
+  return {
+    sceneCount: Array.isArray(spec.scenes) ? spec.scenes.length : 0,
+    scenes: (spec.scenes || []).map((scene, sceneIndex) => ({
+      scene: sceneIndex,
+      type: scene.type,
+      title: sceneTitle(scene),
+    })),
+  };
+}
+
+function diffArrays(before = [], after = [], keyFn) {
+  const beforeMap = new Map(before.map((item, index) => [keyFn(item, index), { item, index }]));
+  const afterMap = new Map(after.map((item, index) => [keyFn(item, index), { item, index }]));
+  return {
+    added: [...afterMap.entries()].filter(([key]) => !beforeMap.has(key)).map(([key, value]) => ({ id: key, index: value.index })),
+    removed: [...beforeMap.entries()].filter(([key]) => !afterMap.has(key)).map(([key, value]) => ({ id: key, index: value.index })),
+    retained: [...afterMap.entries()].filter(([key]) => beforeMap.has(key)).map(([key, value]) => ({ id: key, beforeIndex: beforeMap.get(key).index, afterIndex: value.index })),
+  };
+}
+
+async function diffDecks(beforePath, afterPath) {
+  const beforeRead = readSpecFile(beforePath);
+  const afterRead = readSpecFile(afterPath);
+  const beforeScenes = beforeRead.spec.scenes || [];
+  const afterScenes = afterRead.spec.scenes || [];
+  const sceneCount = Math.max(beforeScenes.length, afterScenes.length);
+  const scenes = [];
+  for (let i = 0; i < sceneCount; i++) {
+    const before = beforeScenes[i] || null;
+    const after = afterScenes[i] || null;
+    if (!before || !after) {
+      scenes.push({ scene: i, change: before ? 'removed' : 'added', before: before && { type: before.type, title: sceneTitle(before) }, after: after && { type: after.type, title: sceneTitle(after) } });
+      continue;
+    }
+    const changes = [];
+    for (const field of ['type', 'title', 'headline', 'eyebrow', 'body', 'caption', 'narration']) {
+      if (JSON.stringify(before[field]) !== JSON.stringify(after[field])) changes.push({ field, before: before[field], after: after[field] });
+    }
+    if (before.type === 'graph' || after.type === 'graph') {
+      const nodes = diffArrays(before.nodes || [], after.nodes || [], (node, index) => String(node.id || index));
+      const edges = diffArrays(before.edges || [], after.edges || [], graphEdgeId);
+      const pathChanged = JSON.stringify(before.path || before.focus || []) !== JSON.stringify(after.path || after.focus || []);
+      if (nodes.added.length || nodes.removed.length) changes.push({ field: 'graph.nodes', ...nodes });
+      if (edges.added.length || edges.removed.length) changes.push({ field: 'graph.edges', ...edges });
+      if (pathChanged) changes.push({ field: 'graph.path', before: before.path || before.focus || [], after: after.path || after.focus || [] });
+    }
+    if (changes.length) scenes.push({ scene: i, change: 'modified', before: { type: before.type, title: sceneTitle(before) }, after: { type: after.type, title: sceneTitle(after) }, changes });
+  }
+  return {
+    before: relPath(beforeRead.abs),
+    after: relPath(afterRead.abs),
+    summary: { changedScenes: scenes.length, beforeScenes: beforeScenes.length, afterScenes: afterScenes.length },
+    scenes,
+  };
+}
+
+async function reviewDeck(args) {
+  const { abs, spec } = readSpecFile(args.path);
+  const validation = validateSpec(spec, { specPath: abs });
+  const { value: checkViolations, output: checkOutput } = captureConsole(() => runCheck(spec));
+  const graphAudit = graphAuditSpec(spec);
+  const narrationPlan = await narrationPlanForSpec(spec, abs);
+  let browserAudit = null;
+  if (args.browserAudit !== false) {
+    try {
+      const report = await auditSpec(spec, { specPath: abs });
+      browserAudit = { ok: true, ...report };
+    } catch (err) {
+      browserAudit = { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+  }
+  const issueCount = (validation.errors || []).length
+    + checkViolations
+    + graphAudit.summary.errors
+    + graphAudit.summary.warnings
+    + narrationPlan.summary.issues
+    + (browserAudit && browserAudit.ok ? browserAudit.summary.findings : 0)
+    + (browserAudit && browserAudit.ok === false ? 1 : 0);
+  const status = !validation.valid || checkViolations || graphAudit.summary.errors || (browserAudit && browserAudit.ok && browserAudit.summary.errors)
+    ? 'failed'
+    : issueCount ? 'needs_work' : 'passed';
+  return {
+    path: relPath(abs),
+    status,
+    summary: {
+      scenes: (spec.scenes || []).length,
+      issues: issueCount,
+      validationErrors: (validation.errors || []).length,
+      checkViolations,
+      graphWarnings: graphAudit.summary.warnings,
+      narrationIssues: narrationPlan.summary.issues,
+      browserFindings: browserAudit && browserAudit.ok ? browserAudit.summary.findings : null,
+    },
+    validation,
+    check: { violations: checkViolations, output: checkOutput },
+    graphAudit,
+    narrationPlan,
+    browserAudit,
+  };
+}
+
+async function contactSheet(args) {
+  const { abs, spec } = readSpecFile(args.path);
+  const { stepsForScene } = await import(pathToFileURL(path.join(ROOT_DIR, 'web', 'sceneSteps.mjs')).href);
+  const scenes = Array.isArray(args.scenes) && args.scenes.length ? args.scenes : (spec.scenes || []).map((_, i) => i);
+  const outDir = safeResolve(args.outDir || '.artifacts/slidey-contact-sheet');
+  fs.mkdirSync(outDir, { recursive: true });
+  const captures = [];
+  for (const sceneIndex of scenes) {
+    clampSceneIndex(sceneIndex, (spec.scenes || []).length);
+    const scene = spec.scenes[sceneIndex];
+    const steps = stepsForScene(scene);
+    const pageSteps = steps.length ? steps : [null];
+    const selected = args.steps === 'all'
+      ? pageSteps.map((_, i) => i)
+      : args.steps === 'focus'
+        ? pageSteps.map((step, i) => [step, i]).filter(([step]) => /^graph_focus_/.test(String(step))).map(([, i]) => i)
+        : [pageSteps.length - 1];
+    for (const stepIndex of selected) {
+      const session = await loadRenderPage(spec, abs, sceneIndex, stepIndex);
+      try {
+        const file = `scene-${String(sceneIndex).padStart(3, '0')}-step-${String(stepIndex + 1).padStart(3, '0')}.png`;
+        const fileAbs = path.join(outDir, file);
+        await session.page.screenshot({ path: fileAbs, type: 'png' });
+        captures.push({
+          scene: sceneIndex,
+          title: sceneTitle(scene),
+          stepIndex,
+          step: session.step,
+          focus: /^graph_focus_/.test(String(session.step)) ? graphPathEntries(scene)[Number(String(session.step).replace('graph_focus_', ''))] || null : null,
+          path: relPath(fileAbs),
+        });
+      } finally {
+        await closeBrowser(session.browser);
+      }
+    }
+  }
+  const htmlPath = path.join(outDir, 'index.html');
+  const html = [
+    '<!doctype html><meta charset="utf-8"><title>Slidey contact sheet</title>',
+    '<style>body{font-family:system-ui,sans-serif;margin:24px;background:#111;color:#eee}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:18px}figure{margin:0;border:1px solid #333;padding:10px;background:#181818}img{width:100%;display:block}figcaption{font-size:13px;line-height:1.4;color:#ccc;margin-top:8px}</style>',
+    '<div class="grid">',
+    ...captures.map((capture) => `<figure><img src="${path.basename(capture.path)}"><figcaption>Scene ${capture.scene}, step ${capture.stepIndex + 1}: ${escapeHtml(capture.title || '')}<br>${escapeHtml(capture.step || '')}${capture.focus && capture.focus.note ? `<br>${escapeHtml(capture.focus.note)}` : ''}</figcaption></figure>`),
+    '</div>',
+  ].join('\n');
+  fs.writeFileSync(htmlPath, html);
+  return { path: relPath(htmlPath), captures };
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+async function prepareReviewArtifact(args) {
+  const { abs, spec } = readSpecFile(args.path);
+  const outDir = safeResolve(args.outDir || `.artifacts/slidey-review/${path.basename(abs).replace(/\W+/g, '-')}`);
+  fs.mkdirSync(outDir, { recursive: true });
+  const review = await reviewDeck({ path: args.path, browserAudit: args.browserAudit === true });
+  const validationPath = path.join(outDir, 'validation.json');
+  const graphPath = path.join(outDir, 'graph-audit.json');
+  const narrationPath = path.join(outDir, 'narration-plan.json');
+  const summaryPath = path.join(outDir, 'deck-summary.json');
+  const reviewPath = path.join(outDir, 'review.json');
+  fs.writeFileSync(validationPath, JSON.stringify(review.validation, null, 2) + '\n');
+  fs.writeFileSync(graphPath, JSON.stringify(review.graphAudit, null, 2) + '\n');
+  fs.writeFileSync(narrationPath, JSON.stringify(review.narrationPlan, null, 2) + '\n');
+  fs.writeFileSync(summaryPath, JSON.stringify(summarizeSpec(spec), null, 2) + '\n');
+  fs.writeFileSync(reviewPath, JSON.stringify(review, null, 2) + '\n');
+  let bundled = null;
+  if (args.bundle !== false) {
+    const htmlOut = path.join(outDir, `${path.basename(abs).replace(/\.slidey\.json$/i, '').replace(/\.json$/i, '')}.html`);
+    try {
+      bundleSpec(abs, spec, htmlOut, { skipValidate: args.skipValidate === true });
+      bundled = relPath(htmlOut);
+    } catch (err) {
+      review.bundleError = err && err.message ? err.message : String(err);
+      fs.writeFileSync(reviewPath, JSON.stringify(review, null, 2) + '\n');
+    }
+  }
+  return {
+    path: relPath(outDir),
+    status: review.status,
+    bundled,
+    files: [validationPath, graphPath, narrationPath, summaryPath, reviewPath].map(relPath),
+  };
+}
+
 const TOOLS = [
   {
     name: 'slidey_workspace_tree',
@@ -818,6 +1202,57 @@ const TOOLS = [
     inputSchema: toolInputSchema({
       path: { type: 'string' },
       sceneIndex: { type: 'integer', minimum: 0, description: 'Optional single scene to audit.' },
+    }, ['path']),
+  },
+  {
+    name: 'slidey_review_deck',
+    description: 'Run the deck-review workbench pass: schema validation, static checks, graph audit, narration plan, and browser visual audit by default.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      browserAudit: { type: 'boolean', description: 'Run browser visual QA. Defaults true; set false for a fast semantic review.' },
+    }, ['path']),
+  },
+  {
+    name: 'slidey_graph_audit',
+    description: 'Run graph-specific QA for Cytoscape scenes: node/edge references, disconnected nodes, focus-path coverage, label risks, dense overviews, and suggested JSON patches.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+    }, ['path']),
+  },
+  {
+    name: 'slidey_contact_sheet',
+    description: 'Render scene/reveal screenshots into an inspectable HTML contact sheet. Use steps:"focus" for graph focus reveals, "all" for all reveals, or omit for final frames.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      scenes: { type: 'array', items: { type: 'integer', minimum: 0 }, description: 'Scene indices to capture. Defaults to all scenes.' },
+      steps: { type: 'string', enum: ['final', 'focus', 'all'], description: 'Which reveal steps to capture. Defaults to final.' },
+      outDir: { type: 'string', description: 'Output directory. Defaults to .artifacts/slidey-contact-sheet.' },
+    }, ['path']),
+  },
+  {
+    name: 'slidey_narration_plan',
+    description: 'Report narration text and timing-sized reveal chunks per scene/reveal, including graph focus notes and narration risks.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+    }, ['path']),
+  },
+  {
+    name: 'slidey_diff_deck',
+    description: 'Summarize semantic differences between two decks: scene changes, text/narration changes, graph node/edge changes, and focus-path changes.',
+    inputSchema: toolInputSchema({
+      beforePath: { type: 'string' },
+      afterPath: { type: 'string' },
+    }, ['beforePath', 'afterPath']),
+  },
+  {
+    name: 'slidey_prepare_review_artifact',
+    description: 'Write a review bundle under .artifacts: bundled HTML, validation JSON, graph audit, narration plan, deck summary, and aggregate review JSON.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      outDir: { type: 'string', description: 'Output directory. Defaults to .artifacts/slidey-review/<deck>.' },
+      bundle: { type: 'boolean', description: 'Write bundled HTML. Defaults true.' },
+      skipValidate: { type: 'boolean', description: 'Bundle even if validation reports problems. Defaults false.' },
+      browserAudit: { type: 'boolean', description: 'Include browser visual audit in the aggregate review. Defaults false for artifact speed/reliability.' },
     }, ['path']),
   },
   {
@@ -1084,6 +1519,28 @@ async function callTool(name, args = {}) {
       const report = await auditSpec(spec, { specPath: abs, selectedScenes });
       return okResult({ path: relPath(abs), ...report });
     }
+
+    case 'slidey_review_deck':
+      return okResult(await reviewDeck(args));
+
+    case 'slidey_graph_audit': {
+      const { abs, spec } = readSpecFile(args.path);
+      return okResult({ path: relPath(abs), ...graphAuditSpec(spec) });
+    }
+
+    case 'slidey_contact_sheet':
+      return okResult(await contactSheet(args));
+
+    case 'slidey_narration_plan': {
+      const { abs, spec } = readSpecFile(args.path);
+      return okResult(await narrationPlanForSpec(spec, abs));
+    }
+
+    case 'slidey_diff_deck':
+      return okResult(await diffDecks(args.beforePath, args.afterPath));
+
+    case 'slidey_prepare_review_artifact':
+      return okResult(await prepareReviewArtifact(args));
 
     case 'slidey_schema':
       return okResult(SCHEMA);

@@ -51,6 +51,7 @@ const playerRef = ref(null);
 const videoRef = ref(null);
 const audioRef = ref(null);
 const frameRect = ref(null);
+const playbackStarted = ref(false);
 // Gate the size transition: off for the initial inline placement (so the holder
 // snaps onto the thumbnail with no grow-in), on once we start expanding.
 const animate = ref(false);
@@ -122,6 +123,7 @@ function onReplayTime(ms) {
   emitVideoEvent('time', { ms });
 }
 function onReplayPlay() {
+  playbackStarted.value = true;
   playAudio();
   emitVideoEvent('play');
 }
@@ -130,6 +132,7 @@ function onReplayPause() {
   emitVideoEvent('pause');
 }
 function onMp4Play() {
+  playbackStarted.value = true;
   const ms = (videoRef.value?.currentTime || 0) * 1000;
   syncAudioToMs(ms);
   playAudio();
@@ -155,6 +158,7 @@ function onEnded() {
 function begin() {
   clearTimeout(introTimer);
   pauseAudio();
+  playbackStarted.value = false;
   animate.value = false;
   measure();
   if (!cinematic.value) { phase.value = 'full'; nextTick(startPlayback); return; }
@@ -168,6 +172,12 @@ function begin() {
 }
 
 function onResize() { if (!expanded.value) measure(); }
+
+function onRrwebReady() {
+  if (mediaKind.value === 'rrweb' && phase.value === 'full' && !playbackStarted.value) {
+    startPlayback();
+  }
+}
 
 function onVideoCommand(e) {
   const action = e && e.detail && e.detail.action;
@@ -234,6 +244,7 @@ onBeforeUnmount(() => {
             :chapters="store.rrwebChapters"
             :autoplay="false"
             :controls="showControls"
+            @ready="onRrwebReady"
             @timeupdate="onReplayTime"
             @play="onReplayPlay"
             @pause="onReplayPause"

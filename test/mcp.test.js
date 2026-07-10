@@ -316,6 +316,118 @@ test('MCP layout gallery includes project-local pack layouts', async (t) => {
   assert.equal(addPayload.scene.title, 'Local proof');
 });
 
+test('MCP review workbench tools report graph and narration issues', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-review-'));
+  fs.writeFileSync(path.join(root, 'deck.slidey.json'), JSON.stringify({
+    meta: { title: 'Review workbench', mode: 'pitch' },
+    scenes: [
+      {
+        type: 'graph',
+        title: 'Buyer diligence graph',
+        nodes: [
+          { id: 'buyer', label: 'Buyer', w: 180 },
+          { id: 'security', label: 'Security questionnaire response', w: 180 },
+          { id: 'roi', label: 'ROI' },
+          { id: 'orphan', label: 'Unused branch' },
+        ],
+        edges: [
+          { id: 'buyer-security', from: 'buyer', to: 'security', label: 'asks for' },
+          { id: 'security-roi', from: 'security', to: 'roi', label: 'supports' },
+          { id: 'missing-target', from: 'security', to: 'missing', label: 'broken' },
+        ],
+        path: [
+          'buyer',
+          { node: 'missing', edge: 'missing-target' },
+        ],
+        caption: 'Focus explains dense branches.',
+      },
+      { type: 'narrative', title: 'Close', body: 'Done', narration: 'Done' },
+    ],
+  }, null, 2) + '\n');
+
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+  await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+
+  const tools = await server.send('tools/list');
+  const names = tools.result.tools.map((tool) => tool.name);
+  for (const name of ['slidey_review_deck', 'slidey_graph_audit', 'slidey_narration_plan', 'slidey_diff_deck', 'slidey_prepare_review_artifact']) {
+    assert.ok(names.includes(name), `${name} should be listed`);
+  }
+
+  const graph = await server.send('tools/call', {
+    name: 'slidey_graph_audit',
+    arguments: { path: 'deck.slidey.json' },
+  });
+  assert.ifError(graph.error);
+  const graphPayload = JSON.parse(graph.result.content[0].text);
+  assert.equal(graphPayload.status, 'failed');
+  assert.ok(graphPayload.scenes[0].issues.some((issue) => issue.kind === 'missing-edge-node'));
+  assert.ok(graphPayload.scenes[0].issues.some((issue) => issue.kind === 'missing-focus-note'));
+  assert.ok(graphPayload.scenes[0].issues.some((issue) => issue.suggestedPatch));
+
+  const narration = await server.send('tools/call', {
+    name: 'slidey_narration_plan',
+    arguments: { path: 'deck.slidey.json' },
+  });
+  assert.ifError(narration.error);
+  const narrationPayload = JSON.parse(narration.result.content[0].text);
+  assert.equal(narrationPayload.status, 'needs_work');
+  assert.ok(narrationPayload.issues.some((issue) => issue.kind === 'missing-graph-focus-note'));
+
+  const review = await server.send('tools/call', {
+    name: 'slidey_review_deck',
+    arguments: { path: 'deck.slidey.json', browserAudit: false },
+  });
+  assert.ifError(review.error);
+  const reviewPayload = JSON.parse(review.result.content[0].text);
+  assert.equal(reviewPayload.status, 'failed');
+  assert.equal(reviewPayload.browserAudit, null);
+  assert.ok(reviewPayload.summary.graphWarnings > 0);
+});
+
+test('MCP diff deck summarizes text and graph semantic changes', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-diff-'));
+  fs.writeFileSync(path.join(root, 'before.slidey.json'), JSON.stringify({
+    scenes: [
+      {
+        type: 'graph',
+        title: 'Before',
+        nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }],
+        edges: [{ id: 'a-b', from: 'a', to: 'b' }],
+        path: ['a'],
+      },
+    ],
+  }, null, 2) + '\n');
+  fs.writeFileSync(path.join(root, 'after.slidey.json'), JSON.stringify({
+    scenes: [
+      {
+        type: 'graph',
+        title: 'After',
+        nodes: [{ id: 'a', label: 'A' }, { id: 'c', label: 'C' }],
+        edges: [{ id: 'a-c', from: 'a', to: 'c' }],
+        path: ['a', 'c'],
+      },
+      { type: 'title', title: 'New scene' },
+    ],
+  }, null, 2) + '\n');
+
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+  await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+
+  const diff = await server.send('tools/call', {
+    name: 'slidey_diff_deck',
+    arguments: { beforePath: 'before.slidey.json', afterPath: 'after.slidey.json' },
+  });
+  assert.ifError(diff.error);
+  const payload = JSON.parse(diff.result.content[0].text);
+  assert.equal(payload.summary.changedScenes, 2);
+  assert.ok(payload.scenes[0].changes.some((change) => change.field === 'title'));
+  assert.ok(payload.scenes[0].changes.some((change) => change.field === 'graph.nodes'));
+  assert.equal(payload.scenes[1].change, 'added');
+});
+
 test('MCP validates an ABSOLUTE spec path outside the workspace root', async (t) => {
   // Regression: safeResolve() previously did path.resolve(root, './' + input),
   // which mangled an absolute path into `<root>/abs/...` → "spec not found".

@@ -148,6 +148,7 @@ let liveAdvanceInProgress = false;
 let sceneNarrationSeq = 0;
 let sceneNarrationAdvanceInProgress = false;
 let videoCueState = { key: '', cues: [], spoken: new Set() };
+let videoCueNarrationChain = Promise.resolve();
 const NARRATION_PREFETCH_AHEAD = 2;
 const SILENT_WAV_DATA_URL = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
 let narrationAudioElement = null;
@@ -530,6 +531,7 @@ function clearLiveNarrationTimer() {
 
 function resetVideoCueState() {
   videoCueState = { key: '', cues: [], spoken: new Set() };
+  videoCueNarrationChain = Promise.resolve();
 }
 
 function currentNarrationMeta() {
@@ -837,11 +839,12 @@ async function advanceLiveNarration() {
   liveAdvanceInProgress = true;
   try {
     await deck.value.gotoScene(state.sceneIndex + 1);
+    sceneNarrationSeq += 1;
+    await nextTick();
+    runLiveNarrationForCurrent();
   } finally {
     liveAdvanceInProgress = false;
   }
-  await nextTick();
-  runLiveNarrationForCurrent();
 }
 
 function delaySceneNarration(ms, token) {
@@ -870,14 +873,16 @@ function firstNarrationStepIndex(scene, steps) {
   return 0;
 }
 
-async function listenCurrentSceneByReveal(scene, token) {
-  if (!deck.value || !scene) return;
+async function playCurrentSceneByReveal(scene, token) {
+  if (!deck.value || !scene) return false;
   const state = deck.value.state;
   const sceneIndex = state ? state.sceneIndex : 0;
   const steps = stepsForScene(scene);
   if (!steps.length) {
-    await speakText(speechTextForScene(scene), { cancel: false });
-    return;
+    const text = speechTextForScene(scene);
+    if (text) return speakText(text, { cancel: false });
+    const stillCurrent = await delaySceneNarration(1200, token);
+    return stillCurrent;
   }
 
   const startPos = deck.value.posForScene(sceneIndex, 0);
@@ -887,14 +892,13 @@ async function listenCurrentSceneByReveal(scene, token) {
     const leadingCue = cues.slice(0, firstStepIndex).map(cue => String(cue || '').trim()).filter(Boolean).join('\n');
     if (leadingCue) cues[firstStepIndex] = [leadingCue, cues[firstStepIndex]].filter(Boolean).join('\n');
   }
+  const delayMs = scene.type === 'graph' ? 760 : 650;
   const items = [];
   for (let i = firstStepIndex; i < steps.length; i += 1) {
-    items.push({ index: i, pos: startPos + i, cue: String(cues[i] || '').trim() });
+    items.push({ index: i, pos: startPos + i, cue: String(cues[i] || '').trim(), delayMs });
   }
-  if (!items.length) return;
-  const delayMs = scene.type === 'graph' ? 760 : 650;
-  for (const item of items) item.delayMs = delayMs;
-  await playBufferedNarrationSteps(items, token);
+  if (!items.length) return true;
+  return playBufferedNarrationSteps(items, token);
 }
 
 function runLiveNarrationForCurrent() {
@@ -921,9 +925,13 @@ function runLiveNarrationForCurrent() {
     }
     return;
   }
+  const token = sceneNarrationSeq;
+  const steps = stepsForScene(scene);
   const text = speechTextForScene(scene);
-  if (text) {
-    speakText(text, { cancel: false, onDone: advanceLiveNarration });
+  if (text || steps.length) {
+    playCurrentSceneByReveal(scene, token).then(ok => {
+      if (ok && liveNarration.value && token === sceneNarrationSeq) advanceLiveNarration();
+    });
   } else {
     narrationLoading.value = false;
     updateNarrationActivity();
@@ -944,7 +952,7 @@ function listenCurrentNarration() {
     narrationError.value = 'This slide has no narration.';
     return;
   }
-  listenCurrentSceneByReveal(scene, token);
+  playCurrentSceneByReveal(scene, token);
 }
 
 function startLiveNarration() {
@@ -971,13 +979,19 @@ function onVideoTime(e) {
     if (videoCueState.spoken.has(cue.key)) continue;
     if (seconds + 0.12 >= cue.at) {
       videoCueState.spoken.add(cue.key);
-      speakText(cue.text, { cancel: false });
+      videoCueNarrationChain = videoCueNarrationChain
+        .then(() => {
+          if (!liveNarration.value || currentScene.value !== scene || videoCueState.key !== videoCueKey()) return false;
+          return speakText(cue.text, { cancel: false });
+        })
+        .catch(() => false);
     }
   }
 }
 
-function onVideoEnded() {
+async function onVideoEnded() {
   if (liveNarration.value && currentScene.value && currentScene.value.type === 'video') {
+    try { await videoCueNarrationChain; } catch (_) {}
     advanceLiveNarration();
   }
 }
@@ -986,7 +1000,7 @@ watch(() => {
   const state = deck.value && deck.value.state;
   return state ? `${activeDeckId.value}:${state.sceneIndex}:${state.pos}` : '';
 }, () => {
-  if (sceneNarrationAdvanceInProgress) return;
+  if (sceneNarrationAdvanceInProgress || liveAdvanceInProgress) return;
   sceneNarrationSeq += 1;
   clearLiveNarrationTimer();
   resetVideoCueState();
