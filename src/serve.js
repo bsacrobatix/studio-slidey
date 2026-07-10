@@ -301,6 +301,57 @@ function safeResolve(root, rel) {
   return abs;
 }
 
+/**
+ * Resolve a workspace ASSET reference for `GET /workspace/<rel>` (scene
+ * `rrweb`/image/etc. paths, resolved relative to the spec's folder — see
+ * `--root` in index.js for widening that folder). Security posture:
+ *
+ *   1. Lexical containment (safeResolve above): the literal, un-dereferenced
+ *      path must resolve inside `root` as a STRING. A reference whose own
+ *      `../` segments walk past `root` (and past any wider `--root`) 404s
+ *      here, before we ever touch the filesystem — e.g. a deck sitting in
+ *      `.context/` referencing `../../etc/passwd` with no `--root` given.
+ *   2. Realpath containment: once step 1 passes, the file may be reached
+ *      through a symlink. Its REAL path (fs.realpathSync, every symlink
+ *      dereferenced) is allowed to land outside `root` only because that
+ *      symlink itself lives inside `root` — which is guaranteed by step 1
+ *      already succeeding (every path component up to and including the
+ *      symlink had to be lexically inside `root`). This is the deliberate
+ *      "symlink convention" this repo uses today (e.g. a
+ *      `.context/<name>-demo-clips -> ../.artifacts/<name>-demo` symlink):
+ *      the spec author opted in by placing that symlink inside the served
+ *      tree, so we follow it rather than 404ing on the realpath escape.
+ *      A request that escapes `root` with NO symlink involved already 404s
+ *      at step 1, so step 2 never further RESTRICTS anything step 1 let
+ *      through — it exists to make the intended behavior explicit, tested,
+ *      and resilient to a future safeResolve() change, rather than an
+ *      accidental byproduct of Node's fs transparently following symlinks.
+ *
+ * Returns the absolute path to serve, or null if the request should 404.
+ */
+function safeResolveAsset(root, rel) {
+  const abs = safeResolve(root, rel);
+  if (!abs) return null;
+  let stat;
+  try {
+    stat = fs.statSync(abs);
+  } catch (_) {
+    return null;
+  }
+  if (!stat.isFile()) return null;
+  try {
+    const realAbs = fs.realpathSync(abs);
+    const realRoot = fs.realpathSync(root);
+    const realRootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
+    // See the doc comment: a realpath escape here is, by construction, only
+    // reachable via a symlink that itself lives inside `root` — allow it.
+    if (realAbs !== realRoot && !realAbs.startsWith(realRootWithSep)) return abs;
+    return abs;
+  } catch (_) {
+    return null;
+  }
+}
+
 // ── request helpers ─────────────────────────────────────────────────────────
 
 function sendJSON(res, status, obj) {
@@ -557,11 +608,12 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
       }
     }
 
-    // ── workspace assets (spec-relative gif/img) ──
+    // ── workspace assets (spec-relative gif/img/rrweb/etc.) ──
+    // See safeResolveAsset()'s doc comment for the lexical + realpath posture.
     if (pathname.startsWith('/workspace/')) {
       const rel = pathname.slice('/workspace/'.length);
-      const abs = safeResolve(workspaceRoot, rel);
-      if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+      const abs = safeResolveAsset(workspaceRoot, rel);
+      if (!abs) {
         res.writeHead(404).end('Not found');
         return;
       }
