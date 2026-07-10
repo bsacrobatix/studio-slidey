@@ -81,7 +81,9 @@ async function launchVSCode(workspace, openFile) {
 
 async function commandPalette(win, command) {
   await win.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+P' : 'Control+Shift+P');
+  await win.locator('.quick-input-widget').waitFor({ state: 'visible', timeout: 10_000 });
   await win.keyboard.type(command);
+  await win.waitForFunction((label) => document.body.innerText.includes(label), command, { timeout: 10_000 });
   await win.keyboard.press('Enter');
 }
 
@@ -138,7 +140,7 @@ test('real VS Code extension opens a spec-relative reference in the editor', asy
     fs.rmSync(launched.extensionsDir, { recursive: true, force: true });
   });
 
-  await commandPalette(launched.win, 'Slidey: Preview Presentation');
+  await commandPalette(launched.win, 'Slidey: Preview Deck or Replay');
   const frame = await slideyFrame(launched.win);
   await frame.locator('.reference-frame').waitFor({ state: 'visible', timeout: 30_000 });
   await frame.locator('.reference-frame').click();
