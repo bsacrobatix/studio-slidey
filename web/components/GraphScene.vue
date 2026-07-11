@@ -12,6 +12,7 @@ import '../graph-projection/renderer.js';
 const scene = computed(() => store.scene || {});
 const isProjection = computed(() => !!scene.value.projection);
 const projectionSvg = ref(null);
+const frameRoot = ref(null);
 const cyRoot = ref(null);
 let cy = null;
 let lastNonce = 0;
@@ -121,10 +122,15 @@ function elements() {
     position: nodePosition(n) || undefined,
     classes: [n.kind, n.className, n.classes].flat().filter(Boolean).join(' '),
   }));
+  // BUG G-5 fix: shared across the whole map() pass so edges whose labels
+  // would land on top of one another (classic in a dense grid — e.g. the two
+  // diagonals of a 2x2 node block cross, and share the same edge midpoint)
+  // get nudged apart instead of silently overlapping. See deconflictOffset().
+  const labelAnchors = [];
   const edges = (scene.value.edges || []).map((e, idx) => {
     const source = nodeById.get(String(e.from));
     const target = nodeById.get(String(e.to));
-    const labelOffset = edgeLabelOffset(e, source, target);
+    const labelOffset = edgeLabelOffset(e, source, target, labelAnchors);
     return {
       group: 'edges',
       data: {
@@ -155,14 +161,86 @@ function explicitNumber(...values) {
   return null;
 }
 
-function edgeLabelOffset(edge, source, target) {
+// Rough label box half-extents (px, pre-zoom) from its text length, at the
+// default ~20px edge font — used for a size-aware overlap test rather than a
+// fixed-radius one, since "of" and "answers auditability" need very
+// different clearances (BUG G-5).
+function labelHalfExtents(label, fontSize) {
+  const size = Number(fontSize) || 20;
+  const halfW = Math.max(24, String(label || '').length * size * 0.3) + 6;
+  const halfH = size * 0.5 + 6;
+  return { halfW, halfH };
+}
+
+function rectsOverlap(a, b) {
+  return Math.abs(a.x - b.x) < (a.halfW + b.halfW) && Math.abs(a.y - b.y) < (a.halfH + b.halfH);
+}
+
+// BUG G-5 fix: nudge a heuristic label offset away from any already-placed
+// label box it would overlap. Walks outward from the original offset
+// (alternating above/below, growing each attempt) until clear, or gives up
+// after a few tries rather than looping forever on a truly crowded spot.
+// Explicit author offsets (labelMarginX/Y) are never moved — only
+// registered as an obstacle for later heuristic labels to avoid.
+function deconflictOffset(labelAnchors, midX, midY, offset, halfW, halfH) {
+  if (!Array.isArray(labelAnchors) || !labelAnchors.length) return offset;
+  const step = Math.max(halfH * 2 + 4, 34);
+  let candidate = offset;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const box = { x: midX + candidate.x, y: midY + candidate.y, halfW, halfH };
+    const collides = labelAnchors.some(a => rectsOverlap(a, box));
+    if (!collides) return candidate;
+    const nudge = step * (Math.floor(attempt / 2) + 1) * (attempt % 2 === 0 ? 1 : -1);
+    candidate = { x: offset.x, y: offset.y + nudge };
+  }
+  return candidate;
+}
+
+// The straight-line source/target midpoint is a poor stand-in for the actual
+// rendered label anchor once an edge has a real `unbundled-bezier` bend
+// (`controlPointDistances`/`controlPointWeights`) — a handful of gravytanker
+// edges use large, asymmetric bends specifically to route around other
+// elements, and without this the de-collision math below "sees" two edges as
+// co-located when their curves have in fact already separated them (or vice
+// versa). Approximates cytoscape's own curve point: interpolate along the
+// source→target line by the control-point weight, then offset perpendicular
+// by the control-point distance.
+function edgeCurveMidpoint(source, target, edge) {
+  const s = nodePosition(source);
+  const t = nodePosition(target);
+  if (!s || !t) return null;
+  const weight = explicitNumber(edge.controlPointWeights, edge.controlWeights, edge.controlWeight);
+  const w = weight != null ? weight : 0.5;
+  const baseX = s.x + (t.x - s.x) * w;
+  const baseY = s.y + (t.y - s.y) * w;
+  const distance = explicitNumber(edge.controlPointDistances, edge.controlDistances, edge.distance);
+  if (!distance) return { x: baseX, y: baseY };
+  const dx = t.x - s.x;
+  const dy = t.y - s.y;
+  const len = Math.hypot(dx, dy) || 1;
+  // Perpendicular unit vector (rotate the source→target direction 90°) —
+  // matches the sign convention cytoscape uses for control-point-distances.
+  const px = -dy / len;
+  const py = dx / len;
+  return { x: baseX + px * distance, y: baseY + py * distance };
+}
+
+function edgeLabelOffset(edge, source, target, labelAnchors) {
+  const targetPos = nodePosition(target);
+  const resolvedSourcePos = nodePosition(source);
+  const curveMid = resolvedSourcePos && targetPos ? edgeCurveMidpoint(source, target, edge) : null;
+  const midX = curveMid ? curveMid.x : (resolvedSourcePos && targetPos ? (resolvedSourcePos.x + targetPos.x) / 2 : 0);
+  const midY = curveMid ? curveMid.y : (resolvedSourcePos && targetPos ? (resolvedSourcePos.y + targetPos.y) / 2 : 0);
+  const fontSize = scene.value.edgeFontSize || 20;
+  const { halfW, halfH } = labelHalfExtents(edge.label, fontSize);
+
   const explicitX = explicitNumber(edge.labelMarginX, edge.labelX);
   const explicitY = explicitNumber(edge.labelMarginY, edge.labelY);
   if (explicitX != null || explicitY != null) {
-    return { x: explicitX || 0, y: explicitY != null ? explicitY : -14 };
+    const offset = { x: explicitX || 0, y: explicitY != null ? explicitY : -14 };
+    if (labelAnchors) labelAnchors.push({ x: midX + offset.x, y: midY + offset.y, halfW, halfH });
+    return offset;
   }
-  const targetPos = nodePosition(target);
-  const resolvedSourcePos = nodePosition(source);
   if (!resolvedSourcePos || !targetPos || !edge.label) return { x: 0, y: -14 };
   const dx = targetPos.x - resolvedSourcePos.x;
   const dy = targetPos.y - resolvedSourcePos.y;
@@ -170,15 +248,18 @@ function edgeLabelOffset(edge, source, target) {
   const absDy = Math.abs(dy);
   const grid = graphGrid();
   const layoutHeight = Number(scene.value.layoutHeight || scene.value.layoutH || (grid ? grid.y + grid.height : 720));
-  const midY = (resolvedSourcePos.y + targetPos.y) / 2;
+  let offset;
   if (absDx > absDy * 1.7) {
     const lane = midY < layoutHeight * 0.38 ? -1 : midY > layoutHeight * 0.62 ? 1 : -1;
-    return { x: 0, y: lane * 42 };
+    offset = { x: 0, y: lane * 42 };
+  } else if (absDy > absDx * 1.2) {
+    offset = { x: dx >= 0 ? 58 : -58, y: dy >= 0 ? 12 : -12 };
+  } else {
+    offset = { x: 0, y: dy >= 0 ? 44 : -44 };
   }
-  if (absDy > absDx * 1.2) {
-    return { x: dx >= 0 ? 58 : -58, y: dy >= 0 ? 12 : -12 };
-  }
-  return { x: 0, y: dy >= 0 ? 44 : -44 };
+  offset = deconflictOffset(labelAnchors, midX, midY, offset, halfW, halfH);
+  if (labelAnchors) labelAnchors.push({ x: midX + offset.x, y: midY + offset.y, halfW, halfH });
+  return offset;
 }
 
 function layoutConfig({ animate = false } = {}) {
@@ -245,9 +326,16 @@ function rebuild() {
   stopIdleMotion();
   const pending = new Promise(resolve => {
     if (cy) cy.destroy();
+    const built = elements();
+    // Test-only introspection hook (mirrors the existing __slideyPendingRenders
+    // pattern): the resolved label offsets aren't otherwise observable, since
+    // Cytoscape draws labels to <canvas>, not DOM text nodes. Regression tests
+    // for the label de-collision heuristic (BUG G-5) read this rather than
+    // trying to OCR a screenshot. No effect on rendered output.
+    if (typeof window !== 'undefined') window.__slideyLastGraphElements = built;
     cy = cytoscape({
       container: cyRoot.value,
-      elements: elements(),
+      elements: built,
       wheelSensitivity: 0.25,
       userZoomingEnabled: scene.value.interactive === true,
       userPanningEnabled: scene.value.interactive === true,
@@ -491,10 +579,13 @@ function applyFocus() {
 }
 
 function refreshViewport() {
-  if (!cy) return;
   if (refreshFrame) cancelAnimationFrame(refreshFrame);
   refreshFrame = requestAnimationFrame(() => {
     refreshFrame = 0;
+    if (isProjection.value) {
+      fitProjectionFrame();
+      return;
+    }
     if (!cy || !cyRoot.value) return;
     cy.resize();
     applyFocus();
@@ -506,6 +597,45 @@ function refreshViewport() {
 // dependency-free renderer instead of building a Cytoscape graph. No camera /
 // focus-path in this mode (path/focus are Cytoscape-only concepts).
 const projectionError = ref('');
+
+// BUG G-2 fix: the projection <svg> has a real, fixed aspect ratio (its
+// viewBox), but the frame it sits in is sized by the slide grid (any aspect).
+// Letting the browser's default `xMidYMid meet` scaling reconcile the two
+// wastes space on whichever axis doesn't match. Instead we measure the frame's
+// actual content box and set the <svg>'s CSS width/height in pixels to the
+// largest box that (a) preserves the graph's true aspect ratio and (b) fits
+// entirely inside the frame — then center it with `margin:auto` (see the
+// `.graph-canvas--projection` rule). This makes sizing deterministic and
+// pixel-exact in both the interactive viewer and the headless PNG/MP4 path.
+function currentProjectionGraph() {
+  const data = store.graphProjectionData;
+  const win = typeof window !== 'undefined' ? window : null;
+  if (!data || !win || !win.SlideyGraphProjection) return null;
+  try {
+    const resolved = win.SlideyGraphProjection.resolveState(data, scene.value.state, scene.value.projectionOpts || {});
+    return (data.graphs || []).find(g => g.id === resolved.graphId) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function fitProjectionFrame() {
+  if (!isProjection.value || !frameRoot.value || !projectionSvg.value) return;
+  const graph = currentProjectionGraph();
+  if (!graph || !(graph.w > 0) || !(graph.h > 0)) return;
+  const availW = frameRoot.value.clientWidth;
+  const availH = frameRoot.value.clientHeight;
+  if (!(availW > 0) || !(availH > 0)) return;
+  const aspect = graph.w / graph.h;
+  let width = availW;
+  let height = width / aspect;
+  if (height > availH) {
+    height = availH;
+    width = height * aspect;
+  }
+  projectionSvg.value.style.width = `${width}px`;
+  projectionSvg.value.style.height = `${height}px`;
+}
 
 function renderProjection() {
   projectionError.value = '';
@@ -521,6 +651,7 @@ function renderProjection() {
   }
   try {
     window.renderGraphProjection(projectionSvg.value, data, scene.value.state, scene.value.projectionOpts || {});
+    fitProjectionFrame();
   } catch (err) {
     projectionError.value = String((err && err.message) || err);
   }
@@ -539,14 +670,17 @@ watch(() => store.graphFocus, applyFocus);
 watch(() => store.isRevealed('graph-frame'), async shown => {
   if (!shown) return;
   await nextTick();
-  if (isProjection.value) renderProjection();
-  else refreshViewport();
+  if (isProjection.value) {
+    renderProjection();
+  } else {
+    refreshViewport();
+  }
 });
 
 onMounted(() => {
   if (typeof ResizeObserver === 'undefined') return;
   resizeObserver = new ResizeObserver(refreshViewport);
-  if (cyRoot.value) resizeObserver.observe(cyRoot.value);
+  if (frameRoot.value) resizeObserver.observe(frameRoot.value);
 });
 
 onBeforeUnmount(() => {
@@ -571,11 +705,18 @@ onBeforeUnmount(() => {
     >{{ scene.title }}</div>
     <div
       id="graph-frame"
+      ref="frameRoot"
       class="graph-frame reveal"
       :class="{ shown: store.isRevealed('graph-frame') }"
     >
       <div v-if="!isProjection" ref="cyRoot" class="graph-canvas"></div>
-      <svg v-else ref="projectionSvg" class="graph-canvas graph-canvas--projection" role="img"></svg>
+      <svg
+        v-else
+        ref="projectionSvg"
+        class="graph-canvas graph-canvas--projection"
+        role="img"
+        preserveAspectRatio="xMidYMid meet"
+      ></svg>
       <div v-if="isProjection && projectionError" class="graph-projection-error">{{ projectionError }}</div>
       <div v-if="!isProjection && activeNode" class="graph-focus-card">
         <div class="graph-focus-label">{{ activeNode.label || activeNode.id }}</div>
@@ -598,6 +739,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 18px;
   align-items: stretch;
@@ -624,8 +766,12 @@ onBeforeUnmount(() => {
 }
 
 .graph-canvas--projection {
+  /* Sized in pixels by fitProjectionFrame() to the graph's true aspect ratio;
+     margin:auto (with the inherited inset:0) centers the resulting box inside
+     the frame on whichever axis has slack, so there is no wasted dead space. */
   width: 100%;
   height: 100%;
+  margin: auto;
 }
 
 .graph-projection-error {
