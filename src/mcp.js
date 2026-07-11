@@ -671,7 +671,68 @@ function addIssue(issues, severity, kind, message, extra = {}) {
   issues.push({ severity, kind, message, ...extra });
 }
 
-function graphAuditSpec(spec) {
+// Mirrors GraphScene.vue's grid-slot resolution (graphGrid + gridPosition):
+// true when a node's position is deterministically known ahead of render,
+// either via a grid col/row slot or a pinned x/y/position. Used to decide
+// whether an "unanchored" edge-label warning is actionable (BUG G-3).
+function graphSceneGrid(scene) {
+  const template = scene.layoutTemplate || scene.template || '';
+  const raw = scene.grid && typeof scene.grid === 'object' ? scene.grid : {};
+  if (!template && !Object.keys(raw).length) return null;
+  const preset = template === 'lane-grid-3x5' || template === 'grid-3x5'
+    ? { columns: 5, rows: 3 } : {};
+  const columns = Number(raw.columns || raw.cols || preset.columns || 5);
+  const rows = Number(raw.rows || raw.lanes || preset.rows || 3);
+  if (!Number.isFinite(columns) || columns < 1 || !Number.isFinite(rows) || rows < 1) return null;
+  return { columns, rows };
+}
+
+function nodeHasResolvablePosition(scene, node) {
+  if (!node) return false;
+  if (node.position && Number.isFinite(node.position.x) && Number.isFinite(node.position.y)) return true;
+  if (Number.isFinite(node.x) && Number.isFinite(node.y)) return true;
+  const grid = graphSceneGrid(scene);
+  if (!grid) return false;
+  const col = node.col ?? node.column ?? node.gridColumn ?? node.grid?.col ?? node.grid?.column;
+  const row = node.row ?? node.lane ?? node.gridRow ?? node.grid?.row ?? node.grid?.lane;
+  return col != null && row != null && Number.isFinite(Number(col)) && Number.isFinite(Number(row));
+}
+
+// BUG G-4 fix: projection-mode graph scenes (scene.projection + scene.state)
+// previously passed the static audit trivially even when `projection` didn't
+// resolve to a file or `state` wasn't a key in it — the only guard was a
+// runtime `throw` inside the browser renderer, surfaced as an on-slide error
+// string with no pre-render signal. Statically resolve the projection JSON
+// (same resolution rule as src/assets.js sceneShowOpts) and check it here.
+function auditProjectionScene(scene, sceneIndex, specPath, issues) {
+  if (!scene.projection) return;
+  if (/^(data:|https?:)/i.test(scene.projection)) return; // not statically resolvable; skip
+  const abs = path.resolve(path.dirname(specPath || process.cwd()), scene.projection);
+  if (!fs.existsSync(abs)) {
+    addIssue(issues, 'error', 'missing-projection-file', `projection "${scene.projection}" does not resolve to a file on disk`, {});
+    return;
+  }
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(abs, 'utf8'));
+  } catch (err) {
+    addIssue(issues, 'error', 'invalid-projection-json', `projection "${scene.projection}" is not valid JSON: ${err.message}`, {});
+    return;
+  }
+  if (!scene.state) {
+    addIssue(issues, 'warning', 'missing-projection-state', 'projection scene has no "state" — nothing will render', {});
+    return;
+  }
+  const states = (data && typeof data.states === 'object' && data.states) || {};
+  const graphs = Array.isArray(data.graphs) ? data.graphs : [];
+  const hasState = Object.prototype.hasOwnProperty.call(states, scene.state);
+  const hasBareGraph = graphs.some((g) => g && g.id === scene.state);
+  if (!hasState && !hasBareGraph) {
+    addIssue(issues, 'error', 'missing-projection-state', `state/graph "${scene.state}" is not a key in "${scene.projection}"'s states, nor a graph id`, {});
+  }
+}
+
+function graphAuditSpec(spec, { specPath } = {}) {
   const scenes = [];
   let errors = 0;
   let warnings = 0;
@@ -681,6 +742,8 @@ function graphAuditSpec(spec) {
 
   for (const { scene, sceneIndex } of graphScenes) {
     const issues = [];
+    auditProjectionScene(scene, sceneIndex, specPath, issues);
+    const nodeById = new Map((Array.isArray(scene.nodes) ? scene.nodes : []).map((node) => [String(node.id), node]));
     const nodes = Array.isArray(scene.nodes) ? scene.nodes : [];
     const edges = Array.isArray(scene.edges) ? scene.edges : [];
     const nodeIds = new Set(nodes.map((node) => String(node.id)));
@@ -694,8 +757,18 @@ function graphAuditSpec(spec) {
       if (!nodeIds.has(to)) addIssue(issues, 'error', 'missing-edge-node', `edge to references missing node "${to}"`, { ref: `edges/${edge.id || `${from}-${to}`}` });
       if (nodeIds.has(from)) degree.set(from, (degree.get(from) || 0) + 1);
       if (nodeIds.has(to)) degree.set(to, (degree.get(to) || 0) + 1);
-      if (edge.label && !Number.isFinite(edge.labelMarginX) && !Number.isFinite(edge.labelMarginY) && !Number.isFinite(edge.labelX) && !Number.isFinite(edge.labelY)) {
-        addIssue(issues, 'warning', 'unanchored-edge-label', `edge "${edge.id || `${from}-${to}`}" has a label without explicit label offset`, {
+      // BUG G-3 fix: GraphScene.vue's edgeLabelOffset() computes a real,
+      // position-aware label offset whenever BOTH endpoints have a
+      // deterministic position (a grid col/row slot, or a pinned x/y) — that
+      // heuristic is not noise, so only warn when at least one endpoint's
+      // position is left to a force layout (cose/etc.), where the renderer
+      // has nothing to reason from and silently falls back to a static
+      // offset that can collide.
+      const hasExplicitOffset = Number.isFinite(edge.labelMarginX) || Number.isFinite(edge.labelMarginY)
+        || Number.isFinite(edge.labelX) || Number.isFinite(edge.labelY);
+      const heuristicCanAnchor = nodeHasResolvablePosition(scene, nodeById.get(from)) && nodeHasResolvablePosition(scene, nodeById.get(to));
+      if (edge.label && !hasExplicitOffset && !heuristicCanAnchor) {
+        addIssue(issues, 'warning', 'unanchored-edge-label', `edge "${edge.id || `${from}-${to}`}" has a label without explicit label offset, and no grid/pinned position for the renderer's auto-offset heuristic to anchor to`, {
           ref: `edges/${edge.id || `${from}-${to}`}`,
           suggestedPatch: [
             { op: 'add', path: `/scenes/${sceneIndex}/edges/${edges.indexOf(edge)}/labelMarginY`, value: -28 },
@@ -901,7 +974,7 @@ async function reviewDeck(args) {
   const { abs, spec } = readSpecFile(args.path);
   const validation = validateSpec(spec, { specPath: abs });
   const { value: checkViolations, output: checkOutput } = captureConsole(() => runCheck(spec));
-  const graphAudit = graphAuditSpec(spec);
+  const graphAudit = graphAuditSpec(spec, { specPath: abs });
   const narrationPlan = await narrationPlanForSpec(spec, abs);
   let browserAudit = null;
   if (args.browserAudit !== false) {
@@ -1525,7 +1598,7 @@ async function callTool(name, args = {}) {
 
     case 'slidey_graph_audit': {
       const { abs, spec } = readSpecFile(args.path);
-      return okResult({ path: relPath(abs), ...graphAuditSpec(spec) });
+      return okResult({ path: relPath(abs), ...graphAuditSpec(spec, { specPath: abs }) });
     }
 
     case 'slidey_contact_sheet':

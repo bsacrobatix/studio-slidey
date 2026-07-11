@@ -386,6 +386,93 @@ test('MCP review workbench tools report graph and narration issues', async (t) =
   assert.ok(reviewPayload.summary.graphWarnings > 0);
 });
 
+// BUG G-3 regression: GraphScene.vue's edgeLabelOffset() computes a real,
+// position-aware label offset whenever both of an edge's endpoints have a
+// deterministic position (a grid col/row slot, or a pinned x/y) — the static
+// audit used to warn "unanchored-edge-label" on every such edge anyway
+// (36/36/38 pure-noise warnings on the real gravytanker fragment scenes).
+// It should now warn only when at least one endpoint is left to a force
+// layout, where the renderer really does have nothing to anchor to.
+test('MCP graph audit only warns unanchored-edge-label when the renderer truly cannot anchor it', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-graph-audit-anchor-'));
+  fs.writeFileSync(path.join(root, 'deck.slidey.json'), JSON.stringify({
+    scenes: [
+      {
+        type: 'graph',
+        title: 'Grid-positioned (heuristic can anchor)',
+        layoutTemplate: 'lane-grid',
+        grid: { columns: 2, rows: 2, x: 0, y: 0, width: 200, height: 200 },
+        nodes: [
+          { id: 'a', label: 'A', col: 1, row: 1 },
+          { id: 'b', label: 'B', col: 2, row: 2 },
+        ],
+        edges: [{ id: 'a-b', from: 'a', to: 'b', label: 'no explicit offset' }],
+      },
+      {
+        type: 'graph',
+        title: 'Force layout (heuristic cannot anchor)',
+        nodes: [{ id: 'x', label: 'X' }, { id: 'y', label: 'Y' }],
+        edges: [{ id: 'x-y', from: 'x', to: 'y', label: 'no position at all' }],
+      },
+    ],
+  }, null, 2) + '\n');
+
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+  await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+
+  const res = await server.send('tools/call', {
+    name: 'slidey_graph_audit',
+    arguments: { path: 'deck.slidey.json' },
+  });
+  assert.ifError(res.error);
+  const payload = JSON.parse(res.result.content[0].text);
+  assert.ok(
+    !payload.scenes[0].issues.some((issue) => issue.kind === 'unanchored-edge-label'),
+    'grid-positioned edge should not be flagged: ' + JSON.stringify(payload.scenes[0].issues),
+  );
+  assert.ok(
+    payload.scenes[1].issues.some((issue) => issue.kind === 'unanchored-edge-label'),
+    'force-layout edge with no position info should still be flagged',
+  );
+});
+
+// BUG G-4 regression: projection-mode graph scenes (scene.projection +
+// scene.state) used to pass the static audit trivially even when the
+// projection file was missing/unparsable or `state` wasn't a real key —
+// the only guard was a runtime throw inside the browser renderer.
+test('MCP graph audit statically validates projection-mode scenes', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-graph-audit-projection-'));
+  fs.writeFileSync(path.join(root, 'proj.json'), JSON.stringify({
+    graphs: [{ id: 'g1', w: 100, h: 100, nodes: [{ id: 'a' }], edges: [] }],
+    states: { good: { graph: 'g1', status: {} } },
+  }, null, 2) + '\n');
+  fs.writeFileSync(path.join(root, 'deck.slidey.json'), JSON.stringify({
+    scenes: [
+      { type: 'graph', title: 'Good', projection: 'proj.json', state: 'good' },
+      { type: 'graph', title: 'Bad state', projection: 'proj.json', state: 'nope' },
+      { type: 'graph', title: 'Missing file', projection: 'missing.json', state: 'x' },
+      { type: 'graph', title: 'No state', projection: 'proj.json' },
+    ],
+  }, null, 2) + '\n');
+
+  const server = startServer(root);
+  t.after(() => server.child.kill());
+  await server.send('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+
+  const res = await server.send('tools/call', {
+    name: 'slidey_graph_audit',
+    arguments: { path: 'deck.slidey.json' },
+  });
+  assert.ifError(res.error);
+  const payload = JSON.parse(res.result.content[0].text);
+  assert.equal(payload.status, 'failed');
+  assert.deepEqual(payload.scenes[0].issues, []);
+  assert.ok(payload.scenes[1].issues.some((issue) => issue.severity === 'error' && issue.kind === 'missing-projection-state'));
+  assert.ok(payload.scenes[2].issues.some((issue) => issue.severity === 'error' && issue.kind === 'missing-projection-file'));
+  assert.ok(payload.scenes[3].issues.some((issue) => issue.severity === 'warning' && issue.kind === 'missing-projection-state'));
+});
+
 test('MCP diff deck summarizes text and graph semantic changes', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-diff-'));
   fs.writeFileSync(path.join(root, 'before.slidey.json'), JSON.stringify({
