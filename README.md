@@ -316,6 +316,51 @@ Markdown, code, diff patches, JSON/text/logs, image/image-compare, Mermaid graph
 source, MP4, and rrweb fixtures in one deck. Keep it updated whenever a new
 embed type, reference kind, plugin viewer, or host open behavior is added.
 
+### Inline links that open in a modal
+
+A `[text](target)` Markdown link inside prose is preserved through
+`slidey convert` (and can be hand-authored the same way) as
+`<a data-slidey-ref="target">text</a>` in the field's `*Html` companion —
+`bodyHtml`/`ledeHtml` on `narrative` scenes, `labelHtml`/`subHtml`/`linesHtml`
+on Markdown-imported `cards`, `introHtml`/`outroHtml`, `subtitleHtml`, and so
+on. Clicking one in the web viewer opens `target` in whichever surface
+already owns that kind — nothing new to configure per link, the routing is
+inferred from `target` itself:
+
+- **A path or URL** (`docs/design.md`, `qa-assets/mockup.html`,
+  `diagram.svg`, `demo.mp4`, ...) opens the reference viewer modal, exactly
+  like a `references[]` entry — same kind inference (Markdown, code, JSON,
+  diff, text, image, video), plus a new **`html` kind** for `.html`/`.htm`
+  files: it renders the page live in a sandboxed `<iframe>` instead of
+  showing it as source.
+- **`deck:<id>`** or **`deck:<id>#<sceneId>`** switches to another `library`
+  deck (and optionally a scene in it) — the same in-app navigation a `links`
+  entry drives, without opening a modal.
+- **A target ending in `.rrweb.json`** opens the rrweb session-replay modal.
+
+The modal dismisses via its close button, <kbd>Escape</kbd>, or a backdrop
+click — the same as every other reference modal — and the link is exempt
+from the deck's click-to-advance navigation, so clicking it never also
+changes slides.
+
+Static exports (PNG/PDF/MP4) never intercept the click — there's no click to
+intercept — so the link renders as a plain visible reference marker instead
+(an underline plus a small ↗ glyph after the text) rather than silently
+looking like ordinary prose. Set `meta.linkMarkers: false` on the spec to
+hide the glyph deck-wide (the underline stays either way).
+
+```json
+{
+  "type": "narrative",
+  "eyebrow": "Inline links",
+  "body": "See the design doc for details.",
+  "bodyHtml": "See the <a data-slidey-ref=\"docs/design.md\">design doc</a> for details."
+}
+```
+
+`examples/embed-qa.slidey.json` includes a slide exercising the Markdown-link
+and HTML-iframe cases end to end.
+
 ## Visualizing a kitsoki session trace
 
 A **`.jsonl` input is treated as a [kitsoki](https://github.com/) session trace**

@@ -44,6 +44,12 @@
       ]
     },
     {
+      "type": "narrative",
+      "eyebrow": "Inline links open a modal",
+      "body": "Click the underlined words: a Markdown link opens the reference viewer, and an HTML link renders in a sandboxed iframe instead of as source. Escape or a backdrop click dismisses either. A deck: target (see README) would switch slides instead of opening a modal.",
+      "bodyHtml": "Click the underlined words: a <a data-slidey-ref=\"qa-assets/notes.md\">Markdown link</a> opens the reference viewer, and an <a data-slidey-ref=\"qa-assets/mockup.html\">HTML link</a> renders in a sandboxed iframe instead of as source. Escape or a backdrop click dismisses either. A <code>deck:</code> target (see README) would switch slides instead of opening a modal."
+    },
+    {
       "type": "reference",
       "title": "Markdown section preview",
       "reference": {
