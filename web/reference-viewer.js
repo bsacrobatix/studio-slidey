@@ -3,8 +3,9 @@ import { escapeHTML, highlightJSON } from './format.js';
 const IMAGE_EXT = new Set(['.apng', '.avif', '.gif', '.jpg', '.jpeg', '.png', '.svg', '.webp']);
 const VIDEO_EXT = new Set(['.mp4', '.m4v', '.mov', '.webm']);
 const MARKDOWN_EXT = new Set(['.md', '.markdown', '.mdown']);
+const HTML_EXT = new Set(['.html', '.htm']);
 const CODE_EXT = new Set([
-  '.c', '.cc', '.cpp', '.cs', '.css', '.go', '.h', '.hpp', '.html', '.java', '.js',
+  '.c', '.cc', '.cpp', '.cs', '.css', '.go', '.h', '.hpp', '.java', '.js',
   '.jsx', '.kt', '.lua', '.mjs', '.php', '.py', '.rb', '.rs', '.sh', '.sql', '.swift',
   '.ts', '.tsx', '.vue', '.xml', '.yaml', '.yml',
 ]);
@@ -59,6 +60,7 @@ export function inferReferenceKind(ref = {}) {
   if (IMAGE_EXT.has(ext)) return 'image';
   if (VIDEO_EXT.has(ext)) return 'video';
   if (MARKDOWN_EXT.has(ext)) return 'markdown';
+  if (HTML_EXT.has(ext)) return 'html';
   if (DIFF_EXT.has(ext)) return 'diff';
   if (ext === '.json') return 'json';
   if (CODE_EXT.has(ext)) return 'code';

@@ -45,6 +45,7 @@ function onKey(e) {
   if (e.target.closest && e.target.closest('.slidey-editor')) return;
   if (e.target.closest && e.target.closest('.slidey-ref-backdrop')) return;
   if (e.target.closest && e.target.closest('[data-slidey-reference-trigger]')) return;
+  if (e.target.closest && e.target.closest('[data-slidey-ref]')) return;
   // On a video scene, Left/Right always move the SLIDE — even while the player's
   // scrub control or the <video> element has focus (which would otherwise seek
   // the media). preventDefault suppresses that default so only the deck advances.
@@ -78,6 +79,7 @@ function onClick(e) {
   if (e.target.closest('.slidey-reference-rail')) return;
   if (e.target.closest('.slidey-ref-backdrop')) return;
   if (e.target.closest('[data-slidey-reference-trigger]')) return;
+  if (e.target.closest('[data-slidey-ref]')) return;
   // Clicks on the video player / its transport (play, scrub, grab) must not also
   // advance the slide, so the controls are actually usable.
   if (e.target.closest('.video-cine-holder')) return;

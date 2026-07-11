@@ -27,6 +27,7 @@ import {
 } from '../narration.mjs';
 import { stepsForScene } from '../sceneSteps.mjs';
 import { normalizeReference, normalizeReferences } from '../reference-viewer.js';
+import { classifyInlineRefTarget } from '../inline-links.js';
 
 const deck = shallowRef(null);
 const currentSpec = ref(null);
@@ -1507,6 +1508,38 @@ function closeReference() {
   activeReference.value = null;
 }
 
+// Delegated click router for inline `<a data-slidey-ref="target">` links —
+// produced by `slidey convert` from Markdown `[text](target)`, or hand-
+// authored into any `*Html` field (bodyHtml, labelHtml, introHtml, ...).
+// Routes to whichever modal surface already owns that target kind: another
+// library deck ("deck:<id>" / "deck:<id>#<scene>"), the rrweb replay modal
+// (an `.rrweb.json` target), or the reference viewer modal (everything
+// else — image/video/markdown/code/json/diff/text/html, inferred the same
+// way `references[]` entries are). Static PNG/PDF/MP4 exports never dispatch
+// a real click here, so those renders simply show the anchor's visual
+// chrome (see `[data-slidey-ref]` in template.css) with no interaction —
+// the documented graceful-degradation default.
+function onInlineRefClick(e) {
+  const anchor = e.target && e.target.closest && e.target.closest('[data-slidey-ref]');
+  if (!anchor) return;
+  const parsed = classifyInlineRefTarget(anchor.getAttribute('data-slidey-ref'));
+  if (!parsed) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const label = anchor.textContent || '';
+  if (parsed.kind === 'deck') {
+    window.dispatchEvent(new CustomEvent('slidey:library-link', {
+      detail: { deck: parsed.deck, scene: parsed.scene || null, label },
+    }));
+  } else if (parsed.kind === 'rrweb') {
+    window.dispatchEvent(new CustomEvent('slidey:open-rrweb', {
+      detail: { ref: parsed.ref, title: label },
+    }));
+  } else {
+    openReference({ src: parsed.src, label });
+  }
+}
+
 function isLocalViewerHost() {
   const host = window.location.hostname;
   return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
@@ -1716,6 +1749,7 @@ onMounted(async () => {
   window.addEventListener('resize', fitScale);
   window.addEventListener('keydown', onWindowKeydown);
   window.addEventListener('click', onWindowClick);
+  window.addEventListener('click', onInlineRefClick);
   window.addEventListener('slidey:open-rrweb', onOpenRrweb);
   window.addEventListener('slidey:library-link', onLibraryLinkEvent);
   window.addEventListener('slidey:video-time', onVideoTime);
@@ -1810,6 +1844,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', fitScale);
   window.removeEventListener('keydown', onWindowKeydown);
   window.removeEventListener('click', onWindowClick);
+  window.removeEventListener('click', onInlineRefClick);
   window.removeEventListener('slidey:open-rrweb', onOpenRrweb);
   window.removeEventListener('slidey:library-link', onLibraryLinkEvent);
   window.removeEventListener('slidey:video-time', onVideoTime);

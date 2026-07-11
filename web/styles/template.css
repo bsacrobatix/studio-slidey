@@ -566,6 +566,29 @@ body.mode-pitch #pitch-stage:has(#transcript-region.active) { padding: 40px 64px
 /* --no-gaps mode: suppress fade-in so scenes cut hard with no blank frames */
 body.instant .reveal { transition: none !important; }
 
+/* Inline `[text](target)` links (see src/markdown.js, web/inline-links.js).
+   This chrome applies identically in the live web viewer AND in exported
+   PNG/PDF/MP4 snapshots (both entry points load this file) — only the web
+   viewer's click router (App.vue) actually opens anything, so the glyph is
+   the graceful-degradation signal in static renders that the run of text is
+   a reference. Set meta.linkMarkers:false on the spec to hide the glyph. */
+[data-slidey-ref] {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+[data-slidey-ref]::after {
+  content: "\2197";
+  display: inline-block;
+  margin-left: 0.15em;
+  font-size: 0.72em;
+  vertical-align: super;
+  opacity: 0.75;
+}
+body.slidey-no-link-markers [data-slidey-ref]::after { content: none; }
+
 /* ── Narrative ───────────────────────────────────────────────────────────── */
 #narrative-region { gap: 36px; max-width: 1500px; margin: 0 auto; text-align: center; }
 #narrative-eyebrow {

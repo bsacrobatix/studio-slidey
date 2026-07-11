@@ -71,6 +71,14 @@ watchEffect(() => {
   document.body.classList.toggle('mode-api', !pitch);
 });
 
+// Inline `[data-slidey-ref]` links (see markdown.js / inline-links.js) show a
+// small reference-marker glyph by default in every render mode — including
+// static PNG/PDF/MP4 exports, which mount this component directly with no
+// click routing at all. `meta.linkMarkers: false` hides that glyph deck-wide.
+watchEffect(() => {
+  document.body.classList.toggle('slidey-no-link-markers', store.meta && store.meta.linkMarkers === false);
+});
+
 const activeTheme = computed(() => themeConfig(store.meta && store.meta.theme, store.meta || {}));
 
 watchEffect(() => {

@@ -16,7 +16,7 @@ const refData = computed(() => props.reference || {});
 const kind = computed(() => refData.value.kind || 'file');
 const title = computed(() => refData.value.label || refData.value.src || 'Reference');
 const openLabel = computed(() => kind.value === 'diff' ? 'View Diff' : 'Open');
-const canFetchText = computed(() => !['image', 'video'].includes(kind.value));
+const canFetchText = computed(() => !['image', 'video', 'html'].includes(kind.value));
 const bodyHTML = computed(() => {
   if (kind.value === 'markdown') return renderMarkdownHTML(text.value);
   return renderTextHTML(text.value, kind.value, refData.value.lang || '');
@@ -98,6 +98,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
             class="slidey-ref-markdown"
             v-html="bodyHTML"
           ></article>
+          <iframe
+            v-else-if="kind === 'html'"
+            class="slidey-ref-html"
+            :src="refData.href"
+            :title="title"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+            referrerpolicy="no-referrer"
+          ></iframe>
           <pre
             v-else
             class="slidey-ref-pre slidey-ref-numbered"
