@@ -97,3 +97,19 @@ test('renderNumberedTextHTML highlights linked line ranges', async () => {
   assert.match(html, /data-line="2"><span class="slidey-ref-lineno">2<\/span>/);
   assert.match(html, /slidey-ref-line is-highlighted/);
 });
+
+test('inferReferenceKind maps .html/.htm to the html (iframe) kind, distinct from code', async () => {
+  const { inferReferenceKind } = await import('../web/reference-viewer.js');
+
+  assert.equal(inferReferenceKind({ src: 'demo/mockup.html' }), 'html');
+  assert.equal(inferReferenceKind({ src: 'demo/index.htm' }), 'html');
+  assert.equal(inferReferenceKind({ src: 'src/App.js' }), 'code');
+});
+
+test('normalizeReference infers html kind for a plain .html path', async () => {
+  const { normalizeReference } = await import('../web/reference-viewer.js');
+
+  const ref = normalizeReference('demo/mockup.html');
+  assert.equal(ref.kind, 'html');
+  assert.equal(ref.src, 'demo/mockup.html');
+});
