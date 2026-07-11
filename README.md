@@ -748,7 +748,37 @@ pixel positions:
 lanes across five columns. A custom `grid` overrides the shortcut. Nodes use
 one-indexed `col`/`row` slots plus optional `xOffset`/`yOffset` nudges for small
 semantic adjustments. Edge labels get deterministic geometry-based offsets and
-opaque backgrounds; use `labelMarginX`/`labelMarginY` only for exceptions.
+opaque backgrounds; use `labelMarginX`/`labelMarginY` only for exceptions. When
+two edges' auto-computed labels would land on top of each other (a common case
+in a dense lane grid, e.g. the crossing diagonals of a 2x2 node block), the
+renderer nudges the later one apart rather than stacking them — this only
+applies to the auto-offset heuristic, never to an explicit
+`labelMarginX`/`labelMarginY` you set yourself. The graph frame always fills
+its slide area regardless of `title`/`caption` length.
+
+##### `projection` input mode — render a graph-projection JSON instead of `nodes`/`edges`
+
+Use this to drive graph scenes from an existing graph-projection v1 JSON
+(lane/row-positioned nodes, a shared type `palette`, and named `states` that
+each select one graph plus a `done`/`fail`/`plan`/`dim`/`pulse` status
+overlay) instead of authoring `nodes`/`edges` per scene:
+
+```json
+{ "type": "graph",
+  "title": "Diligence: compliance question",
+  "projection": "gravytanker-portal.graph-projection.json",
+  "state": "complianceQuestion",
+  "caption": "The buyer's first question is always the crypto boundary." }
+```
+
+`projection` is a path relative to the spec file; `state` is a key in the
+projection's `states` map (or, as a fallback, a bare graph id with no status
+overlay). One scene renders one state — author one scene per state to build a
+reveal across several states of the same graph. There is no `path`/`focus`
+camera in this mode (`path`/`focus` are Cytoscape-only); the whole graph is
+shown at once, sized and centered to fill the frame at the graph's own aspect
+ratio. `slidey_graph_audit` statically checks that `projection` resolves to
+valid JSON and that `state` is a real key/graph id before you ever render.
 
 #### `mermaid` — Mermaid diagrams rendered as themed SVG
 
