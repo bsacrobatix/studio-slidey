@@ -21,7 +21,6 @@ catalog:
       - id: source-tour-proposal
         kind: document
         path: docs/proposals/extensible-tour-engine.md
-
 type_registry:
   - id: core-node
     schema: graph-type/v0
@@ -81,29 +80,124 @@ type_registry:
       - id: acceptance
         target_type: requirement
         cardinality: many
-
+  # Deliverable layer — POG materialization-first taxonomy (2026-07-11):
+  # deliverable nodes are SPECS of real evidence/functionality artifacts
+  # (decks, demos, docs, tutorials, test evidence); "work" is the act of
+  # materializing them, and a deliverable is REAL exactly when its latest
+  # materialize run's Starlark gate check passes. Status uses the derived
+  # EvidenceStatus vocabulary (missing | planned | in-progress | failed |
+  # verified | stale) — flipped by runs, never hand-curated. The deck type
+  # carries the full contract (producer story + type-provided assertion);
+  # demo/test-suite/doc/tutorial get their story bindings when this repo's
+  # POG onboarding wires kitsoki stories for them.
+  - id: deck
+    schema: graph-type/v0
+    extends: core-node
+    summary: A slidey deck generated from deterministic data; real when it is 1:1 with its evidence registries per the type-provided deck_matches_evidence assertion.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: demonstrates
+        target_type: feature
+        cardinality: many
+    artifact:
+      schema: slidey/artifact/deck/v0
+      format: json
+      presentation: media
+    materialize:
+      story: stories/render-deck
+      context_edges: [demonstrates]
+      params:
+        - {id: build_command, type: string, default: "node scripts/build-meme-gallery-deck.js"}
+      checks:
+        - id: gate
+          script: scripts/checks/deck_matches_evidence.star
+          inputs_field: check_inputs
+          capabilities: {fs: {read: ["examples/**", "data/**"]}}
+  - id: demo
+    schema: graph-type/v0
+    extends: core-node
+    summary: A recorded demonstration packet (tours + rrweb clips) of a use case; spec-only until its capture story is wired.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: demonstrates
+        target_type: use-case
+        cardinality: many
+    artifact:
+      schema: slidey/artifact/demo-packet/v0
+      format: json
+      presentation: media
+  - id: test-suite
+    schema: graph-type/v0
+    extends: core-node
+    summary: Recorded deterministic test/flow evidence; spec-only until its recorder story is wired.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: proves
+        target_type: requirement
+        cardinality: many
+    artifact:
+      schema: slidey/artifact/flow-evidence/v0
+      format: json
+      presentation: document
+  - id: doc
+    schema: graph-type/v0
+    extends: core-node
+    summary: A generated document deliverable; spec-only until its producer story is wired.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: documents
+        target_type: feature
+        cardinality: many
+    artifact:
+      schema: slidey/artifact/doc/v0
+      format: markdown
+      presentation: document
+  - id: tutorial
+    schema: graph-type/v0
+    extends: core-node
+    summary: A step-by-step walkthrough teaching a use case; spec-only until its producer story is wired.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: teaches
+        target_type: use-case
+        cardinality: many
+    artifact:
+      schema: slidey/artifact/doc/v0
+      format: markdown
+      presentation: document
+  # The structured write primitive (cribbed from the POG program catalog):
+  # system-authored writes — materialize write-backs, derived status flips —
+  # land as changeset nodes, so every catalog mutation has provenance.
+  - id: changeset
+    schema: graph-type/v0
+    extends: core-node
+    summary: A reviewable, structured edit to this catalog; content writes are changesets, lifecycle flips are direct writes with provenance.
 nodes:
   - schema: slidey/product/v0
     id: product-slidey
     title: slidey
     status: active
     visibility: public
-    summary: Deterministic, spec-driven declarative scene engine. A JSON spec
-      describes an ordered list of scenes; from that one spec slidey produces
-      video (MP4 with synthesized narration), vector PDF, and an interactive
-      web app — all sharing a single set of Vue 3 scene components so the
-      outputs never drift.
+    summary: Deterministic, spec-driven declarative scene engine. A JSON spec describes an ordered list of scenes; from that one spec slidey produces video (MP4 with synthesized narration), vector PDF, and an interactive web app — all sharing a single set of Vue 3 scene components so the outputs never drift.
     sources: [source-readme]
     edges: {}
-
   # --- features ------------------------------------------------------------
   - schema: slidey/feature/v0
     id: feature-video-render
     title: Narrated video rendering
     status: shipped
     visibility: public
-    summary: Headless Chrome screenshots each frame, edge-tts synthesizes
-      narration, ffmpeg muxes to out.mp4 — no LLM in the rendering loop.
+    summary: Headless Chrome screenshots each frame, edge-tts synthesizes narration, ffmpeg muxes to out.mp4 — no LLM in the rendering loop.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -114,8 +208,7 @@ nodes:
     title: Vector PDF export
     status: shipped
     visibility: public
-    summary: One vector page per reveal step; text and SVG stay selectable,
-      with an optional raster mode for slow-repainting viewers.
+    summary: One vector page per reveal step; text and SVG stay selectable, with an optional raster mode for slow-repainting viewers.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -126,8 +219,7 @@ nodes:
     title: Interactive web deck
     status: shipped
     visibility: public
-    summary: The same scene components navigated by keyboard/click, built by
-      Vite into a self-contained web app.
+    summary: The same scene components navigated by keyboard/click, built by Vite into a self-contained web app.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -138,8 +230,7 @@ nodes:
     title: Embed protocol (embed:view / embed:annotate / embed:pick)
     status: shipped
     visibility: public
-    summary: Host pages drive scope/step and anchor picking — the protocol
-      sassfully uses as its first real host integration.
+    summary: Host pages drive scope/step and anchor picking — the protocol sassfully uses as its first real host integration.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -149,8 +240,7 @@ nodes:
     title: Subset decks
     status: proposed
     visibility: public
-    summary: Mini-versions of a deck (e.g. a pitch cut) generated from the
-      same spec by selecting a scene subset.
+    summary: Mini-versions of a deck (e.g. a pitch cut) generated from the same spec by selecting a scene subset.
     sources: [source-ideas]
     edges:
       part_of: [product-slidey]
@@ -159,9 +249,7 @@ nodes:
     title: Deck-to-deck navigation
     status: proposed
     visibility: public
-    summary: An exec-summary deck links into detailed decks as a navigable
-      graph — nav history, TOC, and indexes so the user can always find the
-      way back up the chain.
+    summary: An exec-summary deck links into detailed decks as a navigable graph — nav history, TOC, and indexes so the user can always find the way back up the chain.
     sources: [source-ideas]
     edges:
       part_of: [product-slidey]
@@ -170,20 +258,17 @@ nodes:
     title: Extensible tour engine
     status: proposed
     visibility: public
-    summary: Proposal to generalize the guided-tour machinery
-      (docs/proposals/extensible-tour-engine.md).
+    summary: Proposal to generalize the guided-tour machinery (docs/proposals/extensible-tour-engine.md).
     sources: [source-tour-proposal]
     edges:
       part_of: [product-slidey]
-
   # --- requirements ----------------------------------------------------------
   - schema: slidey/requirement/v0
     id: req-single-spec-three-outputs
     title: One spec drives all three outputs without drift
     status: satisfied
     visibility: public
-    summary: Video, PDF, and web app must render from the same spec through
-      the same Vue scene components, so the outputs can never disagree.
+    summary: Video, PDF, and web app must render from the same spec through the same Vue scene components, so the outputs can never disagree.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -194,8 +279,7 @@ nodes:
     title: Same bundle + same spec produce byte-identical frames
     status: satisfied
     visibility: public
-    summary: Rendering is deterministic — re-rendering an unchanged spec with
-      an unchanged bundle yields byte-identical frames.
+    summary: Rendering is deterministic — re-rendering an unchanged spec with an unchanged bundle yields byte-identical frames.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -205,8 +289,7 @@ nodes:
     title: No LLM in the rendering loop
     status: satisfied
     visibility: public
-    summary: The render pipeline is fully deterministic; language models may
-      author specs but never participate in producing frames from them.
+    summary: The render pipeline is fully deterministic; language models may author specs but never participate in producing frames from them.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -216,21 +299,18 @@ nodes:
     title: PDF pages keep text and SVG selectable
     status: satisfied
     visibility: public
-    summary: The default PDF export is vector — one page per reveal step with
-      selectable text — with rasterization only as an explicit opt-in.
+    summary: The default PDF export is vector — one page per reveal step with selectable text — with rasterization only as an explicit opt-in.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
       required_by: [feature-vector-pdf]
-
   # --- use cases ---------------------------------------------------------------
   - schema: slidey/use-case/v0
     id: uc-demo-video-from-manifest
     title: Demo video generated from a declarative manifest
     status: supported
     visibility: public
-    summary: An author writes a JSON spec and gets a narrated MP4 — the POG
-      program's demo-evidence renderer path.
+    summary: An author writes a JSON spec and gets a narrated MP4 — the POG program's demo-evidence renderer path.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -241,8 +321,7 @@ nodes:
     title: Handout PDF from the same deck
     status: supported
     visibility: public
-    summary: The same spec produces a selectable, printable handout without a
-      separate authoring pass.
+    summary: The same spec produces a selectable, printable handout without a separate authoring pass.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -253,8 +332,7 @@ nodes:
     title: Presenter clicks through the interactive deck
     status: supported
     visibility: public
-    summary: Keyboard/click navigation over the same scenes used by video and
-      PDF output.
+    summary: Keyboard/click navigation over the same scenes used by video and PDF output.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -265,9 +343,115 @@ nodes:
     title: slidey hosts sassfully feedback via the embed protocol
     status: supported
     visibility: public
-    summary: A viewer anchors feedback at any visible point of a deck through
-      embed:view / embed:pick — sassfully's host-neutrality proof.
+    summary: A viewer anchors feedback at any visible point of a deck through embed:view / embed:pick — sassfully's host-neutrality proof.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
       exercises: [feature-embed-protocol]
+  # --- deliverables (evidence/functionality nodes) --------------------------
+  - schema: slidey/deck/v0
+    id: deck-meme-gallery
+    title: Meme gallery QA deck — 1:1 with the template registries
+    status: verified
+    visibility: public
+    summary: examples/meme-gallery-all.slidey.json, generated from the vendored memegen catalog plus curated extras (data/meme-templates.json + data/meme-templates.custom.json) by scripts/build-meme-gallery-deck.js. The canonical deck-from-deterministic-data deliverable — materializing re-runs the builder and the gate check asserts every registry template has exactly one scene (no missing coverage, no phantom or duplicate scenes).
+    check_inputs:
+      deck: examples/meme-gallery-all.slidey.json
+      registries:
+        - data/meme-templates.json
+        - data/meme-templates.custom.json
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      demonstrates: []
+    evidence:
+      - kind: doc
+        title: Generated gallery deck
+        path: examples/meme-gallery-all.slidey.json
+      - kind: doc
+        title: Template registry (memegen)
+        path: data/meme-templates.json
+      - kind: doc
+        title: Template registry (curated extras)
+        path: data/meme-templates.custom.json
+    materialization:
+      artifacts: []
+      checks:
+        - id: gate
+          ok: true
+          reproduce: kitsoki starlark run scripts/checks/deck_matches_evidence.star --inputs '{"deck":"examples/meme-gallery-all.slidey.json","registries":["data/meme-templates.json","data/meme-templates.custom.json"]}' --capabilities '{"fs":{"read":["examples/**","data/**"]}}'
+          script: scripts/checks/deck_matches_evidence.star
+          script_sha256: bc30a78320291e38f0e985dcfca68cf90c3f9cf53691173a277b0f45ebde82c3
+      job_id: 01KX7SQ2AJ6VBSJVB1ZFQTKHVN
+      stages:
+        - id: render
+          status: complete
+        - id: done
+          status: complete
+        - id: check:gate
+          status: complete
+      status: complete
+      story: stories/render-deck
+  - schema: slidey/demo/v0
+    id: demo-onboarding-tour
+    title: Recorded onboarding tour of a slidey deck
+    status: missing
+    visibility: public
+    summary: Spec of a captured demo packet walking uc-click-through-deck against a real rendered deck. A sample rrweb clip exists (examples/demos/sample-tour.rrweb.json) but no packet manifest has been captured for this spec yet — this node IS the backlog entry.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      demonstrates: [uc-click-through-deck]
+  - schema: slidey/test-suite/v0
+    id: ts-slidey-dev-story-flows
+    title: Recorded no-LLM dev-story flow run against this repo
+    status: failed
+    visibility: public
+    summary: The slidey half of the POG program's dev-story onboarding proof — a recorded `kitsoki test flows` run against .kitsoki/stories/slidey-dev. Honestly failing as of 2026-07-11 (the instance exits 2 against current kitsoki main; imports.core host declarations drifted). Evidence is recorded into the POG program repo (pog/evidence/flows-slidey.json there) by its recorder.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      proves: [req-no-llm-in-render]
+  - schema: slidey/tutorial/v0
+    id: tutorial-author-first-deck
+    title: Tutorial — author and render your first deck
+    status: missing
+    visibility: public
+    summary: Spec of a walkthrough from JSON spec to video/PDF/web outputs. Does not exist yet; sits in the derived work queue until materialized.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      teaches: [uc-demo-video-from-manifest]
+  - id: cs-1
+    operations:
+      - changes:
+          - after:
+              artifacts: []
+              checks:
+                - id: gate
+                  ok: true
+                  reproduce: kitsoki starlark run scripts/checks/deck_matches_evidence.star --inputs '{"deck":"examples/meme-gallery-all.slidey.json","registries":["data/meme-templates.json","data/meme-templates.custom.json"]}' --capabilities '{"fs":{"read":["examples/**","data/**"]}}'
+                  script: scripts/checks/deck_matches_evidence.star
+                  script_sha256: bc30a78320291e38f0e985dcfca68cf90c3f9cf53691173a277b0f45ebde82c3
+              job_id: 01KX7SQ2AJ6VBSJVB1ZFQTKHVN
+              stages:
+                - id: render
+                  status: complete
+                - id: done
+                  status: complete
+                - id: check:gate
+                  status: complete
+              status: complete
+              story: stories/render-deck
+            path:
+              - fields
+              - materialization
+        kind: modified
+        node: deck-meme-gallery
+    provenance:
+      job_id: 01KX7SQ2AJ6VBSJVB1ZFQTKHVN
+      story: stories/render-deck
+    schema: graph/changeset/v1
+    status: notified
+    title: 'materialize deck-meme-gallery: write back status "complete"'
+    visibility: internal
