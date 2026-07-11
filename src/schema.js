@@ -126,7 +126,7 @@ const REFERENCE = {
     path: { type: 'string', description: 'Alias for src, for tool-generated specs.' },
     href: { type: 'string', description: 'Alias for src, for externally generated refs.' },
     label: { type: 'string', description: 'Short label shown in the reference chip and modal title.' },
-    kind: { type: 'string', description: 'Optional media kind override such as markdown, code, diff, json, text, image, video, mermaid, graph, or file.' },
+    kind: { type: 'string', description: 'Optional media kind override such as markdown, code, diff, json, text, image, video, html, mermaid, graph, or file. "html" opens the file in a sandboxed iframe (a rendered page/demo/mockup, not source view).' },
     lang: { type: 'string', description: 'Optional language tag for code/text rendering.' },
     lines: {
       type: 'array',
@@ -153,7 +153,17 @@ COMMON.references = {
       },
     },
   ],
-  description: 'Files or media linked to this scene for inline inspection in the web viewer.',
+  description: 'Files or media linked to this scene for inline inspection in the web viewer. '
+    + 'Any `*Html` companion field (bodyHtml, ledeHtml, labelHtml, subHtml, introHtml, outroHtml, '
+    + 'linesHtml, subtitleHtml, ...) may additionally embed inline `<a data-slidey-ref="target">label</a>` '
+    + 'links — written as Markdown `[label](target)` when authoring/converting from Markdown, or by hand. '
+    + 'Clicking one in the web viewer opens `target` in whichever modal already owns that kind: '
+    + '"deck:<id>" or "deck:<id>#<sceneId>" switches to another library deck/scene; a target ending in '
+    + '".rrweb.json" opens the rrweb replay modal; anything else opens the reference viewer modal with its '
+    + 'kind inferred the same way references[] entries are (image, video, markdown, code, json, diff, text, '
+    + 'or html — html targets render in a sandboxed iframe). Static PNG/PDF/MP4 exports never intercept the '
+    + 'click, so the link renders as plain visible chrome (an underline plus a small ↗ marker); set '
+    + 'meta.linkMarkers:false to hide that marker deck-wide.',
 };
 
 const CARDS_ITEM = {
@@ -473,6 +483,11 @@ const SCHEMA = {
           enum: ['api', 'pitch'],
           description: '"api" enables request scenes with live/mock/playback HTTP; "pitch" is default slides mode',
         },
+        linkMarkers: {
+          type: 'boolean',
+          default: true,
+          description: 'Show a small reference-marker glyph after inline `[text](target)` / `<a data-slidey-ref>` links (see COMMON.references). Applies in the web viewer and in exported PNG/PDF/MP4 renders alike, since only the web viewer can actually open the target on click. Set false to hide the glyph deck-wide.',
+        },
         theme: {
           oneOf: [
             { type: 'string', description: 'Built-in theme name, e.g. "rose-pine-moon"' },
@@ -601,7 +616,9 @@ const SCHEMA = {
               type: { const: 'narrative' },
               eyebrow: { type: 'string', description: 'Category label at the top' },
               body: { type: 'string', description: 'Main prose paragraph' },
+              bodyHtml: { type: 'string', description: 'Sanitized inline HTML companion for body — emphasis/code plus `<a data-slidey-ref="target">` links (see COMMON.references). Set by `slidey convert` from Markdown; renders in place of body when present.' },
               lede: { type: 'string', description: 'Highlighted pull-quote / summary line' },
+              ledeHtml: { type: 'string', description: 'Sanitized inline HTML companion for lede, same convention as bodyHtml.' },
               ...COMMON,
             },
           },
