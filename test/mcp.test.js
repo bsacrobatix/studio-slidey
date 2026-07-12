@@ -160,7 +160,15 @@ test('MCP server exposes spec editing and validation over stdio', async (t) => {
   assert.ifError(patch.error);
   const patchPayload = JSON.parse(patch.result.content[0].text);
   assert.equal(patchPayload.ok, true);
-  assert.equal(patchPayload.spec.scenes[0].title, 'After');
+  assert.equal(patchPayload.sceneCount, 1);
+
+  const reread = await server.send('tools/call', {
+    name: 'slidey_read_spec',
+    arguments: { path: 'deck.json' },
+  });
+  assert.ifError(reread.error);
+  const rereadPayload = JSON.parse(reread.result.content[0].text);
+  assert.equal(rereadPayload.spec.scenes[0].title, 'After');
 
   const validate = await server.send('tools/call', {
     name: 'slidey_validate',
@@ -237,7 +245,7 @@ test('MCP slide-management tools add, duplicate, reorder, and remove', async (t)
   assert.ifError(add.error);
   const addPayload = JSON.parse(add.result.content[0].text);
   assert.equal(addPayload.sceneIndex, 1);
-  assert.equal(addPayload.spec.scenes.length, 3);
+  assert.equal(addPayload.sceneCount, 3);
 
   const duplicate = await server.send('tools/call', {
     name: 'slidey_duplicate_slide',
@@ -249,7 +257,7 @@ test('MCP slide-management tools add, duplicate, reorder, and remove', async (t)
   assert.ifError(duplicate.error);
   const duplicatePayload = JSON.parse(duplicate.result.content[0].text);
   assert.equal(duplicatePayload.sceneIndex, 1);
-  assert.equal(duplicatePayload.spec.scenes.length, 4);
+  assert.equal(duplicatePayload.sceneCount, 4);
 
   const reorder = await server.send('tools/call', {
     name: 'slidey_reorder_slide',
@@ -262,8 +270,16 @@ test('MCP slide-management tools add, duplicate, reorder, and remove', async (t)
   assert.ifError(reorder.error);
   const reorderPayload = JSON.parse(reorder.result.content[0].text);
   assert.equal(reorderPayload.targetIndex, 0);
-  assert.equal(reorderPayload.spec.scenes[0].type, 'code');
-  assert.equal(reorderPayload.spec.scenes.length, 4);
+  assert.equal(reorderPayload.sceneCount, 4);
+
+  const rereadAfterReorder = await server.send('tools/call', {
+    name: 'slidey_read_spec',
+    arguments: { path: 'deck.json' },
+  });
+  assert.ifError(rereadAfterReorder.error);
+  const rereadAfterReorderPayload = JSON.parse(rereadAfterReorder.result.content[0].text);
+  assert.equal(rereadAfterReorderPayload.spec.scenes[0].type, 'code');
+  assert.equal(rereadAfterReorderPayload.spec.scenes.length, 4);
 
   const remove = await server.send('tools/call', {
     name: 'slidey_remove_slide',
