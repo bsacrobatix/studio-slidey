@@ -177,6 +177,9 @@ type_registry:
         - default: scripts/record-flow-evidence.sh
           id: record_command
           type: string
+        - default: .
+          id: repo_root
+          type: string
       story: stories/record-flow-evidence
   - id: doc
     schema: graph-type/v0
@@ -472,9 +475,9 @@ nodes:
   - schema: slidey/demo/v0
     id: demo-onboarding-tour
     title: Recorded onboarding tour of a slidey deck
-    status: missing
+    status: verified
     visibility: public
-    summary: Spec of a captured demo packet walking uc-click-through-deck against a real rendered deck. A sample rrweb clip exists (examples/demos/sample-tour.rrweb.json) but no packet manifest has been captured for this spec yet — this node IS the backlog entry.
+    summary: 'Captured demo packet walking uc-click-through-deck against a real served deck: the interactive viewer (slidey examples/hello.slidey.json) opened and driven with keyboard navigation, captured via kitsoki record-tour.mjs / slidey capture --tours (the productized mechanism), doctor green. The old examples/demos/sample-tour.rrweb.json note is superseded by this packet.'
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -487,14 +490,11 @@ nodes:
       artifacts: []
       checks:
         - id: gate
-          ok: false
-          reasons:
-            - manifest stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json does not exist
-            - clip stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json does not exist (materialize this node to capture it)
+          ok: true
           reproduce: kitsoki starlark run scripts/checks/demo_packet.star --inputs '{"clips":["stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json"],"manifest":"stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json"}' --capabilities '{"fs":{"read":["stories/**",".artifacts/**"]}}'
           script: scripts/checks/demo_packet.star
-          script_sha256: 837c7aaf5f9f0bfd7d582cbbd7c0aad17eaa9996131532a003102b389695dc73
-      job_id: 01KXA84YSH3QE8BCHAH70964EV
+          script_sha256: 90381aa7894c2990252dac1f7ff18a02e9e8107ba5a3ad76c7dcd74db76b61ca
+      job_id: 01KXAAHNAQ47VYHF22M5Q5DVVE
       stages:
         - id: plan
           status: complete
@@ -505,15 +505,22 @@ nodes:
         - id: doctor
           status: complete
         - id: check:gate
-          status: failed
-      status: failed
+          status: complete
+      status: complete
       story: stories/demo-packet
+    evidence:
+      - kind: doc
+        path: stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json
+        title: Demo packet manifest — real capture of the interactive viewer (slidey serve mode) clicking through examples/hello.slidey.json
+      - kind: video
+        path: stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json
+        title: 'Journey clip (real rrweb capture: open viewer, arrow through scenes, step back and replay)'
   - schema: slidey/test-suite/v0
     id: ts-slidey-dev-story-flows
     title: Recorded no-LLM dev-story flow run against this repo
-    status: failed
+    status: verified
     visibility: public
-    summary: The slidey half of the POG program's dev-story onboarding proof — a recorded `kitsoki test flows` run against .kitsoki/stories/slidey-dev. Honestly failing as of 2026-07-11 (the instance exits 2 against current kitsoki main; imports.core host declarations drifted). Evidence is recorded into the POG program repo (pog/evidence/flows-slidey.json there) by its recorder.
+    summary: Recorded no-LLM flow run against this repo's flow-bearing story suite (stories/materialize-doc, materialize_brief flow) — green as of 2026-07-12, evidence recorded into THIS repo (pog/evidence/flows-slidey.json) by scripts/record-flow-evidence.sh. The imports.core host drift is fixed in .kitsoki/stories/slidey-dev/app.yaml (host.capsule_workspace). stories/render-deck has no flow fixtures yet; giving the exemplar deck story a recorded flow is follow-on work.
     sources: [source-readme]
     edges:
       part_of: [product-slidey]
@@ -526,26 +533,24 @@ nodes:
       artifacts: []
       checks:
         - id: gate
-          ok: false
-          reasons:
-            - 'slidey: no evidence recorded (run scripts/record-flow-evidence.sh)'
+          ok: true
           reproduce: kitsoki starlark run scripts/checks/flows_recorded.star --inputs '{"reports":[{"path":"pog/evidence/flows-slidey.json","repo":"slidey"}]}' --capabilities '{"fs":{"read":["pog/evidence/**"]}}'
           script: scripts/checks/flows_recorded.star
           script_sha256: 34aebdba4eff5b14944ecb1b124a758290e8011ff704d8cf9898aed1c71b9f90
-      job_id: 01KXA850YCFMR7ZFMYDWVXZZGA
+      job_id: 01KXAA78AY7WQVGP7YH1FXZAJN
       stages:
         - id: record
           status: complete
         - id: done
           status: complete
         - id: check:gate
-          status: failed
-      status: failed
+          status: complete
+      status: complete
       story: stories/record-flow-evidence
   - schema: slidey/tutorial/v0
     id: tutorial-author-first-deck
     title: Tutorial — author and render your first deck
-    status: missing
+    status: verified
     visibility: public
     summary: Spec of a walkthrough from JSON spec to video/PDF/web outputs. Does not exist yet; sits in the derived work queue until materialized.
     sources: [source-readme]
@@ -925,3 +930,221 @@ nodes:
     title: 'materialize tutorial-author-first-deck: write back status "complete"'
     visibility: internal
     applied_at: "2026-07-12T04:07:48Z"
+  - created_at: "2026-07-12T04:33:06Z"
+    id: cs-8
+    operations:
+      - changes:
+          - after: verified
+            before: missing
+            path:
+              - status
+        kind: modified
+        node: tutorial-author-first-deck
+    schema: graph/changeset/v1
+    status: notified
+    title: Flip tutorial-author-first-deck to verified (brief generated, artifact_exists re-judged ok)
+    visibility: internal
+    authorized_at: "2026-07-12T04:33:06Z"
+    applied_at: "2026-07-12T04:33:07Z"
+  - created_at: "2026-07-12T04:43:56Z"
+    id: cs-9
+    operations:
+      - changes:
+          - after:
+              checks:
+                - capabilities:
+                    fs:
+                      read:
+                        - pog/evidence/**
+                  id: gate
+                  inputs_field: check_inputs
+                  script: scripts/checks/flows_recorded.star
+              context_edges:
+                - proves
+              params:
+                - default: scripts/record-flow-evidence.sh
+                  id: record_command
+                  type: string
+                - default: .
+                  id: repo_root
+                  type: string
+              story: stories/record-flow-evidence
+            path:
+              - materialize
+        kind: registry_type_modified
+        node: test-suite
+    schema: graph/changeset/v1
+    status: notified
+    title: 'test-suite materialize: declare repo_root param (host.run cwd under federation)'
+    visibility: internal
+    authorized_at: "2026-07-12T04:43:56Z"
+    applied_at: "2026-07-12T04:43:56Z"
+  - authored_by: materialize
+    created_at: "2026-07-12T04:43:57Z"
+    id: cs-10
+    operations:
+      - changes:
+          - after:
+              artifacts: []
+              checks:
+                - id: gate
+                  ok: true
+                  reproduce: kitsoki starlark run scripts/checks/flows_recorded.star --inputs '{"reports":[{"path":"pog/evidence/flows-slidey.json","repo":"slidey"}]}' --capabilities '{"fs":{"read":["pog/evidence/**"]}}'
+                  script: scripts/checks/flows_recorded.star
+                  script_sha256: 34aebdba4eff5b14944ecb1b124a758290e8011ff704d8cf9898aed1c71b9f90
+              job_id: 01KXAA78AY7WQVGP7YH1FXZAJN
+              stages:
+                - id: record
+                  status: complete
+                - id: done
+                  status: complete
+                - id: check:gate
+                  status: complete
+              status: complete
+              story: stories/record-flow-evidence
+            before:
+              artifacts: []
+              checks:
+                - id: gate
+                  ok: false
+                  reasons:
+                    - 'slidey: no evidence recorded (run scripts/record-flow-evidence.sh)'
+                  reproduce: kitsoki starlark run scripts/checks/flows_recorded.star --inputs '{"reports":[{"path":"pog/evidence/flows-slidey.json","repo":"slidey"}]}' --capabilities '{"fs":{"read":["pog/evidence/**"]}}'
+                  script: scripts/checks/flows_recorded.star
+                  script_sha256: 34aebdba4eff5b14944ecb1b124a758290e8011ff704d8cf9898aed1c71b9f90
+              job_id: 01KXA850YCFMR7ZFMYDWVXZZGA
+              stages:
+                - id: record
+                  status: complete
+                - id: done
+                  status: complete
+                - id: check:gate
+                  status: failed
+              status: failed
+              story: stories/record-flow-evidence
+            path:
+              - fields
+              - materialization
+        kind: modified
+        node: ts-slidey-dev-story-flows
+    provenance:
+      job_id: 01KXAA78AY7WQVGP7YH1FXZAJN
+      story: stories/record-flow-evidence
+    schema: graph/changeset/v1
+    status: notified
+    title: 'materialize ts-slidey-dev-story-flows: write back status "complete"'
+    visibility: internal
+    applied_at: "2026-07-12T04:43:57Z"
+  - created_at: "2026-07-12T04:44:30Z"
+    id: cs-11
+    operations:
+      - changes:
+          - after: verified
+            before: failed
+            path:
+              - status
+          - after: Recorded no-LLM flow run against this repo's flow-bearing story suite (stories/materialize-doc, materialize_brief flow) — green as of 2026-07-12, evidence recorded into THIS repo (pog/evidence/flows-slidey.json) by scripts/record-flow-evidence.sh. The imports.core host drift is fixed in .kitsoki/stories/slidey-dev/app.yaml (host.capsule_workspace). stories/render-deck has no flow fixtures yet; giving the exemplar deck story a recorded flow is follow-on work.
+            path:
+              - summary
+        kind: modified
+        node: ts-slidey-dev-story-flows
+    schema: graph/changeset/v1
+    status: notified
+    title: 'ts-slidey-dev-story-flows: verified — imports.core drift fixed, flow-bearing suite records green (0.2)'
+    visibility: internal
+    authorized_at: "2026-07-12T04:44:30Z"
+    applied_at: "2026-07-12T04:44:30Z"
+  - authored_by: materialize
+    created_at: "2026-07-12T04:49:39Z"
+    id: cs-12
+    operations:
+      - changes:
+          - after:
+              artifacts: []
+              checks:
+                - id: gate
+                  ok: true
+                  reproduce: kitsoki starlark run scripts/checks/demo_packet.star --inputs '{"clips":["stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json"],"manifest":"stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json"}' --capabilities '{"fs":{"read":["stories/**",".artifacts/**"]}}'
+                  script: scripts/checks/demo_packet.star
+                  script_sha256: 90381aa7894c2990252dac1f7ff18a02e9e8107ba5a3ad76c7dcd74db76b61ca
+              job_id: 01KXAAHNAQ47VYHF22M5Q5DVVE
+              stages:
+                - id: plan
+                  status: complete
+                - id: launch
+                  status: complete
+                - id: capture
+                  status: complete
+                - id: doctor
+                  status: complete
+                - id: check:gate
+                  status: complete
+              status: complete
+              story: stories/demo-packet
+            before:
+              artifacts: []
+              checks:
+                - id: gate
+                  ok: false
+                  reasons:
+                    - manifest stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json does not exist
+                    - clip stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json does not exist (materialize this node to capture it)
+                  reproduce: kitsoki starlark run scripts/checks/demo_packet.star --inputs '{"clips":["stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json"],"manifest":"stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json"}' --capabilities '{"fs":{"read":["stories/**",".artifacts/**"]}}'
+                  script: scripts/checks/demo_packet.star
+                  script_sha256: 837c7aaf5f9f0bfd7d582cbbd7c0aad17eaa9996131532a003102b389695dc73
+              job_id: 01KXA84YSH3QE8BCHAH70964EV
+              stages:
+                - id: plan
+                  status: complete
+                - id: launch
+                  status: complete
+                - id: capture
+                  status: complete
+                - id: doctor
+                  status: complete
+                - id: check:gate
+                  status: failed
+              status: failed
+              story: stories/demo-packet
+            path:
+              - fields
+              - materialization
+        kind: modified
+        node: demo-onboarding-tour
+    provenance:
+      job_id: 01KXAAHNAQ47VYHF22M5Q5DVVE
+      story: stories/demo-packet
+    schema: graph/changeset/v1
+    status: notified
+    title: 'materialize demo-onboarding-tour: write back status "complete"'
+    visibility: internal
+    applied_at: "2026-07-12T04:49:39Z"
+  - created_at: "2026-07-12T04:49:39Z"
+    id: cs-13
+    operations:
+      - changes:
+          - after: verified
+            before: missing
+            path:
+              - status
+          - after:
+              - kind: doc
+                path: stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json
+                title: Demo packet manifest — real capture of the interactive viewer (slidey serve mode) clicking through examples/hello.slidey.json
+              - kind: video
+                path: stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json
+                title: 'Journey clip (real rrweb capture: open viewer, arrow through scenes, step back and replay)'
+            path:
+              - fields
+              - evidence
+          - after: 'Captured demo packet walking uc-click-through-deck against a real served deck: the interactive viewer (slidey examples/hello.slidey.json) opened and driven with keyboard navigation, captured via kitsoki record-tour.mjs / slidey capture --tours (the productized mechanism), doctor green. The old examples/demos/sample-tour.rrweb.json note is superseded by this packet.'
+            path:
+              - summary
+        kind: modified
+        node: demo-onboarding-tour
+    schema: graph/changeset/v1
+    status: notified
+    title: 'demo-onboarding-tour: verified — real captured packet of the interactive viewer (Stage 3)'
+    visibility: internal
+    authorized_at: "2026-07-12T04:49:39Z"
+    applied_at: "2026-07-12T04:49:39Z"
