@@ -465,7 +465,7 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
       try {
         const bytes = fs.readFileSync(abs);
         const mtimeMs = fs.statSync(abs).mtimeMs;
-        let { spec, rrweb } = /\.jsonl$/i.test(abs)
+        let { spec, rrweb, libraryFileErrors } = /\.jsonl$/i.test(abs)
           ? { spec: require('./trace').buildSpecFromFile(abs), rrweb: false }
           : readSpecOrRrwebInfo(abs);
         if (locale) spec = applyLocale(spec, locale, { specPath: abs });
@@ -481,6 +481,10 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
           // (e.g. the AI editing the same file) can't be silently clobbered.
           version: versionOf(bytes),
           editable,
+          // Surface a broken/missing `library.decks[].src` child-deck file
+          // reference instead of silently resolving that deck to zero scenes
+          // (see inlineChildDeckFiles in src/collections.js).
+          ...(libraryFileErrors && libraryFileErrors.length ? { libraryFileErrors } : {}),
         });
       } catch (err) {
         return sendJSON(res, 400, { error: String(err.message || err) });

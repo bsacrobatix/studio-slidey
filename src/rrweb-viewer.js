@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { inlineChildDeckFiles } = require('./collections');
 
 const RRWEB_NAME = /(?:^rrweb|\.rrweb)\.json$/i;
 
@@ -90,7 +91,13 @@ function readSpecOrRrwebInfo(filePath) {
   if (isRrwebFile(filePath)) {
     return { spec: rrwebSpecForFile(filePath, raw), rrweb: true };
   }
-  if (!looksLikeRrwebPayload(raw)) return { spec: raw, rrweb: false };
+  if (!looksLikeRrwebPayload(raw)) {
+    // Inline any `library.decks[].src`/`file`/`path` child-deck FILE references
+    // (a master deck composing sibling `.slidey.json` files) before anything
+    // downstream (validate/resolveDeckSpec/the viewer tree) ever sees the spec.
+    const { spec, errors } = inlineChildDeckFiles(raw, { specPath: filePath });
+    return { spec, rrweb: false, libraryFileErrors: errors };
+  }
   return { spec: rrwebSpecForFile(filePath, raw), rrweb: true };
 }
 

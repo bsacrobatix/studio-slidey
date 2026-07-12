@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
 const SOURCE_DECK_ID = '__source';
 
 function normalizeDeckId(id) {
@@ -144,6 +147,113 @@ function normalizeDeckDefinitions(spec) {
     addDeck(raw, SOURCE_DECK_ID);
   }
   return decks;
+}
+
+const CHILD_DECK_FILE_KEYS = ['src', 'file', 'path'];
+
+function childDeckFileRef(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  for (const key of CHILD_DECK_FILE_KEYS) {
+    const value = raw[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+/**
+ * Recursively inline `library.decks[].src` (aliases `file`/`path`) child-deck
+ * FILE references into `spec.library.decks[]`, so a directory of decks can be
+ * composed as one master `.slidey.json` + N sibling child `.slidey.json`
+ * files instead of pasting every child's scenes into the master. Node-only
+ * (reads the filesystem) — call it once, right after a spec is parsed from
+ * disk, BEFORE resolveDeckSpec/normalizeDeckDefinitions/validateSpec ever see
+ * it. Everything downstream then treats the referenced decks exactly like
+ * hand-authored inline hierarchy decks; the browser never needs its own copy
+ * of this because the server always resolves file refs before a spec is
+ * served to the viewer (see src/serve.js and src/rrweb-viewer.js).
+ *
+ * A referenced file is read as an ordinary slidey spec: its top-level
+ * `scenes[]` become this deck's local (hierarchy) scenes (unless the
+ * referencing entry already has its own inline `scenes[]`, which wins), and
+ * if the referenced file ALSO has a `library.decks[]`, those become this
+ * deck's `children` (appended after any explicit `children` already on the
+ * referencing entry) — so a child file can itself define grandchildren,
+ * inline or via its own further `src` refs.
+ *
+ * Paths resolve relative to the file that DECLARES the reference: a
+ * first-level child resolves relative to the master, a grandchild resolves
+ * relative to ITS OWN file, not the master — ordinary relative-path/import
+ * semantics for a directory of sibling decks.
+ *
+ * Returns `{ spec, errors }`; `spec` is always returned (best-effort with a
+ * broken/missing ref left un-inlined) so callers can still surface `errors`
+ * via the same warning/error channel as other collection problems.
+ */
+function inlineChildDeckFiles(spec, opts = {}) {
+  const errors = [];
+  if (!spec || typeof spec !== 'object' || !spec.library || typeof spec.library !== 'object') {
+    return { spec, errors };
+  }
+
+  const specPath = opts.specPath ? path.resolve(String(opts.specPath)) : null;
+  const baseDir = specPath ? path.dirname(specPath) : path.resolve(String(opts.baseDir || process.cwd()));
+  const readFileFn = opts.readFile || ((abs) => fs.readFileSync(abs, 'utf8'));
+  const existsFn = opts.exists || ((abs) => fs.existsSync(abs));
+  const ancestry = new Set(specPath ? [specPath] : []);
+
+  function resolveEntry(raw, dir, deckIdForErrors) {
+    if (!raw || typeof raw !== 'object') return raw;
+    const ref = childDeckFileRef(raw);
+    const node = { ...raw };
+    const id = node.id != null ? String(node.id) : (deckIdForErrors != null ? String(deckIdForErrors) : '?');
+    let childDir = dir;
+    let fileChildren = [];
+
+    if (ref) {
+      const abs = path.resolve(dir, ref);
+      if (ancestry.has(abs)) {
+        errors.push(`library deck "${id}": circular child-deck reference "${ref}"`);
+      } else if (!existsFn(abs)) {
+        errors.push(`library deck "${id}": child deck file not found: ${ref} (resolved ${abs})`);
+      } else {
+        let childSpec = null;
+        try {
+          childSpec = JSON.parse(readFileFn(abs));
+        } catch (err) {
+          errors.push(`library deck "${id}": failed to parse child deck file ${ref}: ${err.message}`);
+        }
+        if (childSpec) {
+          ancestry.add(abs);
+          childDir = path.dirname(abs);
+          if (!Array.isArray(node.scenes) && Array.isArray(childSpec.scenes)) {
+            node.scenes = childSpec.scenes;
+          }
+          if (node.title == null && childSpec.meta && childSpec.meta.title) node.title = childSpec.meta.title;
+          if (node.description == null && childSpec.meta && childSpec.meta.description) node.description = childSpec.meta.description;
+          if (!node.deckType && !node.kind && !node.role) node.deckType = 'hierarchy';
+
+          const grandRaw = childSpec.library && typeof childSpec.library === 'object' ? childSpec.library.decks : null;
+          fileChildren = rawDeckDefinitions(grandRaw).map(gc => resolveEntry(gc, childDir, gc && gc.id));
+          ancestry.delete(abs);
+        }
+      }
+    }
+
+    // Resolve each side (explicit `children` already on this entry, plus any
+    // grandchildren pulled in from a `src`-referenced file) EXACTLY ONCE —
+    // `explicitChildren` is read from the pristine copy of `raw.children`
+    // (nothing above this point has touched `node.children` yet), so there is
+    // no double-recursion into the file-loaded grandchildren.
+    const explicitChildren = rawDeckDefinitions(node.children).map(child => resolveEntry(child, childDir, child && child.id));
+    if (explicitChildren.length || fileChildren.length || node.children != null) {
+      node.children = [...explicitChildren, ...fileChildren];
+    }
+    return node;
+  }
+
+  const decks = rawDeckDefinitions(spec.library.decks).map(raw => resolveEntry(raw, baseDir, raw && raw.id));
+  const nextSpec = { ...spec, library: { ...spec.library, decks } };
+  return { spec: nextSpec, errors };
 }
 
 function normalizeSections(spec) {
@@ -628,6 +738,7 @@ function linksForScene(scene, resolved) {
 module.exports = {
   SOURCE_DECK_ID,
   cloneJson,
+  inlineChildDeckFiles,
   isCollectionSpec,
   linkTargetForItem,
   normalizeDeckDefinitions,

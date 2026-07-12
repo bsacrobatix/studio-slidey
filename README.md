@@ -214,6 +214,64 @@ counts. Summary scenes can link to deeper decks with
 `links: [{ "label": "Open Animals", "deck": "animals" }]`, or by matching
 `scene.section` to `library.sections[].deck`.
 
+#### A master deck composing sibling deck FILES
+
+A large stack (one master + several child decks, each maintained by a
+different author) doesn't have to be one giant inlined JSON file. A
+`library.decks[]` entry can point at another `.slidey.json` file with `src`
+(aliases `file`/`path`, resolved relative to the file that declares the
+reference) instead of an inline `scenes[]` array. The referenced file is an
+ordinary, independently-openable/validatable slidey spec — its top-level
+`scenes[]` become that deck's local (hierarchy) scenes, and if it ALSO has its
+own `library.decks[]`, those become nested grandchildren:
+
+```json
+{
+  "meta": { "title": "Constructor Studio stack", "mode": "pitch" },
+  "library": {
+    "sourceTitle": "Full stack deck",
+    "decks": [
+      { "id": "pog", "deckType": "hierarchy", "title": "POG deep dive", "src": "pog-deck.slidey.json" },
+      { "id": "kitsoki", "deckType": "hierarchy", "title": "Kitsoki deep dive", "src": "kitsoki-deck.slidey.json" },
+      {
+        "id": "pitch-15min",
+        "deckType": "subset",
+        "title": "15-minute pitch cut",
+        "scenes": [
+          "root-intro",
+          { "fromDeck": "pog", "ref": "pog-title" },
+          { "fromDeck": "pog", "ref": "pog-detail", "narration": "Custom VO for this cut", "overrides": { "eyebrow": "POG, in one slide" } },
+          { "fromDeck": "kitsoki", "ref": "kit-title" },
+          "root-close"
+        ]
+      }
+    ]
+  },
+  "scenes": [
+    { "id": "root-intro", "type": "title", "title": "Constructor Studio", "tags": ["pitch"] },
+    { "id": "root-close", "type": "narrative", "eyebrow": "Thank you", "body": "Questions?", "tags": ["pitch"] }
+  ]
+}
+```
+
+`pog-deck.slidey.json` and `kitsoki-deck.slidey.json` sit next to the master
+and are themselves plain `{ "meta": {...}, "scenes": [...] }` specs (openable
+and `slidey validate`-able on their own). The **`pitch-15min` subset selects
+specific slides across BOTH children in a bespoke order**, with a per-scene
+narration and title (`overrides`) override on top of the file-loaded scene —
+the same explicit `{fromDeck, ref, overrides}` ref form works whether the
+origin deck's scenes came from an inline `scenes[]` or from `src`. `--deck`,
+`--list`, `--estimate`, PNG/PDF/MP4 render, `bundle`, and the viewer's
+`/api/tree`+`/api/spec` all resolve the file-loaded children transparently —
+see `test/fixtures/deck-stack/` for a complete, runnable 3-file example and
+`test/collections-file-refs.test.js` for the coverage (CLI validate/list/
+estimate/render, viewer server, node/browser resolver parity, missing-file and
+circular-reference handling).
+
+A `select`-based (tag) subset cannot reorder or override per-scene — use the
+explicit `scenes: [...]` ref form (as above) whenever a pitch cut needs a
+specific order or per-scene copy/VO changes.
+
 ### Install as a CLI & open a folder/file
 
 ```sh

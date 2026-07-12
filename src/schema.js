@@ -52,6 +52,9 @@ const LIBRARY_DECK = {
     description: { type: 'string' },
     parent: { type: 'string', description: 'Parent deck id for hierarchical navigation and sidebar nesting' },
     meta: { type: 'object', additionalProperties: true, description: 'Metadata merged into the resolved deck' },
+    src: { type: 'string', description: 'Path (relative to the file that declares this deck) to another .slidey.json child-deck file; its top-level scenes[] become this deck\'s local scenes, and its own library.decks[] (if any) become nested children. Lets a directory of decks compose one master + sibling files instead of inlining every child.' },
+    file: { type: 'string', description: 'Alias for src' },
+    path: { type: 'string', description: 'Alias for src' },
     scenes: {
       type: 'array',
       description: 'For subset decks: synced scene refs by id/index or objects like {fromDeck, ref, overrides}; refs can only target the subset parent deck or descendants. For hierarchy decks: inline scene objects that belong to this child deck.',

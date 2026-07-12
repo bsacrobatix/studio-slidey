@@ -27,7 +27,7 @@ const { framesToVideo }     = require('./assembler');
 const { generateAll: generateNarration, applyPronunciations, edgeTtsAvailable, hasNarrationText, DEFAULT_VOICE } = require('./narration');
 const { estimateBoundaries } = require('./timing');
 const { validateSpec }       = require('./validate');
-const { resolveDeckSpec }    = require('./collections');
+const { resolveDeckSpec, inlineChildDeckFiles } = require('./collections');
 const { attachRuntimeThemePacks, stripRuntimeThemePacks } = require('./theme-packs');
 const { applyLocale, attachLocaleRef, extractLocale, readDeck } = require('./localization');
 
@@ -314,6 +314,15 @@ if (args[0] === 'validate') {
     console.error(`[slidey] ERROR: ${absIn} is not valid JSON: ${err.message}`);
     process.exit(1);
   }
+  {
+    const inlined = inlineChildDeckFiles(spec, { specPath: absIn });
+    spec = inlined.spec;
+    if (inlined.errors.length) {
+      console.error(`[slidey] INVALID: ${inlined.errors.length} child-deck file problem(s) in ${absIn}`);
+      for (const line of inlined.errors) console.error(`  ${line}`);
+      process.exit(1);
+    }
+  }
   if (localeOpt) {
     try {
       spec = applyLocale(spec, localeOpt, { specPath: absIn });
@@ -366,7 +375,16 @@ if (args[0] === 'bundle') {
   let localizedBundleSpec = null;
   if (localeOpt) {
     try {
-      localizedBundleSpec = applyLocale(JSON.parse(fs.readFileSync(absIn, 'utf8')), localeOpt, { specPath: absIn });
+      // Inline `library.decks[].src` child-deck files BEFORE writing the
+      // localized copy to a temp dir: once inlined, the copy is fully
+      // self-contained and needs no relative-path resolution of its own.
+      const inlined = inlineChildDeckFiles(JSON.parse(fs.readFileSync(absIn, 'utf8')), { specPath: absIn });
+      if (inlined.errors.length) {
+        console.error(`[slidey] ERROR: ${absIn} has child-deck file problems:`);
+        for (const line of inlined.errors) console.error(`  ${line}`);
+        process.exit(1);
+      }
+      localizedBundleSpec = applyLocale(inlined.spec, localeOpt, { specPath: absIn });
       localizedBundleDir = mkdtemp('slidey-locale-');
       bundleInput = path.join(localizedBundleDir, path.basename(absIn));
       fs.writeFileSync(bundleInput, JSON.stringify(stripRuntimeThemePacks(localizedBundleSpec), null, 2) + '\n', 'utf8');
@@ -1096,6 +1114,13 @@ async function main() {
       spec = JSON.parse(fs.readFileSync(absInput, 'utf-8'));
     } catch (err) {
       console.error(`[slidey] ERROR: failed to parse JSON: ${err.message}`);
+      process.exit(1);
+    }
+    const inlined = inlineChildDeckFiles(spec, { specPath: absInput });
+    spec = inlined.spec;
+    if (inlined.errors.length) {
+      console.error(`[slidey] ERROR: ${absInput} has child-deck file problems:`);
+      for (const line of inlined.errors) console.error(`  ${line}`);
       process.exit(1);
     }
   }
