@@ -29,17 +29,50 @@ function getValidate() {
 function validateSpec(spec, opts = {}) {
   const validate = getValidate();
   const valid = validate(spec);
+  // Capture the root pass's errors BEFORE the library-deck pass below reuses
+  // the same compiled validator (each Ajv run replaces `validate.errors`).
+  const rootErrors = validate.errors;
+  const deckScenes = validateLibraryDeckScenes(spec);
   const semantic = validateSemantics(spec, opts);
-  if (valid && semantic.errors.length === 0) {
+  if (valid && deckScenes.count === 0 && semantic.errors.length === 0) {
     return { valid: true, errors: [], warnings: semantic.warnings, count: 0 };
   }
-  const { lines, count } = formatErrors(validate.errors, spec);
+  const { lines, count } = formatErrors(rootErrors, spec);
   return {
     valid: false,
-    errors: [...lines, ...semantic.errors],
+    errors: [...lines, ...deckScenes.errors, ...semantic.errors],
     warnings: semantic.warnings,
-    count: count + semantic.errors.length,
+    count: count + deckScenes.count + semantic.errors.length,
   };
+}
+
+// The root JSON-Schema pass only shallow-checks `library.decks[].scenes[]`
+// (the deck schema allows arbitrary scene-shaped objects so subset REFS and
+// inline scenes can share the field). A hierarchy deck's inline scenes are
+// real scenes that render exactly like top-level scenes[], so validate each
+// deck's local scene list against the same schema by wrapping it in a
+// synthetic `{ scenes }` spec, and rewrite the error paths to name the deck
+// (`library.decks["<id>"].scenes[<i>]`). Subset/view decks are skipped: their
+// scenes[] entries are id/index/{ref,fromDeck} REFERENCES to scenes that are
+// already validated where they live (and resolveDeckSpec/validateLibrary
+// already reports broken refs) — re-validating them here would double-report.
+function validateLibraryDeckScenes(spec) {
+  const out = { errors: [], count: 0 };
+  if (!spec || !spec.library || typeof spec.library !== 'object') return out;
+  const validate = getValidate();
+  for (const deck of normalizeDeckDefinitions(spec)) {
+    if (deck.source || deck.deckType !== 'hierarchy') continue;
+    const scenes = deck.raw && Array.isArray(deck.raw.scenes) ? deck.raw.scenes : [];
+    if (!scenes.length) continue;
+    const synthetic = { scenes };
+    if (validate(synthetic)) continue;
+    const { lines, count } = formatErrors(validate.errors, synthetic, {
+      sceneLabel: (idx) => `library.decks["${deck.id}"].scenes[${idx}]`,
+    });
+    out.errors.push(...lines);
+    out.count += count;
+  }
+  return out;
 }
 
 function validateSemantics(spec, opts = {}) {
@@ -217,7 +250,11 @@ function imageSize(file) {
 
 // ── Error formatting ────────────────────────────────────────────────────────
 
-function formatErrors(rawErrors, spec) {
+function formatErrors(rawErrors, spec, opts = {}) {
+  // `sceneLabel(idx)` names a scene block in the output; the default is the
+  // top-level "Scene N", validateLibraryDeckScenes passes a deck-qualified
+  // label like `library.decks["exec"].scenes[3]`.
+  const sceneLabel = opts.sceneLabel || ((idx) => `Scene ${idx}`);
   // Split errors into scene-level and global
   const byScene = {};
   const global = [];
@@ -250,7 +287,7 @@ function formatErrors(rawErrors, spec) {
     const typeLabel = scene && scene.type ? ` — type: "${scene.type}"` : '';
     const unknownType = scene && scene.type && !VALID_TYPES.includes(scene.type);
 
-    lines.push(`\n  Scene ${idx}${typeLabel}:`);
+    lines.push(`\n  ${sceneLabel(idx)}${typeLabel}:`);
 
     if (unknownType) {
       lines.push(`    • unknown type "${scene.type}". Valid types: ${VALID_TYPES.join(', ')}`);
