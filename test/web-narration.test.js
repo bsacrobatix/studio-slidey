@@ -18,6 +18,57 @@ test('viewer narration extracts whole-slide and timed video cue text', async () 
   ]);
 });
 
+test('viewer narration aligns step cues to the reveal they describe (qa without an intro sentence)', async () => {
+  const { stepNarrationCues } = await import('../web/narration.mjs');
+  // No sentence "for the title": the old proportional spread put the question
+  // text on the title step and the answer on the question step — every cue
+  // read the NEXT reveal's content. Content alignment must keep them together.
+  const cues = stepNarrationCues({
+    type: 'cards',
+    variant: 'qa',
+    title: 'Second question',
+    question: 'What software makes money?',
+    answer: ['Software that meets a real market need.'],
+    narration: 'And what software makes money? Software that meets a real market need. Great software nobody needs stays a hobby.',
+  }, ['cards_title', 'cards_item_0', 'cards_item_1']);
+
+  assert.equal(cues[0], '');
+  assert.equal(cues[1], 'And what software makes money?');
+  assert.match(cues[2], /^Software that meets a real market need\./);
+});
+
+test('viewer narration keeps one-sentence-per-card decks aligned one-to-one', async () => {
+  const { stepNarrationCues } = await import('../web/narration.mjs');
+  const cues = stepNarrationCues({
+    type: 'cards',
+    variant: 'grid',
+    title: 'Components',
+    cards: [
+      { label: 'Gears', sub: 'application platform' },
+      { label: 'Frontx', sub: 'plugin extensibility framework' },
+    ],
+    narration: 'Two components under the hood. Gears is the application platform. Frontx is the plugin extensibility framework.',
+  }, ['cards_title', 'cards_item_0', 'cards_item_1']);
+
+  assert.deepEqual(cues, [
+    'Two components under the hood.',
+    'Gears is the application platform.',
+    'Frontx is the plugin extensibility framework.',
+  ]);
+});
+
+test('viewer narration falls back to proportional spread when steps expose no content', async () => {
+  const { stepNarrationCues } = await import('../web/narration.mjs');
+  const cues = stepNarrationCues({
+    type: 'chart',
+    variant: 'quadrant',
+    narration: 'First point. Second point.',
+  }, ['chart_title', 'chart_frame', 'chart_series_0', 'chart_caption']);
+
+  assert.deepEqual(cues.filter(Boolean), ['First point.', 'Second point.']);
+  assert.equal(cues[0], 'First point.');
+});
+
 test('viewer narration maps graph focus steps to graph path notes', async () => {
   const { stepNarrationCues } = await import('../web/narration.mjs');
   const cues = stepNarrationCues({
