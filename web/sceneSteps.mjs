@@ -31,7 +31,11 @@ export function stepsForScene(scene) {
   const s = scene || {};
   // `instant: true` — reveal the whole scene at once (no progressive build, no
   // title-only first page). One PDF page / one nav advance for the entire scene.
-  if (s.instant && s.type !== 'title') return ['reveal_all'];
+  // `continues: true` — a seamless cut into this scene from the previous one
+  // (video renderer skips the preceding inter_scene gap); in the web viewer /
+  // PDF the same flag means the scene arrives fully assembled, so shared
+  // content (e.g. a graph both scenes render) never leaves the screen.
+  if ((s.instant || s.continues) && s.type !== 'title') return ['reveal_all'];
   switch (s.type) {
     case 'title':
       return [];

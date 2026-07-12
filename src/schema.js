@@ -117,6 +117,7 @@ const COMMON = {
   hold: { type: 'integer', minimum: 0, description: 'Extra frames to hold after the last reveal step' },
   instant: { type: 'boolean', description: 'Reveal the whole scene at once (no progressive build / no title-only first page) — one PDF page / nav advance for the scene' },
   seamless: { type: 'boolean', description: 'Keep diagram continuity across adjacent scenes when supported by the renderer' },
+  continues: { type: 'boolean', description: 'Cut straight into this scene from the previous one: the preceding inter-scene gap is skipped and this scene’s reveals apply instantly (all content on the first frame / one nav step). Designed for consecutive graph scenes sharing a projection, so the graph never leaves the screen between titles.' },
   skipTitle: { type: 'boolean', description: 'Suppress repeated scene title chrome when supported by the renderer' },
 };
 

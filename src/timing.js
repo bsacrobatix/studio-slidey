@@ -341,6 +341,14 @@ function estimateScene(scene, opts = {}) {
     }
   }
 
+  // scene.continues: reveals apply instantly (same frame math as --no-gaps),
+  // but the scene keeps its own trailing inter_scene gap. The skipped gap on
+  // the PREVIOUS scene is subtracted in estimateBoundaries, which can see
+  // adjacency.
+  if (scene.continues) {
+    return estimateScene(scene, { ...opts, noGaps: true }) + T.inter_scene;
+  }
+
   switch (scene.type) {
     case 'title':
       return hold('title_card', scene.hold);
@@ -619,7 +627,13 @@ function estimateBoundaries(spec, selectedScenes = null, opts = {}) {
   const out = [];
   (spec.scenes || []).forEach((scene, i) => {
     if (selectedScenes && !selectedScenes.has(i)) return;
-    const durationFrames = estimateScene(scene, opts);
+    let durationFrames = estimateScene(scene, opts);
+    // The scene before a `continues` scene drops its trailing inter_scene gap
+    // (the renderer cuts straight into the continuing scene).
+    const next = (spec.scenes || [])[i + 1];
+    if (!opts.noGaps && next && next.continues && scene.type !== 'video') {
+      durationFrames = Math.max(0, durationFrames - TIMING.inter_scene);
+    }
     out.push({
       sceneIndex: i,
       startFrame: frame,
