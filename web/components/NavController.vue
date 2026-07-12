@@ -10,36 +10,23 @@ const props = defineProps({
   suppressDeckClick: { type: Boolean, default: false },
   clearDeckClickSuppression: { type: Function, default: () => {} },
   narrationState: { type: Object, default: () => ({}) },
-  listenNarration: { type: Function, default: () => {} },
-  startLiveNarration: { type: Function, default: () => {} },
+  playSlide: { type: Function, default: () => {} },
+  playDeck: { type: Function, default: () => {} },
+  setNarrationEnabled: { type: Function, default: () => {} },
+  setCaptionsEnabled: { type: Function, default: () => {} },
   stopNarration: { type: Function, default: () => {} },
 });
-const s = props.deck.state;
+// The app replaces the deck object for live reloads and collection/stack
+// navigation. Keep this as a computed lookup rather than capturing the first
+// deck's state during setup, otherwise the HUD continues to show its obsolete
+// scene and reveal totals after the visible deck has changed.
+const s = computed(() => props.deck.state);
 const narration = computed(() => props.narrationState || {});
-const canListen = computed(() => Boolean(narration.value.supported && narration.value.hasSceneNarration && !narration.value.live));
-const canPlayDeck = computed(() => Boolean(narration.value.supported && narration.value.hasDeckNarration));
-const listenLabel = computed(() => (narration.value.speaking && !narration.value.live ? 'Stop' : 'Listen'));
-const liveLabel = computed(() => (narration.value.live ? 'Stop deck' : 'Play deck'));
-const listenTitle = computed(() => {
-  if (!narration.value.supported) return 'Edge TTS preview is available in the Slidey web viewer and VS Code preview';
-  if (!narration.value.hasSceneNarration) return 'This slide has no narration';
-  return 'Listen to this slide narration';
-});
-const liveTitle = computed(() => {
-  if (!narration.value.supported) return 'Edge TTS preview is available in the Slidey web viewer and VS Code preview';
-  if (!narration.value.hasDeckNarration) return 'This deck has no narration';
-  return narration.value.live ? 'Stop narrated deck playback' : 'Play this deck live with Edge TTS narration';
-});
-
-function onListenNarration() {
-  if (narration.value.speaking && !narration.value.live) props.stopNarration();
-  else props.listenNarration();
-}
-
-function onLiveNarration() {
-  if (narration.value.live) props.stopNarration();
-  else props.startLiveNarration();
-}
+const playing = computed(() => Boolean(narration.value.playing));
+const playScope = computed(() => narration.value.playScope || '');
+const narrationTitle = computed(() => narration.value.supported
+  ? 'Speak reveal narration during automatic playback'
+  : 'Narration preview is available in the Slidey web viewer and VS Code preview');
 
 function onKey(e) {
   if (e.target.closest && e.target.closest('.slidey-editor')) return;
@@ -124,20 +111,26 @@ onUnmounted(() => {
     <div class="slidey-narration-controls" @click.stop>
       <button
         type="button"
-        class="slidey-narration-btn"
-        :class="{ active: narration.speaking && !narration.live }"
-        :disabled="!canListen && !(narration.speaking && !narration.live)"
-        :title="listenTitle"
-        @click="onListenNarration"
-      >{{ listenLabel }}</button>
+        class="slidey-play-btn"
+        :class="{ active: playing && playScope === 'slide' }"
+        :title="playing && playScope === 'slide' ? 'Stop automatic slide playback' : 'Automatically reveal this slide from the start'"
+        @click="playing && playScope === 'slide' ? stopNarration() : playSlide()"
+      ><span class="slidey-play-icon">▶</span><span class="slidey-scope-icon" aria-hidden="true">▣</span><span>{{ playing && playScope === 'slide' ? 'Stop' : 'Slide' }}</span></button>
       <button
         type="button"
-        class="slidey-narration-btn"
-        :class="{ active: narration.live }"
-        :disabled="!canPlayDeck && !narration.live"
-        :title="liveTitle"
-        @click="onLiveNarration"
-      >{{ liveLabel }}</button>
+        class="slidey-play-btn primary"
+        :class="{ active: playing && playScope === 'deck' }"
+        :title="playing && playScope === 'deck' ? 'Stop automatic deck playback' : 'Automatically reveal this deck'"
+        @click="playing && playScope === 'deck' ? stopNarration() : playDeck()"
+      ><span class="slidey-play-icon">▶</span><span class="slidey-scope-icon deck" aria-hidden="true">▤</span><span>{{ playing && playScope === 'deck' ? 'Stop' : 'Deck' }}</span></button>
+      <label class="slidey-play-toggle" :class="{ disabled: !narration.supported }" :title="narrationTitle">
+        <input type="checkbox" :checked="narration.narrationEnabled" :disabled="!narration.supported" @change="setNarrationEnabled($event.target.checked)">
+        <span>♪ Narration</span>
+      </label>
+      <label class="slidey-play-toggle" title="Show spoken reveal text as closed captions during automatic playback">
+        <input type="checkbox" :checked="narration.captionsEnabled" @change="setCaptionsEnabled($event.target.checked)">
+        <span>CC</span>
+      </label>
       <span
         v-if="narration.error"
         class="slidey-narration-error"
@@ -226,8 +219,7 @@ body.slidey-video-full .slidey-hud {
   gap: 6px;
   position: relative;
 }
-.slidey-narration-btn {
-  min-width: 66px;
+.slidey-play-btn, .slidey-play-toggle {
   border: 1px solid #30363d;
   border-radius: 6px;
   background: rgba(22, 27, 34, 0.78);
@@ -238,19 +230,23 @@ body.slidey-video-full .slidey-hud {
   line-height: 1;
   padding: 5px 8px;
 }
-.slidey-narration-btn:hover:not(:disabled) {
+.slidey-play-btn { min-width: 72px; display: inline-flex; align-items: center; gap: 5px; }
+.slidey-play-btn:hover:not(:disabled), .slidey-play-toggle:hover:not(.disabled) {
   border-color: #58a6ff;
   color: #c9d1d9;
 }
-.slidey-narration-btn.active {
+.slidey-play-btn.primary { border-color: rgba(88, 166, 255, 0.68); color: #dbeeff; background: rgba(31, 111, 235, 0.2); }
+.slidey-play-btn.active {
   border-color: #3fb950;
   color: #d2f8d2;
   background: rgba(35, 134, 54, 0.24);
 }
-.slidey-narration-btn:disabled {
-  opacity: 0.38;
-  cursor: default;
-}
+.slidey-play-icon { font-size: 10px; color: #79c0ff; }
+.slidey-scope-icon { color: #c9d1d9; font-size: 14px; line-height: 10px; }
+.slidey-scope-icon.deck { letter-spacing: -4px; margin-right: 2px; }
+.slidey-play-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+.slidey-play-toggle input { margin: 0; accent-color: #58a6ff; }
+.slidey-play-toggle.disabled { opacity: 0.38; cursor: default; }
 .slidey-narration-error {
   position: relative;
   width: 18px;

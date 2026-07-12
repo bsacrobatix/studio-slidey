@@ -52,6 +52,7 @@ function writeWorkspace() {
           title: 'Child deck',
           scenes: [
             { id: 'child-title', type: 'title', title: 'CHILD DECK LANDED', tags: ['pitch'] },
+            { id: 'child-close', type: 'title', title: 'CHILD DECK CLOSE', tags: ['pitch'] },
           ],
         },
       ],
@@ -126,6 +127,12 @@ test(
       await page.waitForFunction(
         () => (document.getElementById('title-card-title') || {}).textContent === 'CHILD DECK LANDED',
         { timeout: 5000 },
+      );
+      // The scene surface has already switched, and its HUD must switch with it
+      // instead of retaining the source deck's captured state (1/1).
+      assert.match(
+        await page.$eval('.slidey-progress', (el) => el.textContent.replace(/\s+/g, ' ').trim()),
+        /scene 1\/2.*step 1\/1/,
       );
       // No reference modal should have opened for a deck target.
       assert.equal(await page.$('.slidey-ref-viewer'), null);

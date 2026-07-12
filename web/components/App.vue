@@ -125,6 +125,10 @@ const narrationPreviewSupported = computed(() => workspace.value || embedded.val
 const narrationSpeaking = ref(false);
 const narrationLoading = ref(false);
 const liveNarration = ref(false);
+const livePlaybackScope = ref('');
+const narrationEnabled = ref(true);
+const captionsEnabled = ref(true);
+const liveCaption = ref('');
 const narrationError = ref('');
 const deckHasNarration = computed(() =>
   Boolean(currentSpec.value && Array.isArray(currentSpec.value.scenes)
@@ -135,6 +139,10 @@ const narrationState = computed(() => ({
   speaking: narrationSpeaking.value,
   loading: narrationLoading.value,
   live: liveNarration.value,
+  playing: liveNarration.value,
+  playScope: livePlaybackScope.value,
+  narrationEnabled: narrationEnabled.value,
+  captionsEnabled: captionsEnabled.value,
   hasSceneNarration: currentHasNarration.value,
   hasDeckNarration: deckHasNarration.value,
   error: narrationError.value,
@@ -327,6 +335,10 @@ const activeHierarchySummary = computed(() => {
   if (!trail.length) return activeDeckTitle.value;
   return trail.map(crumb => crumb.title).join(' / ');
 });
+
+// Keep the current deck's title separate from the path: hierarchy paths can
+// get long, while the deck title needs to remain the dominant orientation cue.
+const activeHierarchyOverlayTrail = computed(() => activeHierarchyTrail.value || []);
 
 const activeSubsetSummary = computed(() => {
   if (activeIsSubset.value) return activeDeckTitle.value;
@@ -617,6 +629,8 @@ function stopNarrationAudioOnly() {
 function stopNarration(opts = {}) {
   sceneNarrationSeq += 1;
   liveNarration.value = false;
+  livePlaybackScope.value = '';
+  liveCaption.value = '';
   clearLiveNarrationTimer();
   resetVideoCueState();
   stopNarrationAudioOnly();
@@ -625,6 +639,16 @@ function stopNarration(opts = {}) {
       window.dispatchEvent(new CustomEvent('slidey:video-command', { detail: { action: 'pause' } }));
     } catch (_) { /* no active video scene */ }
   }
+}
+
+function setNarrationEnabled(enabled) {
+  narrationEnabled.value = Boolean(enabled);
+  if (!narrationEnabled.value) stopNarrationAudioOnly();
+}
+
+function setCaptionsEnabled(enabled) {
+  captionsEnabled.value = Boolean(enabled);
+  if (!captionsEnabled.value) liveCaption.value = '';
 }
 
 async function requestNarrationAudio(text, signal) {
@@ -799,6 +823,7 @@ async function playBufferedNarrationSteps(items, sceneToken) {
       stopNarrationAudioOnly();
       return false;
     }
+    if (captionsEnabled.value) liveCaption.value = item.cue || '';
     const ok = await goForSceneNarration(item.pos, sceneToken);
     if (!ok) return false;
     if (url) {
@@ -811,6 +836,24 @@ async function playBufferedNarrationSteps(items, sceneToken) {
       const stillCurrent = await delaySceneNarration(item.delayMs || 650, sceneToken);
       if (!stillCurrent) return false;
     }
+  }
+  return true;
+}
+
+async function playRevealStepsWithoutNarration(scene, token) {
+  if (!deck.value || !scene) return false;
+  const state = deck.value.state;
+  const sceneIndex = state ? state.sceneIndex : 0;
+  const steps = stepsForScene(scene);
+  const startPos = deck.value.posForScene(sceneIndex, 0);
+  const cues = stepNarrationCues(scene, steps);
+  for (let i = 0; i < steps.length; i += 1) {
+    if (token !== sceneNarrationSeq) return false;
+    if (captionsEnabled.value) liveCaption.value = String(cues[i] || '').trim();
+    const ok = await goForSceneNarration(startPos + i, token);
+    if (!ok) return false;
+    const stillCurrent = await delaySceneNarration(scene.type === 'graph' ? 760 : 650, token);
+    if (!stillCurrent) return false;
   }
   return true;
 }
@@ -831,9 +874,11 @@ async function advanceLiveNarration() {
   clearLiveNarrationTimer();
   if (!liveNarration.value || !deck.value) return;
   const state = deck.value.state;
-  if (!state || state.sceneIndex + 1 >= state.sceneCount) {
+  if (!state || livePlaybackScope.value === 'slide' || state.sceneIndex + 1 >= state.sceneCount) {
     liveNarration.value = false;
+    livePlaybackScope.value = '';
     narrationSpeaking.value = false;
+    liveCaption.value = '';
     resetVideoCueState();
     return;
   }
@@ -910,6 +955,9 @@ function runLiveNarrationForCurrent() {
   if (scene.type === 'video') {
     armVideoCueNarration(scene);
     if (typeof scene.narration === 'string' && scene.narration.trim()) {
+      if (captionsEnabled.value) liveCaption.value = scene.narration.trim();
+    }
+    if (narrationEnabled.value && narrationPreviewSupported.value && typeof scene.narration === 'string' && scene.narration.trim()) {
       speakText(scene.narration, { cancel: false });
     } else {
       narrationLoading.value = false;
@@ -930,7 +978,10 @@ function runLiveNarrationForCurrent() {
   const steps = stepsForScene(scene);
   const text = speechTextForScene(scene);
   if (text || steps.length) {
-    playCurrentSceneByReveal(scene, token).then(ok => {
+    const play = narrationEnabled.value && narrationPreviewSupported.value
+      ? playCurrentSceneByReveal(scene, token)
+      : playRevealStepsWithoutNarration(scene, token);
+    play.then(ok => {
       if (ok && liveNarration.value && token === sceneNarrationSeq) advanceLiveNarration();
     });
   } else {
@@ -956,15 +1007,13 @@ function listenCurrentNarration() {
   playCurrentSceneByReveal(scene, token);
 }
 
-function startLiveNarration() {
+function startLiveNarration(scope = 'deck') {
   sceneNarrationSeq += 1;
-  resetNarrationForUserGesture();
   if (!deck.value) return;
-  if (!narrationPreviewSupported.value) {
-    narrationError.value = 'Edge TTS preview is available in the Slidey web viewer and VS Code preview.';
-    return;
-  }
+  if (narrationEnabled.value && narrationPreviewSupported.value) resetNarrationForUserGesture();
   liveNarration.value = true;
+  livePlaybackScope.value = scope === 'slide' ? 'slide' : 'deck';
+  liveCaption.value = '';
   narrationError.value = '';
   runLiveNarrationForCurrent();
 }
@@ -980,10 +1029,13 @@ function onVideoTime(e) {
     if (videoCueState.spoken.has(cue.key)) continue;
     if (seconds + 0.12 >= cue.at) {
       videoCueState.spoken.add(cue.key);
+      if (captionsEnabled.value) liveCaption.value = cue.text;
       videoCueNarrationChain = videoCueNarrationChain
         .then(() => {
           if (!liveNarration.value || currentScene.value !== scene || videoCueState.key !== videoCueKey()) return false;
-          return speakText(cue.text, { cancel: false });
+          return narrationEnabled.value && narrationPreviewSupported.value
+            ? speakText(cue.text, { cancel: false })
+            : false;
         })
         .catch(() => false);
     }
@@ -1981,6 +2033,7 @@ onUnmounted(() => {
     v-if="deck && libraryBackAffordance && !isEditMode"
     type="button"
     class="slidey-library-affordance slidey-library-affordance-up slidey-library-link"
+    :class="{ 'with-hierarchy-overlay': activeIsHierarchy }"
     :title="libraryBackAffordance.context ? `Back up to ${libraryBackAffordance.title}: ${libraryBackAffordance.context}` : `Back up to ${libraryBackAffordance.title}`"
     @click.stop="openLibraryBackAffordance"
   >
@@ -1988,6 +2041,29 @@ onUnmounted(() => {
     <span class="slidey-library-affordance-title">{{ libraryBackAffordance.title }}</span>
     <span v-if="libraryBackAffordance.context" class="slidey-library-affordance-context">{{ libraryBackAffordance.context }}</span>
   </button>
+
+  <nav
+    v-if="deck && activeIsHierarchy"
+    class="slidey-hierarchy-location"
+    aria-label="Current deck location in hierarchy"
+    @click.stop
+  >
+    <div class="slidey-hierarchy-location-kicker">Hierarchy · current deck</div>
+    <div class="slidey-hierarchy-location-title" :title="activeDeckTitle">{{ activeDeckTitle }}</div>
+    <div class="slidey-hierarchy-location-trail" aria-label="Breadcrumb path">
+      <template v-for="(crumb, i) in activeHierarchyOverlayTrail" :key="crumb.id">
+        <span v-if="i" class="slidey-hierarchy-location-separator" aria-hidden="true">›</span>
+        <button
+          type="button"
+          class="slidey-hierarchy-location-crumb"
+          :class="{ active: crumb.id === activeDeckId }"
+          :title="crumb.description || crumb.title"
+          :aria-current="crumb.id === activeDeckId ? 'page' : undefined"
+          @click.stop="switchLibraryDeckFromMenu(crumb.id)"
+        >{{ crumb.title }}</button>
+      </template>
+    </div>
+  </nav>
 
   <button
     v-if="deck && libraryForwardAffordance && !isEditMode"
@@ -2214,10 +2290,15 @@ onUnmounted(() => {
     :suppress-deck-click="suppressDeckNavClick"
     :clear-deck-click-suppression="clearDeckClickSuppression"
     :narration-state="narrationState"
-    :listen-narration="listenCurrentNarration"
-    :start-live-narration="startLiveNarration"
+    :play-slide="() => startLiveNarration('slide')"
+    :play-deck="() => startLiveNarration('deck')"
+    :set-narration-enabled="setNarrationEnabled"
+    :set-captions-enabled="setCaptionsEnabled"
     :stop-narration="stopNarration"
   />
+  <div v-if="deck && liveNarration && captionsEnabled && liveCaption" class="slidey-closed-captions" role="status" aria-live="polite">
+    {{ liveCaption }}
+  </div>
   <div
     v-if="rrwebModal.open"
     class="slidey-rrweb-modal"
@@ -2395,6 +2476,22 @@ body.slidey-workspace.slidey-present-mode .slidey-replay-viewer {
   font-size: 18px;
 }
 .slidey-replay-message.error { color: #ff7b72; }
+.slidey-closed-captions {
+  position: fixed;
+  z-index: 1002;
+  left: 50%;
+  bottom: 62px;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 48px));
+  padding: 9px 14px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.42);
+  font: 600 15px/1.35 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-align: center;
+}
+body.slidey-video-full .slidey-closed-captions { top: 62px; bottom: auto; }
 
 .slidey-rrweb-modal {
   position: fixed;
@@ -2625,6 +2722,84 @@ body.slidey-workspace.slidey-present-mode .slidey-replay-viewer {
 .slidey-reload-toast-icon { color: #e3b341; flex: none; }
 .slidey-reload-toast-msg { overflow-wrap: anywhere; }
 
+/* Always-visible orientation for hierarchy decks. The deck name gets its own
+   line so it remains legible even when a breadcrumb path is deeply nested. */
+.slidey-hierarchy-location {
+  position: fixed;
+  top: 14px;
+  left: calc(var(--slidey-sidebar-w, 0px) + 14px);
+  z-index: 2089;
+  width: min(440px, calc(100vw - var(--slidey-sidebar-w, 0px) - 28px));
+  padding: 9px 12px 10px;
+  border: 1px solid #58a6ff99;
+  border-radius: 8px;
+  background: #0d1117e8;
+  color: #c9d1d9;
+  font-family: 'Courier New', monospace;
+  box-sizing: border-box;
+  box-shadow: inset 3px 0 0 #58a6ff, 0 10px 28px rgba(0,0,0,0.3);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+}
+body.slidey-embedded .slidey-hierarchy-location,
+body.slidey-workspace.slidey-present-mode .slidey-hierarchy-location {
+  top: 58px;
+}
+.slidey-hierarchy-location-kicker {
+  color: #79c0ff;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+.slidey-hierarchy-location-title {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #f0f6fc;
+  font-size: 15px;
+  font-weight: bold;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slidey-hierarchy-location-trail {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-top: 6px;
+  overflow: hidden;
+  color: #8b949e;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.slidey-hierarchy-location-crumb {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.slidey-hierarchy-location-crumb:hover,
+.slidey-hierarchy-location-crumb:focus-visible {
+  outline: none;
+  color: #c9d1d9;
+  text-decoration: underline;
+}
+.slidey-hierarchy-location-crumb.active {
+  flex: 1 1 auto;
+  color: #79c0ff;
+  font-weight: bold;
+}
+.slidey-hierarchy-location-separator {
+  flex: none;
+  margin: 0 6px;
+  color: #484f58;
+}
+
 .slidey-library-affordance {
   position: fixed;
   z-index: 2088;
@@ -2651,9 +2826,16 @@ body.slidey-workspace.slidey-present-mode .slidey-replay-viewer {
   border-color: #58a6ff99;
   box-shadow: inset 3px 0 0 #58a6ff, 0 10px 28px rgba(0,0,0,0.3);
 }
+.slidey-library-affordance-up.with-hierarchy-overlay {
+  top: 105px;
+}
 body.slidey-embedded .slidey-library-affordance-up,
 body.slidey-workspace.slidey-present-mode .slidey-library-affordance-up {
   top: 58px;
+}
+body.slidey-embedded .slidey-library-affordance-up.with-hierarchy-overlay,
+body.slidey-workspace.slidey-present-mode .slidey-library-affordance-up.with-hierarchy-overlay {
+  top: 149px;
 }
 .slidey-library-affordance-down {
   right: 18px;
@@ -3061,6 +3243,15 @@ body.slidey-workspace.slidey-edit-mode .slidey-collection-nav {
 }
 
 @media (max-width: 760px) {
+  .slidey-hierarchy-location {
+    top: 12px;
+    left: 12px;
+    width: calc(100vw - 24px);
+  }
+  body.slidey-embedded .slidey-hierarchy-location,
+  body.slidey-workspace.slidey-present-mode .slidey-hierarchy-location {
+    top: 56px;
+  }
   .slidey-library-affordance-up {
     top: 72px;
     left: 12px;
@@ -3069,6 +3260,13 @@ body.slidey-workspace.slidey-edit-mode .slidey-collection-nav {
   body.slidey-embedded .slidey-library-affordance-up,
   body.slidey-workspace.slidey-present-mode .slidey-library-affordance-up {
     top: 116px;
+  }
+  .slidey-library-affordance-up.with-hierarchy-overlay {
+    top: 103px;
+  }
+  body.slidey-embedded .slidey-library-affordance-up.with-hierarchy-overlay,
+  body.slidey-workspace.slidey-present-mode .slidey-library-affordance-up.with-hierarchy-overlay {
+    top: 147px;
   }
   .slidey-library-affordance-down {
     right: 12px;
