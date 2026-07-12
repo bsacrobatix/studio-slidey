@@ -1244,7 +1244,7 @@ const TOOLS = [
   },
   {
     name: 'slidey_validate',
-    description: 'Validate a spec against Slidey JSON Schema and semantic checks. Returns structured errors and warnings.',
+    description: 'Validate a spec against Slidey JSON Schema and semantic checks. Also schema-validates every library.decks[] hierarchy deck\'s inline scenes (errors are labeled library.decks["<id>"].scenes[<i>]). Returns structured errors and warnings.',
     inputSchema: toolInputSchema({
       path: { type: 'string' },
     }, ['path']),
