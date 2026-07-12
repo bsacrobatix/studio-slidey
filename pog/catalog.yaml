@@ -118,7 +118,7 @@ type_registry:
   - id: demo
     schema: graph-type/v0
     extends: core-node
-    summary: A recorded demonstration packet (tours + rrweb clips) of a use case; spec-only until its capture story is wired.
+    summary: A recorded demonstration packet (tours + rrweb clips + deck) of a use case; real when the committed packet satisfies the type-provided demo_packet assertion.
     edge_fields:
       - id: part_of
         target_type: product
@@ -130,10 +130,27 @@ type_registry:
       schema: slidey/artifact/demo-packet/v0
       format: json
       presentation: media
+    materialize:
+      checks:
+        - capabilities:
+            fs:
+              read:
+                - stories/**
+                - .artifacts/**
+          id: gate
+          inputs_field: check_inputs
+          script: scripts/checks/demo_packet.star
+      context_edges:
+        - demonstrates
+      params:
+        - default: ""
+          id: target_url
+          type: string
+      story: stories/demo-packet
   - id: test-suite
     schema: graph-type/v0
     extends: core-node
-    summary: Recorded deterministic test/flow evidence; spec-only until its recorder story is wired.
+    summary: Recorded deterministic test/flow evidence; real when the recorded runs are clean per the type-provided flows_recorded assertion.
     edge_fields:
       - id: part_of
         target_type: product
@@ -145,10 +162,26 @@ type_registry:
       schema: slidey/artifact/flow-evidence/v0
       format: json
       presentation: document
+    materialize:
+      checks:
+        - capabilities:
+            fs:
+              read:
+                - pog/evidence/**
+          id: gate
+          inputs_field: check_inputs
+          script: scripts/checks/flows_recorded.star
+      context_edges:
+        - proves
+      params:
+        - default: scripts/record-flow-evidence.sh
+          id: record_command
+          type: string
+      story: stories/record-flow-evidence
   - id: doc
     schema: graph-type/v0
     extends: core-node
-    summary: A generated document deliverable; spec-only until its producer story is wired.
+    summary: A generated document projected from the node's graph context; real when the declared artifact paths exist per the type-provided artifact_exists assertion.
     edge_fields:
       - id: part_of
         target_type: product
@@ -160,10 +193,32 @@ type_registry:
       schema: slidey/artifact/doc/v0
       format: markdown
       presentation: document
+    materialize:
+      checks:
+        - capabilities:
+            fs:
+              read:
+                - .artifacts/**
+                - docs/**
+          id: gate
+          inputs_field: check_inputs
+          script: scripts/checks/artifact_exists.star
+      context_edges:
+        - documents
+      params:
+        - default: 2
+          id: depth
+          type: int
+        - id: audience
+          type: enum
+          values:
+            - internal
+            - public
+      story: stories/materialize-doc
   - id: tutorial
     schema: graph-type/v0
     extends: core-node
-    summary: A step-by-step walkthrough teaching a use case; spec-only until its producer story is wired.
+    summary: A step-by-step walkthrough teaching a use case; real when the declared artifact paths exist per the type-provided artifact_exists assertion.
     edge_fields:
       - id: part_of
         target_type: product
@@ -175,6 +230,28 @@ type_registry:
       schema: slidey/artifact/doc/v0
       format: markdown
       presentation: document
+    materialize:
+      checks:
+        - capabilities:
+            fs:
+              read:
+                - .artifacts/**
+                - docs/**
+          id: gate
+          inputs_field: check_inputs
+          script: scripts/checks/artifact_exists.star
+      context_edges:
+        - teaches
+      params:
+        - default: 2
+          id: depth
+          type: int
+        - id: audience
+          type: enum
+          values:
+            - internal
+            - public
+      story: stories/materialize-doc
   # The structured write primitive (cribbed from the POG program catalog):
   # system-authored writes — materialize write-backs, derived status flips —
   # land as changeset nodes, so every catalog mutation has provenance.
@@ -402,6 +479,35 @@ nodes:
     edges:
       part_of: [product-slidey]
       demonstrates: [uc-click-through-deck]
+    check_inputs:
+      clips:
+        - stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json
+      manifest: stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json
+    materialization:
+      artifacts: []
+      checks:
+        - id: gate
+          ok: false
+          reasons:
+            - manifest stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json does not exist
+            - clip stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json does not exist (materialize this node to capture it)
+          reproduce: kitsoki starlark run scripts/checks/demo_packet.star --inputs '{"clips":["stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json"],"manifest":"stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json"}' --capabilities '{"fs":{"read":["stories/**",".artifacts/**"]}}'
+          script: scripts/checks/demo_packet.star
+          script_sha256: 837c7aaf5f9f0bfd7d582cbbd7c0aad17eaa9996131532a003102b389695dc73
+      job_id: 01KXA84YSH3QE8BCHAH70964EV
+      stages:
+        - id: plan
+          status: complete
+        - id: launch
+          status: complete
+        - id: capture
+          status: complete
+        - id: doctor
+          status: complete
+        - id: check:gate
+          status: failed
+      status: failed
+      story: stories/demo-packet
   - schema: slidey/test-suite/v0
     id: ts-slidey-dev-story-flows
     title: Recorded no-LLM dev-story flow run against this repo
@@ -412,6 +518,30 @@ nodes:
     edges:
       part_of: [product-slidey]
       proves: [req-no-llm-in-render]
+    check_inputs:
+      reports:
+        - path: pog/evidence/flows-slidey.json
+          repo: slidey
+    materialization:
+      artifacts: []
+      checks:
+        - id: gate
+          ok: false
+          reasons:
+            - 'slidey: no evidence recorded (run scripts/record-flow-evidence.sh)'
+          reproduce: kitsoki starlark run scripts/checks/flows_recorded.star --inputs '{"reports":[{"path":"pog/evidence/flows-slidey.json","repo":"slidey"}]}' --capabilities '{"fs":{"read":["pog/evidence/**"]}}'
+          script: scripts/checks/flows_recorded.star
+          script_sha256: 34aebdba4eff5b14944ecb1b124a758290e8011ff704d8cf9898aed1c71b9f90
+      job_id: 01KXA850YCFMR7ZFMYDWVXZZGA
+      stages:
+        - id: record
+          status: complete
+        - id: done
+          status: complete
+        - id: check:gate
+          status: failed
+      status: failed
+      story: stories/record-flow-evidence
   - schema: slidey/tutorial/v0
     id: tutorial-author-first-deck
     title: Tutorial — author and render your first deck
@@ -422,6 +552,39 @@ nodes:
     edges:
       part_of: [product-slidey]
       teaches: [uc-demo-video-from-manifest]
+    check_inputs:
+      paths:
+        - .artifacts/tutorial-author-first-deck/brief.md
+    evidence:
+      - kind: doc
+        path: .artifacts/tutorial-author-first-deck/brief.md
+        title: Doc
+    materialization:
+      artifacts:
+        - kind: doc
+          path: .artifacts/tutorial-author-first-deck/brief.md
+          produced_at: "2026-07-12T04:07:48Z"
+          title: Doc
+      checks:
+        - id: gate
+          ok: true
+          reproduce: kitsoki starlark run scripts/checks/artifact_exists.star --inputs '{"paths":[".artifacts/tutorial-author-first-deck/brief.md"]}' --capabilities '{"fs":{"read":[".artifacts/**","docs/**"]}}'
+          script: scripts/checks/artifact_exists.star
+          script_sha256: 46ebb871c1b4e6a7e9615c5b01483ba5ee1193289a210d02cbad9bc1f3aa44d6
+      job_id: 01KXA851GA0THKBSBXRM44G04W
+      stages:
+        - id: gather
+          status: complete
+        - id: draft
+          status: complete
+        - id: verify
+          status: complete
+        - id: done
+          status: complete
+        - id: check:gate
+          status: complete
+      status: complete
+      story: stories/materialize-doc
   - id: cs-1
     operations:
       - changes:
@@ -455,3 +618,310 @@ nodes:
     status: notified
     title: 'materialize deck-meme-gallery: write back status "complete"'
     visibility: internal
+  - created_at: "2026-07-12T03:56:21Z"
+    id: cs-2
+    operations:
+      - changes:
+          - after:
+              checks:
+                - capabilities:
+                    fs:
+                      read:
+                        - stories/**
+                        - .artifacts/**
+                  id: gate
+                  inputs_field: check_inputs
+                  script: scripts/checks/demo_packet.star
+              context_edges:
+                - demonstrates
+              params:
+                - default: ""
+                  id: target_url
+                  type: string
+              story: stories/demo-packet
+            path:
+              - materialize
+          - after: A recorded demonstration packet (tours + rrweb clips + deck) of a use case; real when the committed packet satisfies the type-provided demo_packet assertion.
+            before: A recorded demonstration packet (tours + rrweb clips) of a use case; spec-only until its capture story is wired.
+            path:
+              - summary
+        kind: registry_type_modified
+        node: demo
+      - changes:
+          - after:
+              checks:
+                - capabilities:
+                    fs:
+                      read:
+                        - pog/evidence/**
+                  id: gate
+                  inputs_field: check_inputs
+                  script: scripts/checks/flows_recorded.star
+              context_edges:
+                - proves
+              params:
+                - default: scripts/record-flow-evidence.sh
+                  id: record_command
+                  type: string
+              story: stories/record-flow-evidence
+            path:
+              - materialize
+          - after: Recorded deterministic test/flow evidence; real when the recorded runs are clean per the type-provided flows_recorded assertion.
+            before: Recorded deterministic test/flow evidence; spec-only until its recorder story is wired.
+            path:
+              - summary
+        kind: registry_type_modified
+        node: test-suite
+      - changes:
+          - after:
+              checks:
+                - capabilities:
+                    fs:
+                      read:
+                        - .artifacts/**
+                        - docs/**
+                  id: gate
+                  inputs_field: check_inputs
+                  script: scripts/checks/artifact_exists.star
+              context_edges:
+                - documents
+              params:
+                - default: 2
+                  id: depth
+                  type: int
+                - id: audience
+                  type: enum
+                  values:
+                    - internal
+                    - public
+              story: stories/materialize-doc
+            path:
+              - materialize
+          - after: A generated document projected from the node's graph context; real when the declared artifact paths exist per the type-provided artifact_exists assertion.
+            before: A generated document deliverable; spec-only until its producer story is wired.
+            path:
+              - summary
+        kind: registry_type_modified
+        node: doc
+      - changes:
+          - after:
+              checks:
+                - capabilities:
+                    fs:
+                      read:
+                        - .artifacts/**
+                        - docs/**
+                  id: gate
+                  inputs_field: check_inputs
+                  script: scripts/checks/artifact_exists.star
+              context_edges:
+                - teaches
+              params:
+                - default: 2
+                  id: depth
+                  type: int
+                - id: audience
+                  type: enum
+                  values:
+                    - internal
+                    - public
+              story: stories/materialize-doc
+            path:
+              - materialize
+          - after: A step-by-step walkthrough teaching a use case; real when the declared artifact paths exist per the type-provided artifact_exists assertion.
+            before: A step-by-step walkthrough teaching a use case; spec-only until its producer story is wired.
+            path:
+              - summary
+        kind: registry_type_modified
+        node: tutorial
+    schema: graph/changeset/v1
+    status: notified
+    title: 'Wire deliverable materialize contracts: demo/test-suite/doc/tutorial (Stage 3 type wiring)'
+    visibility: internal
+    authorized_at: "2026-07-12T03:56:21Z"
+    applied_at: "2026-07-12T03:56:21Z"
+  - created_at: "2026-07-12T04:01:24Z"
+    id: cs-3
+    operations:
+      - changes:
+          - after:
+              paths:
+                - .artifacts/tutorial-author-first-deck/brief.md
+            path:
+              - fields
+              - check_inputs
+        kind: modified
+        node: tutorial-author-first-deck
+      - changes:
+          - after:
+              clips:
+                - stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json
+              manifest: stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json
+            path:
+              - fields
+              - check_inputs
+        kind: modified
+        node: demo-onboarding-tour
+      - changes:
+          - after:
+              reports:
+                - path: pog/evidence/flows-slidey.json
+                  repo: slidey
+            path:
+              - fields
+              - check_inputs
+        kind: modified
+        node: ts-slidey-dev-story-flows
+    schema: graph/changeset/v1
+    status: notified
+    title: Declare check_inputs for demo/tutorial/test-suite deliverables (Stage 3)
+    visibility: internal
+    authorized_at: "2026-07-12T04:01:24Z"
+    applied_at: "2026-07-12T04:01:24Z"
+  - authored_by: materialize
+    created_at: "2026-07-12T04:07:45Z"
+    id: cs-4
+    operations:
+      - changes:
+          - after:
+              artifacts: []
+              checks:
+                - id: gate
+                  ok: false
+                  reasons:
+                    - manifest stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json does not exist
+                    - clip stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json does not exist (materialize this node to capture it)
+                  reproduce: kitsoki starlark run scripts/checks/demo_packet.star --inputs '{"clips":["stories/demo-packet/fixtures/onboarding-tour/clips/onboarding-tour-journey.rrweb.json"],"manifest":"stories/demo-packet/fixtures/onboarding-tour/onboarding-tour.demo.json"}' --capabilities '{"fs":{"read":["stories/**",".artifacts/**"]}}'
+                  script: scripts/checks/demo_packet.star
+                  script_sha256: 837c7aaf5f9f0bfd7d582cbbd7c0aad17eaa9996131532a003102b389695dc73
+              job_id: 01KXA84YSH3QE8BCHAH70964EV
+              stages:
+                - id: plan
+                  status: complete
+                - id: launch
+                  status: complete
+                - id: capture
+                  status: complete
+                - id: doctor
+                  status: complete
+                - id: check:gate
+                  status: failed
+              status: failed
+              story: stories/demo-packet
+            path:
+              - fields
+              - materialization
+        kind: modified
+        node: demo-onboarding-tour
+    provenance:
+      job_id: 01KXA84YSH3QE8BCHAH70964EV
+      story: stories/demo-packet
+    schema: graph/changeset/v1
+    status: notified
+    title: 'materialize demo-onboarding-tour: write back status "failed"'
+    visibility: internal
+    applied_at: "2026-07-12T04:07:45Z"
+  - authored_by: materialize
+    created_at: "2026-07-12T04:07:47Z"
+    id: cs-5
+    operations:
+      - changes:
+          - after:
+              artifacts: []
+              checks:
+                - id: gate
+                  ok: false
+                  reasons:
+                    - 'slidey: no evidence recorded (run scripts/record-flow-evidence.sh)'
+                  reproduce: kitsoki starlark run scripts/checks/flows_recorded.star --inputs '{"reports":[{"path":"pog/evidence/flows-slidey.json","repo":"slidey"}]}' --capabilities '{"fs":{"read":["pog/evidence/**"]}}'
+                  script: scripts/checks/flows_recorded.star
+                  script_sha256: 34aebdba4eff5b14944ecb1b124a758290e8011ff704d8cf9898aed1c71b9f90
+              job_id: 01KXA850YCFMR7ZFMYDWVXZZGA
+              stages:
+                - id: record
+                  status: complete
+                - id: done
+                  status: complete
+                - id: check:gate
+                  status: failed
+              status: failed
+              story: stories/record-flow-evidence
+            path:
+              - fields
+              - materialization
+        kind: modified
+        node: ts-slidey-dev-story-flows
+    provenance:
+      job_id: 01KXA850YCFMR7ZFMYDWVXZZGA
+      story: stories/record-flow-evidence
+    schema: graph/changeset/v1
+    status: notified
+    title: 'materialize ts-slidey-dev-story-flows: write back status "failed"'
+    visibility: internal
+    applied_at: "2026-07-12T04:07:47Z"
+  - authored_by: materialize
+    created_at: "2026-07-12T04:07:48Z"
+    id: cs-6
+    operations:
+      - changes:
+          - after:
+              - kind: doc
+                path: .artifacts/tutorial-author-first-deck/brief.md
+                title: Doc
+            path:
+              - fields
+              - evidence
+        kind: modified
+        node: tutorial-author-first-deck
+    provenance:
+      job_id: 01KXA851GA0THKBSBXRM44G04W
+      story: stories/materialize-doc
+    schema: graph/changeset/v1
+    status: notified
+    title: 'materialize tutorial-author-first-deck: append evidence .artifacts/tutorial-author-first-deck/brief.md'
+    visibility: internal
+    applied_at: "2026-07-12T04:07:48Z"
+  - authored_by: materialize
+    created_at: "2026-07-12T04:07:48Z"
+    id: cs-7
+    operations:
+      - changes:
+          - after:
+              artifacts:
+                - kind: doc
+                  path: .artifacts/tutorial-author-first-deck/brief.md
+                  produced_at: "2026-07-12T04:07:48Z"
+                  title: Doc
+              checks:
+                - id: gate
+                  ok: true
+                  reproduce: kitsoki starlark run scripts/checks/artifact_exists.star --inputs '{"paths":[".artifacts/tutorial-author-first-deck/brief.md"]}' --capabilities '{"fs":{"read":[".artifacts/**","docs/**"]}}'
+                  script: scripts/checks/artifact_exists.star
+                  script_sha256: 46ebb871c1b4e6a7e9615c5b01483ba5ee1193289a210d02cbad9bc1f3aa44d6
+              job_id: 01KXA851GA0THKBSBXRM44G04W
+              stages:
+                - id: gather
+                  status: complete
+                - id: draft
+                  status: complete
+                - id: verify
+                  status: complete
+                - id: done
+                  status: complete
+                - id: check:gate
+                  status: complete
+              status: complete
+              story: stories/materialize-doc
+            path:
+              - fields
+              - materialization
+        kind: modified
+        node: tutorial-author-first-deck
+    provenance:
+      job_id: 01KXA851GA0THKBSBXRM44G04W
+      story: stories/materialize-doc
+    schema: graph/changeset/v1
+    status: notified
+    title: 'materialize tutorial-author-first-deck: write back status "complete"'
+    visibility: internal
+    applied_at: "2026-07-12T04:07:48Z"
