@@ -16,6 +16,8 @@ const { runCheck } = require('./check');
 const { estimateBoundaries } = require('./timing');
 const { tempRoot } = require('./temp-path');
 const { versionOf } = require('./spec-version');
+const { addressableScenes, resolveSceneAddress } = require('./scene-address');
+const { resolveDeckSpec } = require('./collections');
 const { attachRuntimeThemePacks, loadThemePacks, stripRuntimeThemePacks } = require('./theme-packs');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -543,14 +545,16 @@ async function renderVideoPoster(args, spec, specPath, sceneIndex, scene) {
 }
 
 async function renderPng(args) {
-  const { abs, spec } = readSpecFile(args.path);
+  const { abs, spec: fileSpec } = readSpecFile(args.path);
+  const address = resolveSceneAddress(fileSpec, args);
+  const spec = address.spec;
   const scenes = Array.isArray(spec.scenes) ? spec.scenes : [];
-  const scene = scenes[args.sceneIndex];
+  const scene = scenes[address.sceneIndex];
   if (scene && scene.type === 'video' && (scene.rrweb || scene.src)) {
-    const poster = await renderVideoPoster(args, spec, abs, args.sceneIndex, scene);
+    const poster = await renderVideoPoster(args, spec, abs, address.sceneIndex, scene);
     if (poster) return poster;
   }
-  const session = await loadRenderPage(spec, abs, args.sceneIndex, args.stepIndex);
+  const session = await loadRenderPage(spec, abs, address.sceneIndex, args.stepIndex);
   try {
     const data = await session.page.screenshot({ type: 'png', encoding: 'base64' });
     return {
@@ -559,6 +563,7 @@ async function renderPng(args) {
           type: 'text',
           text: JSON.stringify({
             path: args.path,
+            deck: address.deckId,
             sceneIndex: session.sceneIndex,
             stepIndex: session.stepIndex,
             step: session.step,
@@ -577,8 +582,10 @@ async function renderPng(args) {
 }
 
 async function renderHtml(args) {
-  const { abs, spec } = readSpecFile(args.path);
-  const session = await loadRenderPage(spec, abs, args.sceneIndex, args.stepIndex);
+  const { abs, spec: fileSpec } = readSpecFile(args.path);
+  const address = resolveSceneAddress(fileSpec, args);
+  const spec = address.spec;
+  const session = await loadRenderPage(spec, abs, address.sceneIndex, args.stepIndex);
   try {
     const html = await session.page.evaluate(() => {
       const root = document.getElementById('root') || document.body;
@@ -600,6 +607,7 @@ async function renderHtml(args) {
     });
     return okResult({
       path: args.path,
+      deck: address.deckId,
       sceneIndex: session.sceneIndex,
       stepIndex: session.stepIndex,
       step: session.step,
@@ -1016,7 +1024,20 @@ async function reviewDeck(args) {
 }
 
 async function contactSheet(args) {
-  const { abs, spec } = readSpecFile(args.path);
+  const { abs, spec: fileSpec } = readSpecFile(args.path);
+  let spec = fileSpec;
+  let deckId = null;
+  let deckTitle = null;
+  if (args.deck != null) {
+    const resolved = resolveDeckSpec(fileSpec, { deckId: String(args.deck) });
+    if (!resolved.deck || resolved.deck.id !== String(args.deck)) {
+      const known = (resolved.decks || []).filter((d) => !d.source).map((d) => d.id);
+      throw new Error(`unknown library deck "${args.deck}"${known.length ? ` — known decks: ${known.join(', ')}` : ''}`);
+    }
+    spec = resolved.spec;
+    deckId = resolved.deck.id;
+    deckTitle = resolved.deck.title || deckId;
+  }
   const { stepsForScene } = await import(pathToFileURL(path.join(ROOT_DIR, 'web', 'sceneSteps.mjs')).href);
   const scenes = Array.isArray(args.scenes) && args.scenes.length ? args.scenes : (spec.scenes || []).map((_, i) => i);
   const outDir = safeResolve(args.outDir || '.artifacts/slidey-contact-sheet');
@@ -1035,10 +1056,12 @@ async function contactSheet(args) {
     for (const stepIndex of selected) {
       const session = await loadRenderPage(spec, abs, sceneIndex, stepIndex);
       try {
-        const file = `scene-${String(sceneIndex).padStart(3, '0')}-step-${String(stepIndex + 1).padStart(3, '0')}.png`;
+        const filePrefix = deckId ? `${deckId}-` : '';
+        const file = `${filePrefix}scene-${String(sceneIndex).padStart(3, '0')}-step-${String(stepIndex + 1).padStart(3, '0')}.png`;
         const fileAbs = path.join(outDir, file);
         await session.page.screenshot({ path: fileAbs, type: 'png' });
         captures.push({
+          deck: deckId,
           scene: sceneIndex,
           title: sceneTitle(scene),
           stepIndex,
@@ -1060,7 +1083,7 @@ async function contactSheet(args) {
     '</div>',
   ].join('\n');
   fs.writeFileSync(htmlPath, html);
-  return { path: relPath(htmlPath), captures };
+  return { path: relPath(htmlPath), deck: deckId, deckTitle, captures };
 }
 
 function escapeHtml(value) {
@@ -1236,13 +1259,15 @@ const TOOLS = [
   },
   {
     name: 'slidey_render_png',
-    description: 'Render a particular scene/reveal step as a PNG image using the real Slidey Vue render bundle. For a video/rrweb scene, returns a REAL replay frame seeked headlessly via rrweb (pass atSecond to scrub to any moment).',
+    description: 'Render a particular scene/reveal step as a PNG image using the real Slidey Vue render bundle. For a video/rrweb scene, returns a REAL replay frame seeked headlessly via rrweb (pass atSecond to scrub to any moment). Address the scene with sceneIndex (top-level index, legacy) or scene (a scene id string, resolved across top-level scenes AND every library.decks[] hierarchy deck — pass deck to scope/disambiguate).',
     inputSchema: toolInputSchema({
       path: { type: 'string' },
-      sceneIndex: { type: 'integer', minimum: 0 },
+      sceneIndex: { type: 'integer', minimum: 0, description: 'Top-level scene index. Ignored if scene is given. With deck set, indexes that deck\'s own scenes instead.' },
+      scene: { type: 'string', description: 'Scene id. Resolved across top-level scenes and every library hierarchy deck when deck is omitted; scoped to one deck when deck is set. Errors listing candidates if ambiguous.' },
+      deck: { type: 'string', description: 'Library deck id (library.decks[].id) to scope/resolve sceneIndex or scene against.' },
       stepIndex: { type: 'integer', minimum: 0, description: 'Reveal step index. Omit for final step of the scene.' },
       atSecond: { type: 'number', minimum: 0, description: 'For a video/rrweb scene: replay time (seconds) to seek to before screenshotting. Omit to use the scene start. Clamped to the clip duration.' },
-    }, ['path', 'sceneIndex']),
+    }, ['path']),
   },
   {
     name: 'slidey_bundle',
@@ -1255,16 +1280,18 @@ const TOOLS = [
   },
   {
     name: 'slidey_render_html',
-    description: 'Render a particular scene/reveal step and return the HTML snapshot of the rendered slide.',
+    description: 'Render a particular scene/reveal step and return the HTML snapshot of the rendered slide. Address the scene with sceneIndex (top-level index, legacy) or scene (a scene id string, resolved across top-level scenes AND every library.decks[] hierarchy deck — pass deck to scope/disambiguate).',
     inputSchema: toolInputSchema({
       path: { type: 'string' },
-      sceneIndex: { type: 'integer', minimum: 0 },
+      sceneIndex: { type: 'integer', minimum: 0, description: 'Top-level scene index. Ignored if scene is given. With deck set, indexes that deck\'s own scenes instead.' },
+      scene: { type: 'string', description: 'Scene id. Resolved across top-level scenes and every library hierarchy deck when deck is omitted; scoped to one deck when deck is set. Errors listing candidates if ambiguous.' },
+      deck: { type: 'string', description: 'Library deck id (library.decks[].id) to scope/resolve sceneIndex or scene against.' },
       stepIndex: { type: 'integer', minimum: 0, description: 'Reveal step index. Omit for final step of the scene.' },
-    }, ['path', 'sceneIndex']),
+    }, ['path']),
   },
   {
     name: 'slidey_check',
-    description: 'Run Slidey static diagram-svg geometry checks and return the report.',
+    description: 'Run Slidey static diagram-svg geometry checks and return the report. Walks top-level scenes AND every library.decks[] hierarchy deck\'s own scenes; findings from a library deck are labeled "library.decks[\\"<id>\\"]" in the output.',
     inputSchema: toolInputSchema({
       path: { type: 'string' },
     }, ['path']),
@@ -1274,7 +1301,8 @@ const TOOLS = [
     description: 'Run the browser-based rendered geometry audit. This catches off-page content, overflow, overlap, tiny text, contrast, broken images, and template leaks.',
     inputSchema: toolInputSchema({
       path: { type: 'string' },
-      sceneIndex: { type: 'integer', minimum: 0, description: 'Optional single scene to audit.' },
+      deck: { type: 'string', description: 'Library deck id (library.decks[].id). When set, audits that deck\'s own scenes instead of the top-level scenes[]; sceneIndex then indexes within that deck.' },
+      sceneIndex: { type: 'integer', minimum: 0, description: 'Optional single scene to audit (within the top-level deck, or within `deck` when set).' },
     }, ['path']),
   },
   {
@@ -1294,10 +1322,11 @@ const TOOLS = [
   },
   {
     name: 'slidey_contact_sheet',
-    description: 'Render scene/reveal screenshots into an inspectable HTML contact sheet. Use steps:"focus" for graph focus reveals, "all" for all reveals, or omit for final frames.',
+    description: 'Render scene/reveal screenshots into an inspectable HTML contact sheet. Use steps:"focus" for graph focus reveals, "all" for all reveals, or omit for final frames. Pass deck to capture a library.decks[] hierarchy deck\'s own scenes instead of the top-level deck.',
     inputSchema: toolInputSchema({
       path: { type: 'string' },
-      scenes: { type: 'array', items: { type: 'integer', minimum: 0 }, description: 'Scene indices to capture. Defaults to all scenes.' },
+      deck: { type: 'string', description: 'Library deck id (library.decks[].id). When set, scenes/scene indices are resolved against that deck\'s own scenes instead of the top-level scenes[].' },
+      scenes: { type: 'array', items: { type: 'integer', minimum: 0 }, description: 'Scene indices to capture (within the top-level deck, or within `deck` when set). Defaults to all scenes in scope.' },
       steps: { type: 'string', enum: ['final', 'focus', 'all'], description: 'Which reveal steps to capture. Defaults to final.' },
       outDir: { type: 'string', description: 'Output directory. Defaults to .artifacts/slidey-contact-sheet.' },
     }, ['path']),
@@ -1586,10 +1615,21 @@ async function callTool(name, args = {}) {
     }
 
     case 'slidey_audit': {
-      const { abs, spec } = readSpecFile(args.path);
+      const { abs, spec: fileSpec } = readSpecFile(args.path);
+      let spec = fileSpec;
+      let auditDeckId = null;
+      if (args.deck != null) {
+        const resolved = resolveDeckSpec(fileSpec, { deckId: String(args.deck) });
+        if (!resolved.deck || resolved.deck.id !== String(args.deck)) {
+          const known = (resolved.decks || []).filter((d) => !d.source).map((d) => d.id);
+          throw new Error(`unknown library deck "${args.deck}"${known.length ? ` — known decks: ${known.join(', ')}` : ''}`);
+        }
+        spec = resolved.spec;
+        auditDeckId = resolved.deck.id;
+      }
       const selectedScenes = Number.isInteger(args.sceneIndex) ? new Set([args.sceneIndex]) : null;
       const report = await auditSpec(spec, { specPath: abs, selectedScenes });
-      return okResult({ path: relPath(abs), ...report });
+      return okResult({ path: relPath(abs), deck: auditDeckId, ...report });
     }
 
     case 'slidey_review_deck':
