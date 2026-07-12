@@ -327,7 +327,7 @@ function buildScatter(s, series, unit) {
 function buildQuadrant(s, series) {
   // Collect all points; auto-scale to [0,1] if any value falls outside it.
   const all = [];
-  for (const ser of series) for (const p of ser.points) all.push({ ...p, color: ser.color });
+  for (const ser of series) for (const p of ser.points) all.push({ ...p, color: ser.color, seriesName: ser.name });
   let xlo = Infinity, xhi = -Infinity, ylo = Infinity, yhi = -Infinity;
   for (const p of all) {
     const x = +p.x, y = +p.y;
@@ -335,8 +335,11 @@ function buildQuadrant(s, series) {
     if (y < ylo) ylo = y; if (y > yhi) yhi = y;
   }
   const inUnit = all.length && xlo >= 0 && xhi <= 1 && ylo >= 0 && yhi <= 1;
-  const sx = inUnit ? { min: 0, max: 1 } : { min: xlo, max: xhi || 1 };
-  const sy = inUnit ? { min: 0, max: 1 } : { min: ylo, max: yhi || 1 };
+  // Pad the auto-scaled domain so extreme points sit inside the frame
+  // instead of on (or visually outside) the plot border.
+  const pad = (lo, hi) => { const m = (hi - lo || 1) * 0.12; return { min: lo - m, max: hi + m }; };
+  const sx = inUnit ? { min: 0, max: 1 } : pad(xlo, xhi || 1);
+  const sy = inUnit ? { min: 0, max: 1 } : pad(ylo, yhi || 1);
 
   const xpos = (v) => PLOT.x + ((v - sx.min) / (sx.max - sx.min || 1)) * PLOT.w;
   const ypos = (v) => PLOT.y + PLOT.h - ((v - sy.min) / (sy.max - sy.min || 1)) * PLOT.h;
@@ -349,7 +352,7 @@ function buildQuadrant(s, series) {
     // Keep labels inside the plot: anchor toward the centre.
     const anchor = x > midX ? 'end' : 'start';
     const lx = x + (x > midX ? -14 : 14);
-    return { x, y, color: p.color, label: String(p.label || p.name || ''), anchor, lx, ly: y + 6 };
+    return { x, y, color: p.color, label: String(p.label || p.name || p.seriesName || ''), anchor, lx, ly: y + 6 };
   });
 
   return {

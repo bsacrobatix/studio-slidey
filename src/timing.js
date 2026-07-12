@@ -306,7 +306,7 @@ function estimateScene(scene, opts = {}) {
   // hold() calls produce frames. title uses ctx.hold directly so is unchanged.
   if (opts.noGaps) {
     switch (scene.type) {
-      case 'title':        return T.title_card;
+      case 'title':        return hold('title_card', scene.hold);
       case 'narrative':    return hold('narrative_hold',   scene.hold);
       case 'diagram':      return hold('diagram_hold',     scene.hold);
       case 'diagram-svg':  return hold('diagramsvg_hold',  scene.hold);
@@ -343,7 +343,7 @@ function estimateScene(scene, opts = {}) {
 
   switch (scene.type) {
     case 'title':
-      return T.title_card;
+      return hold('title_card', scene.hold);
 
     case 'narrative': {
       let f = T.narrative_eyebrow + T.narrative_body;

@@ -1378,7 +1378,7 @@ async function callTool(name, args = {}) {
         force: args.force,
       });
       const validation = validateSpec(patched, { specPath: abs });
-      return okResult({ ok: validation.valid, written, validation, spec: patched });
+      return okResult({ ok: validation.valid, written, validation, sceneCount: Array.isArray(patched.scenes) ? patched.scenes.length : 0 });
     }
     case 'slidey_layout_gallery': {
       let gallerySpecPath = null;
@@ -1415,7 +1415,7 @@ async function callTool(name, args = {}) {
       const updated = { ...spec, scenes };
       const written = writeSpecFile(args.path, updated);
       const validation = validateSpec(updated, { specPath: abs });
-      return okResult({ ok: validation.valid, written, validation, sceneIndex: insertIndex, scene, spec: updated });
+      return okResult({ ok: validation.valid, written, validation, sceneIndex: insertIndex, scene, sceneCount: updated.scenes.length });
     }
 
     case 'slidey_meme_search': {
@@ -1458,7 +1458,7 @@ async function callTool(name, args = {}) {
         ok: validation.valid, written, validation,
         sceneIndex: insertIndex, scene,
         template: memes.summary(template),
-        spec: updated,
+        sceneCount: updated.scenes.length,
       });
     }
 
@@ -1483,7 +1483,7 @@ async function callTool(name, args = {}) {
         sourceIndex,
         sceneIndex: insertIndex,
         scene,
-        spec: updated,
+        sceneCount: updated.scenes.length,
       });
     }
 
@@ -1504,7 +1504,6 @@ async function callTool(name, args = {}) {
         removedSceneIndex: sceneIndex,
         scene: removed,
         sceneCount: updated.scenes.length,
-        spec: updated,
       });
     }
 
@@ -1515,14 +1514,14 @@ async function callTool(name, args = {}) {
       const fromIndex = clampSceneIndex(args.fromIndex, scenes.length);
       const toIndex = clampSceneIndex(args.toIndex, scenes.length);
       if (fromIndex === toIndex) {
-        return okResult({ ok: true, written: { path: relPath(abs), bytes: 0, mtimeMs: fs.statSync(abs).mtimeMs }, validation: validateSpec(spec, { specPath: abs }), spec, sourceIndex: fromIndex, targetIndex: toIndex });
+        return okResult({ ok: true, written: { path: relPath(abs), bytes: 0, mtimeMs: fs.statSync(abs).mtimeMs }, validation: validateSpec(spec, { specPath: abs }), sourceIndex: fromIndex, targetIndex: toIndex });
       }
       const [scene] = scenes.splice(fromIndex, 1);
       scenes.splice(toIndex, 0, scene);
       const updated = { ...spec, scenes };
       const written = writeSpecFile(args.path, updated);
       const validation = validateSpec(updated, { specPath: abs });
-      return okResult({ ok: validation.valid, written, validation, sourceIndex: fromIndex, targetIndex: toIndex, spec: updated });
+      return okResult({ ok: validation.valid, written, validation, sourceIndex: fromIndex, targetIndex: toIndex, sceneCount: updated.scenes.length });
     }
 
     case 'slidey_validate': {
