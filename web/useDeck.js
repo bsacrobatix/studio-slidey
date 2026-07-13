@@ -83,6 +83,69 @@ export function createDeck(spec, specBaseUrl = '') {
   });
   let renderedSceneIndex = -1;
 
+  // Embed anchors deliberately carry producer-owned semantic identity in
+  // addition to the legacy numeric scope. Array position is useful for the
+  // live viewer, but is not durable evidence identity: inserting a scene must
+  // never make an old annotation silently point at a new scene.
+  function artifactIdentity() {
+    const raw = spec && spec.meta && spec.meta.artifact;
+    if (!raw || typeof raw !== 'object') return null;
+    const out = {};
+    for (const key of ['id', 'revision', 'contentDigest', 'sourceDigest', 'attemptDigest']) {
+      if (raw[key] != null && String(raw[key])) out[key] = String(raw[key]);
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
+  function sceneIdentity(sc, sceneIndex, stepIndex = state.stepIndex) {
+    const library = sc && sc._library ? sc._library : {};
+    const sourceScene = library.sourceId != null ? library.sourceId : (sc && (sc.id != null ? sc.id : sc.key));
+    // A source deck is represented as null rather than the viewer's transient
+    // "__source" id. A subset therefore reports the origin deck, never the
+    // subset currently being viewed.
+    const sourceDeck = library.sourceDeckId && library.sourceDeckId !== '__source'
+      ? String(library.sourceDeckId)
+      : null;
+    return {
+      artifact: artifactIdentity(),
+      deck: sourceDeck,
+      scene: sourceScene == null ? null : String(sourceScene),
+      sceneIndex,
+      step: Number.isInteger(stepIndex) ? stepIndex : 0,
+    };
+  }
+
+  function anchorForScene(sceneIndex = state.sceneIndex, stepIndex = state.stepIndex) {
+    return sceneIdentity(scenes[sceneIndex] || {}, sceneIndex, stepIndex);
+  }
+
+  function sameArtifact(requested, current) {
+    if (!requested || typeof requested !== 'object') return true;
+    if (!current || typeof current !== 'object') return !Object.keys(requested).length;
+    return ['id', 'revision', 'contentDigest', 'sourceDigest', 'attemptDigest']
+      .every((key) => requested[key] == null || String(requested[key]) === String(current[key] || ''));
+  }
+
+  // Resolve only a complete semantic anchor. In particular, do not fall back
+  // to sceneIndex when a requested stable scene id is absent: that would be a
+  // silent rebind after a revision/reorder.
+  async function gotoAnchor(anchor) {
+    if (!anchor || typeof anchor !== 'object') throw new Error('embed anchor is required');
+    if (!sameArtifact(anchor.artifact, artifactIdentity())) throw new Error('stale artifact identity');
+    if (anchor.scene == null || anchor.scene === '') throw new Error('embed anchor requires a stable scene id');
+    const wantScene = String(anchor.scene);
+    const wantDeck = anchor.deck == null || anchor.deck === '' ? null : String(anchor.deck);
+    const sceneIndex = scenes.findIndex((scene, index) => {
+      const candidate = sceneIdentity(scene, index, 0);
+      return candidate.scene === wantScene && candidate.deck === wantDeck;
+    });
+    if (sceneIndex < 0) throw new Error('stale scene anchor');
+    const stepIndex = Number.isInteger(Number(anchor.step)) && Number(anchor.step) >= 0
+      ? Number(anchor.step)
+      : 0;
+    return go(posForScene(sceneIndex, stepIndex));
+  }
+
   const assetCache = {};
   async function ensureAsset(src) {
     if (!src) return '';
@@ -237,6 +300,7 @@ export function createDeck(spec, specBaseUrl = '') {
       const sc = scenes[state.sceneIndex] || {};
       const label = sc.title || sc.eyebrow || sc.lede || sc.type || ('Scene ' + state.sceneIndex);
       const scope = String(state.sceneIndex);
+      const anchor = anchorForScene(state.sceneIndex, state.stepIndex);
       // Same-window notification so an in-page controller (the annotation pick
       // overlay) can rebuild for the new slide as the operator advances — it
       // can't see the parent-targeted postMessages below.
@@ -247,7 +311,7 @@ export function createDeck(spec, specBaseUrl = '') {
       // deck is the top window (not embedded).
       if (window.parent === window) return;
       window.parent.postMessage(
-        { type: 'embed:view', producer: 'slidey', scope, step: String(state.stepIndex), label, count: scenes.length },
+        { type: 'embed:view', producer: 'slidey', scope, step: String(state.stepIndex), label, count: scenes.length, anchor },
         '*',
       );
       window.parent.postMessage(
@@ -289,5 +353,5 @@ export function createDeck(spec, specBaseUrl = '') {
     return idx >= 0 ? idx : 0;
   }
 
-  return { state, render, go, next, prev, first, last, gotoScene, posForScene };
+  return { state, render, go, next, prev, first, last, gotoScene, posForScene, anchorForScene, gotoAnchor };
 }

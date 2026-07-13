@@ -130,6 +130,9 @@ const narrationEnabled = ref(true);
 const captionsEnabled = ref(true);
 const liveCaption = ref('');
 const narrationError = ref('');
+// Producer-owned rrweb playback time. It is copied into an annotation anchor
+// only while an rrweb scene is active; it is never interpreted by the host.
+const rrwebTimeMs = ref(null);
 const deckHasNarration = computed(() =>
   Boolean(currentSpec.value && Array.isArray(currentSpec.value.scenes)
     && currentSpec.value.scenes.some(scene => speechTextForScene(scene))));
@@ -1019,6 +1022,8 @@ function startLiveNarration(scope = 'deck') {
 }
 
 function onVideoTime(e) {
+  const ms = Number(e && e.detail && e.detail.ms);
+  rrwebTimeMs.value = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : null;
   if (!liveNarration.value) return;
   const scene = currentScene.value || {};
   if (scene.type !== 'video') return;
@@ -1814,6 +1819,15 @@ onMounted(async () => {
     getRoot: () => document,
     getSceneType: () => store.sceneType,
     getSceneIndex: () => (deck.value && deck.value.state ? deck.value.state.sceneIndex : 0),
+    getAnchor: () => {
+      const anchor = deck.value && deck.value.anchorForScene ? deck.value.anchorForScene() : null;
+      if (!anchor || !currentScene.value || !currentScene.value.rrweb || rrwebTimeMs.value == null) return anchor;
+      return { ...anchor, rrwebTime: rrwebTimeMs.value };
+    },
+    gotoAnchor: (anchor) => {
+      if (!deck.value || !deck.value.gotoAnchor) throw new Error('deck is not ready for anchor restoration');
+      return deck.value.gotoAnchor(anchor);
+    },
     gotoView: (sceneIndex, stepIndex) => {
       if (!deck.value) return;
       return deck.value.go(deck.value.posForScene(sceneIndex, stepIndex));
