@@ -12,6 +12,8 @@ const props = defineProps({
   narrationState: { type: Object, default: () => ({}) },
   playSlide: { type: Function, default: () => {} },
   playDeck: { type: Function, default: () => {} },
+  playStack: { type: Function, default: () => {} },
+  stackAvailable: { type: Boolean, default: false },
   setNarrationEnabled: { type: Function, default: () => {} },
   setCaptionsEnabled: { type: Function, default: () => {} },
   stopNarration: { type: Function, default: () => {} },
@@ -33,15 +35,11 @@ function onKey(e) {
   if (e.target.closest && e.target.closest('.slidey-ref-backdrop')) return;
   if (e.target.closest && e.target.closest('[data-slidey-reference-trigger]')) return;
   if (e.target.closest && e.target.closest('[data-slidey-ref]')) return;
-  // On a video scene, Left/Right always move the SLIDE — even while the player's
-  // scrub control or the <video> element has focus (which would otherwise seek
-  // the media). preventDefault suppresses that default so only the deck advances.
-  if (store.sceneType === 'video' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-    e.preventDefault();
-    if (e.key === 'ArrowRight') props.deck.next(); else props.deck.prev();
-    return;
-  }
-  if (e.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+  // Do not steal native keyboard behavior from controls. In particular, Enter
+  // must activate the focused button once (rather than also advancing a slide),
+  // and arrows must continue to seek a focused video player or range input.
+  if (e.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'AUDIO', 'VIDEO'].includes(e.target.tagName)
+    || e.target.closest?.('[role="button"], [role="slider"], [contenteditable="true"]')) return;
   switch (e.key) {
     case 'ArrowRight': case ' ': case 'PageDown': case 'Enter':
       e.preventDefault(); props.deck.next(); break;
@@ -86,7 +84,7 @@ onUnmounted(() => {
 
 <template>
   <div class="slidey-hud">
-    <div class="slidey-progress">
+    <div class="slidey-progress" role="status" aria-live="polite" aria-atomic="true">
       <span class="slidey-scene">scene {{ s.sceneIndex + 1 }}/{{ s.sceneCount }}</span>
       <span class="slidey-sep">·</span>
       <span class="slidey-step">step {{ s.stepIndex + 1 }}/{{ s.stepsInScene }}</span>
@@ -99,7 +97,42 @@ onUnmounted(() => {
       :disabled="s.pos <= 0"
       @click="deck.first()"
     >⏮</button>
-    <div class="slidey-bar"><div class="slidey-bar-fill" :style="{ width: (s.total > 1 ? (s.pos / (s.total - 1) * 100) : 100) + '%' }"></div></div>
+    <div class="slidey-playback-controls" @click.stop>
+      <button
+        type="button"
+        class="slidey-play-btn"
+        :class="{ active: playing && playScope === 'slide' }"
+        :title="playing && playScope === 'slide' ? 'Stop automatic slide playback' : 'Automatically reveal this slide from the start'"
+        :aria-label="playing && playScope === 'slide' ? 'Stop automatic slide playback' : 'Play this slide automatically from the start'"
+        @click="playing && playScope === 'slide' ? stopNarration() : playSlide()"
+      ><span class="slidey-play-icon">▶</span><span class="slidey-scope-icon" aria-hidden="true">▣</span><span>{{ playing && playScope === 'slide' ? 'Stop' : 'Slide' }}</span></button>
+      <button
+        type="button"
+        class="slidey-play-btn primary"
+        :class="{ active: playing && playScope === 'deck' }"
+        :title="playing && playScope === 'deck' ? 'Stop automatic deck playback' : 'Automatically reveal this deck'"
+        :aria-label="playing && playScope === 'deck' ? 'Stop automatic deck playback' : 'Play deck automatically'"
+        @click="playing && playScope === 'deck' ? stopNarration() : playDeck()"
+      ><span class="slidey-play-icon">▶</span><span class="slidey-scope-icon deck" aria-hidden="true">▤</span><span>{{ playing && playScope === 'deck' ? 'Stop' : 'Deck' }}</span></button>
+      <button
+        type="button"
+        class="slidey-play-btn"
+        :class="{ active: playing && playScope === 'stack' }"
+        :disabled="!stackAvailable"
+        :title="!stackAvailable ? 'Play Stack is available for hierarchy collections' : (playing && playScope === 'stack' ? 'Stop automatic stack playback' : 'Play the hierarchy from root to this deck')"
+        :aria-label="!stackAvailable ? 'Play Stack unavailable' : (playing && playScope === 'stack' ? 'Stop automatic stack playback' : 'Play hierarchy stack from root to this deck')"
+        @click="playing && playScope === 'stack' ? stopNarration() : playStack()"
+      ><span class="slidey-play-icon">▶</span><span class="slidey-scope-icon deck" aria-hidden="true">▥</span><span>{{ playing && playScope === 'stack' ? 'Stop' : 'Stack' }}</span></button>
+    </div>
+    <div
+      class="slidey-bar"
+      role="progressbar"
+      aria-label="Deck progress"
+      :aria-valuemin="0"
+      :aria-valuemax="Math.max(s.total - 1, 1)"
+      :aria-valuenow="s.pos"
+      :aria-valuetext="`Slide ${s.sceneIndex + 1} of ${s.sceneCount}, reveal ${s.stepIndex + 1} of ${s.stepsInScene}`"
+    ><div class="slidey-bar-fill" :style="{ width: (s.total > 1 ? (s.pos / (s.total - 1) * 100) : 100) + '%' }"></div></div>
     <button
       type="button"
       class="slidey-jump"
@@ -109,20 +142,6 @@ onUnmounted(() => {
       @click="deck.last()"
     >⏭</button>
     <div class="slidey-narration-controls" @click.stop>
-      <button
-        type="button"
-        class="slidey-play-btn"
-        :class="{ active: playing && playScope === 'slide' }"
-        :title="playing && playScope === 'slide' ? 'Stop automatic slide playback' : 'Automatically reveal this slide from the start'"
-        @click="playing && playScope === 'slide' ? stopNarration() : playSlide()"
-      ><span class="slidey-play-icon">▶</span><span class="slidey-scope-icon" aria-hidden="true">▣</span><span>{{ playing && playScope === 'slide' ? 'Stop' : 'Slide' }}</span></button>
-      <button
-        type="button"
-        class="slidey-play-btn primary"
-        :class="{ active: playing && playScope === 'deck' }"
-        :title="playing && playScope === 'deck' ? 'Stop automatic deck playback' : 'Automatically reveal this deck'"
-        @click="playing && playScope === 'deck' ? stopNarration() : playDeck()"
-      ><span class="slidey-play-icon">▶</span><span class="slidey-scope-icon deck" aria-hidden="true">▤</span><span>{{ playing && playScope === 'deck' ? 'Stop' : 'Deck' }}</span></button>
       <label class="slidey-play-toggle" :class="{ disabled: !narration.supported }" :title="narrationTitle">
         <input type="checkbox" :checked="narration.narrationEnabled" :disabled="!narration.supported" @change="setNarrationEnabled($event.target.checked)">
         <span>♪ Narration</span>
@@ -211,6 +230,7 @@ body.slidey-video-full .slidey-hud {
 }
 .slidey-jump:hover:not(:disabled) { color: #58a6ff; background: rgba(88,166,255,0.12); }
 .slidey-jump:disabled { opacity: 0.3; cursor: default; }
+.slidey-playback-controls,
 .slidey-narration-controls {
   pointer-events: auto;
   flex: none;

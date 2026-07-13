@@ -52,6 +52,7 @@ function writeWorkspace() {
           title: 'Child deck',
           scenes: [
             { id: 'child-title', type: 'title', title: 'CHILD DECK LANDED', tags: ['pitch'] },
+            { id: 'child-middle', type: 'title', title: 'CHILD DECK MIDDLE', tags: ['pitch'] },
             { id: 'child-close', type: 'title', title: 'CHILD DECK CLOSE', tags: ['pitch'] },
           ],
         },
@@ -66,6 +67,8 @@ function writeWorkspace() {
         bodyHtml: 'See the <a data-slidey-ref="mockup.html">mockup</a> and the '
           + '<a data-slidey-ref="deck:child">child deck</a>.',
       },
+      { id: 'main-middle', type: 'title', title: 'SOURCE DECK MIDDLE', tags: ['pitch'] },
+      { id: 'main-close', type: 'title', title: 'SOURCE DECK CLOSE', tags: ['pitch'] },
     ],
   };
   fs.writeFileSync(path.join(root, 'deck.slidey.json'), JSON.stringify(spec, null, 2));
@@ -132,10 +135,51 @@ test(
       // instead of retaining the source deck's captured state (1/1).
       assert.match(
         await page.$eval('.slidey-progress', (el) => el.textContent.replace(/\s+/g, ' ').trim()),
-        /scene 1\/2.*step 1\/1/,
+        /scene 1\/3/,
       );
       // No reference modal should have opened for a deck target.
       assert.equal(await page.$('.slidey-ref-viewer'), null);
+    });
+  },
+);
+
+test(
+  'hierarchy menu keeps each deck at its own last slide',
+  { skip: !haveDist && 'run npm run build:web first' },
+  async (t) => {
+    if (!await requireBrowser(t)) return;
+    await withViewerPage(t, async (page) => {
+      // The source deck starts at slide one. Opening another deck must not
+      // carry that index forward, and returning must restore this deck's own
+      // position after the child advances independently.
+      await page.click('[aria-label="Browse hierarchy"]');
+      await page.evaluate(() => {
+        [...document.querySelectorAll('.slidey-hierarchy-map-row')]
+          .find((el) => el.textContent.includes('Child deck')).click();
+      });
+      await page.waitForFunction(
+        () => (document.getElementById('title-card-title') || {}).textContent === 'CHILD DECK LANDED',
+        { timeout: 5000 },
+      );
+      // Selecting the hierarchy row leaves that button focused; blur it so the
+      // viewer's keyboard controller receives ArrowRight.
+      await page.evaluate(() => document.activeElement.blur());
+      await page.keyboard.press('ArrowRight');
+      await page.waitForFunction(
+        () => (document.getElementById('title-card-title') || {}).textContent === 'CHILD DECK MIDDLE',
+        { timeout: 5000 },
+      );
+
+      await page.click('[aria-label="Browse hierarchy"]');
+      await page.evaluate(() => {
+        [...document.querySelectorAll('.slidey-hierarchy-map-row')]
+          .find((el) => el.textContent.includes('Inline link modal test')).click();
+      });
+      await page.waitForSelector('#narrative-body a[data-slidey-ref]', { timeout: 5000 });
+      assert.match(
+        await page.$eval('.slidey-progress', (el) => el.textContent.replace(/\s+/g, ' ').trim()),
+        /scene 1\/3/,
+      );
     });
   },
 );

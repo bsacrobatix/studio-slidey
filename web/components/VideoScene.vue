@@ -45,6 +45,7 @@ const HUD_INSET = 52;
 // Show the transport: always when playing inline (non-cinematic), and during the
 // fullscreen cinematic playback (the intro/outro thumbnail stays chrome-free).
 const showControls = computed(() => !cinematic.value || expanded.value);
+const reducedMotion = ref(false);
 
 const frameRef = ref(null);
 const playerRef = ref(null);
@@ -56,6 +57,8 @@ const playbackStarted = ref(false);
 // snaps onto the thumbnail with no grow-in), on once we start expanding.
 const animate = ref(false);
 let introTimer = null;
+let motionQuery = null;
+let onMotionPreferenceChange = null;
 
 function emitVideoEvent(name, detail = {}) {
   if (typeof window === 'undefined' || typeof CustomEvent !== 'function') return;
@@ -161,7 +164,7 @@ function begin() {
   playbackStarted.value = false;
   animate.value = false;
   measure();
-  if (!cinematic.value) { phase.value = 'full'; nextTick(startPlayback); return; }
+  if (!cinematic.value || reducedMotion.value) { phase.value = 'full'; nextTick(startPlayback); return; }
   phase.value = 'intro';
   introTimer = setTimeout(() => {
     animate.value = true;       // enable the tween for the expand (and later shrink)
@@ -199,6 +202,10 @@ watch(expanded, setFullFlag);
 
 watch(() => store.scene, () => nextTick(begin));
 onMounted(() => {
+  motionQuery = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  onMotionPreferenceChange = () => { reducedMotion.value = Boolean(motionQuery && motionQuery.matches); };
+  onMotionPreferenceChange();
+  if (motionQuery) motionQuery.addEventListener('change', onMotionPreferenceChange);
   window.addEventListener('resize', onResize);
   window.addEventListener('slidey:video-command', onVideoCommand);
   nextTick(begin);
@@ -207,6 +214,7 @@ onBeforeUnmount(() => {
   clearTimeout(introTimer);
   window.removeEventListener('resize', onResize);
   window.removeEventListener('slidey:video-command', onVideoCommand);
+  if (motionQuery && onMotionPreferenceChange) motionQuery.removeEventListener('change', onMotionPreferenceChange);
   setFullFlag(false);
 });
 </script>
@@ -354,4 +362,7 @@ onBeforeUnmount(() => {
   transition: opacity 0.5s ease;
 }
 .video-cine-backdrop.expanded { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .video-cine-holder.animate, .video-cine-backdrop { transition: none; }
+}
 </style>

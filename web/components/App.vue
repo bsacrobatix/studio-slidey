@@ -16,7 +16,7 @@ import { createDeck, resolveAssetHref } from '../useDeck.js';
 import { installEmbedAnnotate } from '../embed-annotate.js';
 import { installInlineEdit } from '../inline-edit.js';
 import { initialViewFromSearch } from '../initial-view.js';
-import { resolveDeckSpec, linksForScene, sceneSectionIds, SOURCE_DECK_ID } from '../collections.mjs';
+import { resolveDeckSpec, hierarchyPathForDeck, linksForScene, sceneSectionIds, SOURCE_DECK_ID } from '../collections.mjs';
 import { chaptersFromEvents } from '../rrweb/chapters.js';
 import { resolveEvidencePlaybackHref } from '../evidencePlayback.mjs';
 import {
@@ -28,6 +28,16 @@ import {
 import { stepsForScene } from '../sceneSteps.mjs';
 import { normalizeReference, normalizeReferences } from '../reference-viewer.js';
 import { classifyInlineRefTarget } from '../inline-links.js';
+import { documentLanguageForSpec, documentTitleForSpec, sceneAnnouncement } from '../accessibility.mjs';
+import FeedbackModal from '../feedback/vendor/feedback-vue/src/FeedbackModal.vue';
+import {
+  anchorFor as feedbackAnchorForDeck,
+  slideyPrivacyManifest,
+  buildContext as buildFeedbackContext,
+  feedbackRouter,
+  feedbackSinks,
+  feedbackKindGroups,
+} from '../feedback/slideyFeedback.js';
 
 const deck = shallowRef(null);
 const currentSpec = ref(null);
@@ -69,12 +79,36 @@ const directReplay = ref({
 const cloning = ref(false);
 const cloneError = ref('');
 const activeReference = ref(null);
+const feedbackOpen = ref(false);
+const feedbackSink = ref('');
+const feedbackManifest = slideyPrivacyManifest();
+const feedbackRouterInstance = computed(() => {
+  if (typeof window !== 'undefined') {
+    window.__SLIDEY_FEEDBACK__ = { ...(window.__SLIDEY_FEEDBACK__ || {}), selectedSink: feedbackSink.value || feedbackSinks()[0]?.id };
+  }
+  return feedbackRouter();
+});
+const feedbackContext = computed(() => (feedbackOpen.value ? buildFeedbackContext() : null));
+function feedbackAnchorFor(kind) {
+  return feedbackAnchorForDeck(deck.value, currentSpec.value, kind);
+}
+function onFeedbackSubmitted() {
+  window.setTimeout(() => { feedbackOpen.value = false; }, 1500);
+}
+function onFeedbackOverlayClick(e) {
+  if (e.target === e.currentTarget) feedbackOpen.value = false;
+}
+function selectFeedbackSink(e) { feedbackSink.value = e.target.value; }
 const collection = shallowRef(null);
 const activeDeckId = ref(SOURCE_DECK_ID);
 const compactViewport = ref(false);
 const openCollectionMenu = ref('');
 const libraryBackStack = ref([]);
 const libraryForwardStack = ref([]);
+// A collection is a set of independently navigable presentations. Keep their
+// last positions here rather than treating the outgoing deck's index as a
+// meaningful position in the newly selected deck.
+const libraryDeckPositions = new Map();
 const libraryDecks = computed(() => collection.value && collection.value.isCollection ? collection.value.decks : []);
 const activeViewEditable = computed(() =>
   activeSpecEditable.value && (!collection.value || !collection.value.isCollection || collection.value.isSource));
@@ -104,11 +138,20 @@ const activeDeckTitle = computed(() => {
   const found = activeDeckInfo.value;
   return found ? found.title : activeDeckId.value;
 });
+const viewerTitle = computed(() => {
+  if (activeDeckInfo.value) return activeDeckTitle.value;
+  const meta = currentSpec.value && currentSpec.value.meta;
+  return (meta && (meta.title || meta.name)) || 'Untitled deck';
+});
 const currentScene = computed(() => {
   const spec = currentSpec.value;
   const state = deck.value && deck.value.state;
   return spec && state && Array.isArray(spec.scenes) ? spec.scenes[state.sceneIndex] || null : null;
 });
+const currentSceneAnnouncement = computed(() => sceneAnnouncement(
+  currentSpec.value,
+  deck.value && deck.value.state,
+));
 const currentLinks = computed(() => linksForScene(currentScene.value, collection.value));
 const compactWorkspace = computed(() => workspace.value && !embedded.value && viewerMode.value !== 'present' && compactViewport.value);
 const rrwebModal = ref({
@@ -126,6 +169,7 @@ const narrationSpeaking = ref(false);
 const narrationLoading = ref(false);
 const liveNarration = ref(false);
 const livePlaybackScope = ref('');
+const livePlaybackStack = ref(null);
 const narrationEnabled = ref(true);
 const captionsEnabled = ref(true);
 const liveCaption = ref('');
@@ -518,6 +562,18 @@ function resetLibraryNavigationTrail() {
   libraryForwardStack.value = [];
 }
 
+function rememberLibraryDeckPosition(deckId = activeDeckId.value, state = deck.value && deck.value.state) {
+  if (!deckId || !state) return;
+  libraryDeckPositions.set(deckId, {
+    sceneIndex: state.sceneIndex,
+    stepIndex: state.stepIndex,
+  });
+}
+
+function resetLibraryDeckPositions() {
+  libraryDeckPositions.clear();
+}
+
 function toggleCollectionMenu(menu) {
   openCollectionMenu.value = openCollectionMenu.value === menu ? '' : menu;
 }
@@ -633,6 +689,7 @@ function stopNarration(opts = {}) {
   sceneNarrationSeq += 1;
   liveNarration.value = false;
   livePlaybackScope.value = '';
+  livePlaybackStack.value = null;
   liveCaption.value = '';
   clearLiveNarrationTimer();
   resetVideoCueState();
@@ -645,7 +702,25 @@ function stopNarration(opts = {}) {
 }
 
 function setNarrationEnabled(enabled) {
-  narrationEnabled.value = Boolean(enabled);
+  const nextEnabled = Boolean(enabled);
+  if (narrationEnabled.value === nextEnabled) return;
+  narrationEnabled.value = nextEnabled;
+
+  // Audio cancellation increments narrationSeq, which correctly stops the
+  // current utterance but used to make the reveal-playback loop interpret the
+  // toggle as a terminal failure. Restart that loop at the *next* reveal so
+  // automatic slide/deck playback keeps moving under the newly chosen mode.
+  // Video playback is already independent of cue audio: its time events simply
+  // start (or skip) later cues according to narrationEnabled.
+  const scene = currentScene.value;
+  if (liveNarration.value && scene && scene.type !== 'video') {
+    sceneNarrationSeq += 1;
+    clearLiveNarrationTimer();
+    resetVideoCueState();
+    stopNarrationAudioOnly();
+    nextTick(() => runLiveNarrationForCurrent({ resumeAfterCurrentStep: true }));
+    return;
+  }
   if (!narrationEnabled.value) stopNarrationAudioOnly();
 }
 
@@ -843,14 +918,14 @@ async function playBufferedNarrationSteps(items, sceneToken) {
   return true;
 }
 
-async function playRevealStepsWithoutNarration(scene, token) {
+async function playRevealStepsWithoutNarration(scene, token, startStepIndex = 0) {
   if (!deck.value || !scene) return false;
   const state = deck.value.state;
   const sceneIndex = state ? state.sceneIndex : 0;
   const steps = stepsForScene(scene);
   const startPos = deck.value.posForScene(sceneIndex, 0);
   const cues = stepNarrationCues(scene, steps);
-  for (let i = 0; i < steps.length; i += 1) {
+  for (let i = Math.max(0, startStepIndex); i < steps.length; i += 1) {
     if (token !== sceneNarrationSeq) return false;
     if (captionsEnabled.value) liveCaption.value = String(cues[i] || '').trim();
     const ok = await goForSceneNarration(startPos + i, token);
@@ -877,9 +952,41 @@ async function advanceLiveNarration() {
   clearLiveNarrationTimer();
   if (!liveNarration.value || !deck.value) return;
   const state = deck.value.state;
-  if (!state || livePlaybackScope.value === 'slide' || state.sceneIndex + 1 >= state.sceneCount) {
+  if (!state || livePlaybackScope.value === 'slide') {
     liveNarration.value = false;
     livePlaybackScope.value = '';
+    livePlaybackStack.value = null;
+    narrationSpeaking.value = false;
+    liveCaption.value = '';
+    resetVideoCueState();
+    return;
+  }
+  if (state.sceneIndex + 1 >= state.sceneCount) {
+    const stack = livePlaybackStack.value;
+    const nextIndex = stack && stack.index + 1;
+    if (livePlaybackScope.value === 'stack' && stack && nextIndex < stack.deckIds.length) {
+      livePlaybackStack.value = { ...stack, index: nextIndex };
+      liveNarration.value = false;
+      try {
+        const changed = await switchLibraryDeck(stack.deckIds[nextIndex], null, {
+          preservePlayback: true,
+          restart: true,
+        });
+        if (!changed) throw new Error('Could not load the next hierarchy deck');
+        liveNarration.value = true;
+        livePlaybackScope.value = 'stack';
+        sceneNarrationSeq += 1;
+        await nextTick();
+        runLiveNarrationForCurrent();
+      } catch (err) {
+        stopNarration();
+        narrationError.value = String(err.message || err);
+      }
+      return;
+    }
+    liveNarration.value = false;
+    livePlaybackScope.value = '';
+    livePlaybackStack.value = null;
     narrationSpeaking.value = false;
     liveCaption.value = '';
     resetVideoCueState();
@@ -922,7 +1029,7 @@ function firstNarrationStepIndex(scene, steps) {
   return 0;
 }
 
-async function playCurrentSceneByReveal(scene, token) {
+async function playCurrentSceneByReveal(scene, token, startStepIndex = 0) {
   if (!deck.value || !scene) return false;
   const state = deck.value.state;
   const sceneIndex = state ? state.sceneIndex : 0;
@@ -943,14 +1050,14 @@ async function playCurrentSceneByReveal(scene, token) {
   }
   const delayMs = scene.type === 'graph' ? 760 : 650;
   const items = [];
-  for (let i = firstStepIndex; i < steps.length; i += 1) {
+  for (let i = Math.max(firstStepIndex, startStepIndex); i < steps.length; i += 1) {
     items.push({ index: i, pos: startPos + i, cue: String(cues[i] || '').trim(), delayMs });
   }
   if (!items.length) return true;
   return playBufferedNarrationSteps(items, token);
 }
 
-function runLiveNarrationForCurrent() {
+function runLiveNarrationForCurrent(opts = {}) {
   if (!liveNarration.value || !deck.value) return;
   clearLiveNarrationTimer();
   resetVideoCueState();
@@ -980,10 +1087,14 @@ function runLiveNarrationForCurrent() {
   const token = sceneNarrationSeq;
   const steps = stepsForScene(scene);
   const text = speechTextForScene(scene);
+  const state = deck.value.state;
+  const startStepIndex = opts.resumeAfterCurrentStep && state
+    ? Math.min(steps.length, state.stepIndex + 1)
+    : 0;
   if (text || steps.length) {
     const play = narrationEnabled.value && narrationPreviewSupported.value
-      ? playCurrentSceneByReveal(scene, token)
-      : playRevealStepsWithoutNarration(scene, token);
+      ? playCurrentSceneByReveal(scene, token, startStepIndex)
+      : playRevealStepsWithoutNarration(scene, token, startStepIndex);
     play.then(ok => {
       if (ok && liveNarration.value && token === sceneNarrationSeq) advanceLiveNarration();
     });
@@ -1013,6 +1124,31 @@ function listenCurrentNarration() {
 function startLiveNarration(scope = 'deck') {
   sceneNarrationSeq += 1;
   if (!deck.value) return;
+  if (scope === 'stack') {
+    const deckIds = hierarchyPathForDeck(libraryDeckRows.value, activeDeckId.value);
+    if (!deckIds.length) return;
+    if (narrationEnabled.value && narrationPreviewSupported.value) resetNarrationForUserGesture();
+    clearLiveNarrationTimer();
+    resetVideoCueState();
+    livePlaybackStack.value = { deckIds, index: 0 };
+    liveNarration.value = false;
+    livePlaybackScope.value = 'stack';
+    liveCaption.value = '';
+    narrationError.value = '';
+    switchLibraryDeck(deckIds[0], null, { preservePlayback: true, restart: true }).then(changed => {
+      if (!changed) {
+        livePlaybackStack.value = null;
+        narrationError.value = 'Could not start hierarchy stack playback.';
+        return;
+      }
+      liveNarration.value = true;
+      livePlaybackScope.value = 'stack';
+      sceneNarrationSeq += 1;
+      nextTick(runLiveNarrationForCurrent);
+    });
+    return;
+  }
+  livePlaybackStack.value = null;
   if (narrationEnabled.value && narrationPreviewSupported.value) resetNarrationForUserGesture();
   liveNarration.value = true;
   livePlaybackScope.value = scope === 'slide' ? 'slide' : 'deck';
@@ -1159,7 +1295,7 @@ function targetPosition(nextDeck, spec, target) {
 
 async function loadSpec(spec, baseUrl, restore, opts = {}) {
   resetDirectReplay();
-  stopNarration({ pauseVideo: false });
+  if (!opts.preservePlayback) stopNarration({ pauseVideo: false });
   const resolved = resolveDeckSpec(spec, { deckId: opts.deckId });
   if (resolved.errors && resolved.errors.length) {
     throw new Error(resolved.errors.join('; '));
@@ -1170,6 +1306,8 @@ async function loadSpec(spec, baseUrl, restore, opts = {}) {
   }
   sourceSpec.value = spec;
   currentSpec.value = renderSpec;
+  document.documentElement.lang = documentLanguageForSpec(renderSpec);
+  document.title = documentTitleForSpec(renderSpec);
   collection.value = resolved;
   activeDeckId.value = resolved.deckId || SOURCE_DECK_ID;
   store.setMeta(renderSpec.meta || {});
@@ -1179,6 +1317,7 @@ async function loadSpec(spec, baseUrl, restore, opts = {}) {
     sessionSpec.value = cloneSpec(spec);
     dirty.value = false;
     resetLibraryNavigationTrail();
+    resetLibraryDeckPositions();
   }
   saveError.value = '';
   if (!activeViewEditable.value && isEditMode.value) setViewerMode('browse');
@@ -1317,21 +1456,19 @@ async function openPath(rel, restore, deckId) {
   }
 }
 
-async function switchLibraryDeck(deckId, target = null) {
+async function switchLibraryDeck(deckId, target = null, opts = {}) {
   if (!sourceSpec.value || !deckId) return false;
-  const cur = deck.value && deck.value.state;
-  const restore = cur && !target ? { sceneIndex: cur.sceneIndex, stepIndex: cur.stepIndex } : null;
-  const scene = currentScene.value;
-  const inferredTarget = target || (scene ? {
-    scene: (scene._library && scene._library.sourceId) || scene.id || null,
-    section: sceneSectionIds(scene)[0] || null,
-    step: cur ? cur.stepIndex : null,
-  } : null);
+  rememberLibraryDeckPosition();
+  // A menu switch has no destination slide, so resume the selected deck where
+  // it was last left (or its first slide on first visit). Library links retain
+  // their explicit destination through `target` below.
+  const restore = !target && !opts.restart ? libraryDeckPositions.get(deckId) || null : null;
   try {
     loading.value = true;
     await loadSpec(sourceSpec.value, activeSpecBaseUrl.value, restore, {
       deckId,
-      target: inferredTarget,
+      target,
+      preservePlayback: opts.preservePlayback,
       resetSession: false,
     });
     return true;
@@ -1403,10 +1540,9 @@ async function pollMtime() {
     const changed = version ? (loadedVersion && version !== loadedVersion) : (loadedMtime && mtimeMs !== loadedMtime);
     if (changed) {
       stale.value = true;
-      // Embedded preview: there's no sidebar reload pill, so refresh in place —
-      // unless the user has unsaved in-place edits, in which case auto-reloading
-      // would silently discard them. Leave it stale; the floating reload button
-      // lets them pull the external version manually when they're ready.
+      // Embedded preview refreshes in place unless there are unsaved edits,
+      // which would otherwise be discarded. In that case the compact deck
+      // control exposes a reload action for the external version.
       if (embedded.value && !(isEditMode.value && dirty.value)) reloadActive();
     }
   } catch (_) { /* server gone / transient — try again next tick */ }
@@ -1469,11 +1605,16 @@ function fitScale() {
   const showSidebar = workspace.value && !embedded.value && viewerMode.value !== 'present' && !compactViewport.value;
   const sw = showSidebar ? sidebarWidth.value : 0;
   const ew = workspace.value && deck.value && isEditMode.value ? editorWidth.value : 0;
+  // The persistent viewer bar reserves real stage space instead of sitting on
+  // top of deck content. Replay owns its full-screen surface and has no bar.
+  const topBarH = deck.value && !directReplay.active ? 54 : 0;
   const availableW = Math.max(320, window.innerWidth - sw - ew);
-  const scale = Math.min(availableW / 1920, window.innerHeight / 1080);
+  const availableH = Math.max(180, window.innerHeight - topBarH);
+  const scale = Math.min(availableW / 1920, availableH / 1080);
   document.documentElement.style.setProperty('--slidey-scale', String(scale));
   document.documentElement.style.setProperty('--slidey-sidebar-w', `${sw}px`);
   document.documentElement.style.setProperty('--slidey-editor-w', `${ew}px`);
+  document.documentElement.style.setProperty('--slidey-topbar-h', `${topBarH}px`);
 }
 
 function setViewerMode(mode) {
@@ -1871,6 +2012,7 @@ onMounted(async () => {
       if (r.ok) cfg = await r.json();
     } catch (_) { /* not the CLI viewer — fall through */ }
       if (cfg && cfg.root) {
+        if (cfg.feedback) window.__SLIDEY_FEEDBACK__ = cfg.feedback;
         workspace.value = true;
         embedded.value = !!cfg.embedded;
         document.body.classList.add('slidey-workspace');
@@ -1931,39 +2073,6 @@ onUnmounted(() => {
     <div class="slidey-sidebar-head">
       <span class="slidey-sidebar-mark">slidey</span>
       <span class="slidey-sidebar-root" :title="tree && tree.name">{{ tree ? tree.name : '' }}</span>
-      <div v-if="deck" class="slidey-mode-toggle" role="group" aria-label="Viewer mode">
-        <button
-          type="button"
-          :class="{ active: viewerMode === 'browse' }"
-          :aria-pressed="viewerMode === 'browse'"
-          title="Browse mode"
-          @click.stop="setViewerMode('browse')"
-        >Browse</button>
-        <button
-          type="button"
-          :class="{ active: viewerMode === 'edit' }"
-          :aria-pressed="viewerMode === 'edit'"
-          :disabled="!activeViewEditable"
-          :title="activeViewEditable ? 'Edit mode' : 'Subset decks are read-only views of the source deck'"
-          @click.stop="setViewerMode('edit')"
-        >{{ activeViewEditable ? 'Edit' : 'Read-only' }}</button>
-        <button
-          type="button"
-          :class="{ active: viewerMode === 'present' }"
-          :aria-pressed="viewerMode === 'present'"
-          title="Present mode — hide the sidebar and editor for full-screen display"
-          @click.stop="setViewerMode('present')"
-        >Present</button>
-      </div>
-      <!-- Live-reload affordance: appears when the open spec changes on disk. -->
-      <button
-        v-if="stale"
-        class="slidey-reload"
-        :class="{ spinning: reloading }"
-        :disabled="reloading"
-        title="This deck changed on disk — click to reload"
-        @click.stop="reloadActive"
-      >⟳ reload</button>
       <button
         v-if="activePath && deck && !activeSpecEditable"
         class="slidey-sidebar-clone"
@@ -1986,57 +2095,6 @@ onUnmounted(() => {
     <div class="slidey-sidebar-resize" @mousedown="startResize"></div>
   </aside>
 
-  <!-- Embedded preview (VS Code): floating mode controls. In-place editing
-       uses the same scene editor overlay as CLI + workspace. -->
-  <div v-if="embedded && deck && !directReplay.active" class="slidey-embedded-edit">
-    <div class="slidey-embedded-toggle" role="group" aria-label="Viewer mode">
-      <button
-        type="button"
-        :class="{ active: viewerMode === 'edit' }"
-        :aria-pressed="viewerMode === 'edit'"
-        :disabled="!activeViewEditable"
-        title="Edit mode — click any text on the slide to edit it"
-        @click.stop="setViewerMode('edit')"
-      >Edit</button>
-      <button
-        type="button"
-        :class="{ active: viewerMode === 'present' }"
-        :aria-pressed="viewerMode === 'present'"
-        title="Present mode — clean full-screen view for showing the deck"
-        @click.stop="setViewerMode('present')"
-      >Present</button>
-    </div>
-      <button
-        v-if="isEditMode && !embedded"
-        type="button"
-        class="slidey-embedded-save"
-        :class="{ dirty }"
-        :disabled="!dirty || saving || !activeViewEditable"
-        :title="saveError || 'Save edits back to the file'"
-        @click.stop="saveActive"
-      >{{ saving ? 'Saving…' : (dirty ? 'Save' : 'Saved') }}</button>
-      <button
-        v-if="isEditMode && !embedded"
-        type="button"
-        class="slidey-embedded-revert"
-        :disabled="!dirty || saving || !activeViewEditable"
-        title="Discard edits and revert to the last saved version"
-        @click.stop="revertActive"
-      >Revert</button>
-    <span v-if="isEditMode && !embedded && saveError" class="slidey-embedded-saveerr" :title="saveError">⚠ save failed</span>
-  </div>
-
-  <!-- Embedded preview: floating manual-reload button (deck also auto-reloads). -->
-  <button
-    v-if="embedded && deck && !directReplay.active"
-    class="slidey-embedded-reload"
-    :class="{ spinning: reloading }"
-    :disabled="reloading"
-    title="Reload this deck from disk"
-    aria-label="Reload deck"
-    @click.stop="reloadActive"
-  >⟳</button>
-
   <!-- Reload-failure toast: the previous deck stays on screen; this just informs. -->
   <div v-if="reloadError" class="slidey-reload-toast" @click="clearReloadError">
     <span class="slidey-reload-toast-icon">⚠</span>
@@ -2044,7 +2102,7 @@ onUnmounted(() => {
   </div>
 
   <button
-    v-if="deck && libraryBackAffordance && !isEditMode"
+    v-if="deck && libraryBackAffordance && !isEditMode && !activeIsHierarchy"
     type="button"
     class="slidey-library-affordance slidey-library-affordance-up slidey-library-link"
     :class="{ 'with-hierarchy-overlay': activeIsHierarchy }"
@@ -2056,28 +2114,248 @@ onUnmounted(() => {
     <span v-if="libraryBackAffordance.context" class="slidey-library-affordance-context">{{ libraryBackAffordance.context }}</span>
   </button>
 
-  <nav
-    v-if="deck && activeIsHierarchy"
-    class="slidey-hierarchy-location"
-    aria-label="Current deck location in hierarchy"
+  <header
+    v-if="deck && !directReplay.active"
+    class="slidey-deck-chrome"
+    :class="{ 'has-collection-nav': libraryDeckRows.length }"
     @click.stop
   >
-    <div class="slidey-hierarchy-location-kicker">Hierarchy · current deck</div>
-    <div class="slidey-hierarchy-location-title" :title="activeDeckTitle">{{ activeDeckTitle }}</div>
-    <div class="slidey-hierarchy-location-trail" aria-label="Breadcrumb path">
-      <template v-for="(crumb, i) in activeHierarchyOverlayTrail" :key="crumb.id">
-        <span v-if="i" class="slidey-hierarchy-location-separator" aria-hidden="true">›</span>
+    <nav v-if="activeHierarchyTrail.length > 1" class="slidey-deck-crumbs" aria-label="Parent deck path">
+      <template v-for="(crumb, i) in activeHierarchyTrail.slice(0, -1)" :key="crumb.id">
+        <span v-if="i" class="slidey-deck-crumb-separator" aria-hidden="true">/</span>
         <button
           type="button"
-          class="slidey-hierarchy-location-crumb"
-          :class="{ active: crumb.id === activeDeckId }"
+          class="slidey-deck-crumb"
           :title="crumb.description || crumb.title"
-          :aria-current="crumb.id === activeDeckId ? 'page' : undefined"
           @click.stop="switchLibraryDeckFromMenu(crumb.id)"
         >{{ crumb.title }}</button>
       </template>
+    </nav>
+    <div class="slidey-deck-title" :title="viewerTitle">{{ viewerTitle }}</div>
+    <div v-if="workspace || embedded" class="slidey-deck-actions" role="group" aria-label="Viewer mode">
+      <button
+        v-if="stale"
+        type="button"
+        class="slidey-deck-mode slidey-deck-reload"
+        :class="{ spinning: reloading }"
+        :disabled="reloading"
+        title="This deck changed on disk — reload it"
+        data-tooltip="This deck changed on disk — reload it"
+        aria-label="Reload changed deck"
+        @click.stop="reloadActive"
+      ><span aria-hidden="true">⟳</span></button>
+      <button
+        type="button"
+        class="slidey-deck-mode"
+        :class="{ active: viewerMode === 'browse' }"
+        :aria-pressed="viewerMode === 'browse'"
+        title="Browse deck"
+        data-tooltip="Browse deck"
+        aria-label="Browse deck"
+        @click.stop="setViewerMode('browse')"
+      ><span aria-hidden="true">◉</span></button>
+      <button
+        type="button"
+        class="slidey-deck-mode"
+        :class="{ active: viewerMode === 'edit' }"
+        :aria-pressed="viewerMode === 'edit'"
+        :disabled="!activeViewEditable"
+        :title="activeViewEditable ? 'Edit deck' : 'This deck is read-only'"
+        :data-tooltip="activeViewEditable ? 'Edit deck' : 'This deck is read-only'"
+        :aria-label="activeViewEditable ? 'Edit deck' : 'This deck is read-only'"
+        @click.stop="setViewerMode('edit')"
+      ><span aria-hidden="true">✎</span></button>
+      <button
+        type="button"
+        class="slidey-deck-mode"
+        :class="{ active: viewerMode === 'present' }"
+        :aria-pressed="viewerMode === 'present'"
+        title="Present full screen"
+        data-tooltip="Present full screen"
+        aria-label="Present full screen"
+        @click.stop="setViewerMode('present')"
+      ><span aria-hidden="true">⛶</span></button>
     </div>
-  </nav>
+    <div v-if="!embedded" class="slidey-deck-actions" role="group" aria-label="Feedback">
+      <button
+        type="button"
+        class="slidey-deck-mode"
+        title="Send feedback"
+        data-tooltip="Send feedback"
+        aria-label="Send feedback"
+        @click.stop="feedbackOpen = true"
+      ><span aria-hidden="true">💬</span></button>
+    </div>
+    <nav
+      v-if="libraryDeckRows.length"
+      class="slidey-collection-nav"
+      aria-label="Collection navigation"
+      @click.stop
+    >
+        <div class="slidey-collection-tabs" role="group" aria-label="Collection menus">
+          <button
+            type="button"
+            class="slidey-deck-mode slidey-collection-tab"
+            :class="{ active: openCollectionMenu === 'hierarchy', current: activeIsHierarchy }"
+            :aria-expanded="openCollectionMenu === 'hierarchy'"
+            aria-controls="slidey-hierarchy-menu"
+            title="Browse hierarchy"
+            data-tooltip="Browse hierarchy"
+            aria-label="Browse hierarchy"
+            @click.stop="toggleCollectionMenu('hierarchy')"
+          >
+            <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 3.5h3v3H3zM10 9.5h3v3h-3zM10 2.5h3v3h-3zM6 5v3.5h4M6 10.5h4" /></svg>
+            <span class="slidey-collection-tab-label">Hierarchy</span>
+          </button>
+          <button
+            type="button"
+            class="slidey-deck-mode slidey-collection-tab subsets"
+            :class="{ active: openCollectionMenu === 'subsets', current: activeIsSubset }"
+            :aria-expanded="openCollectionMenu === 'subsets'"
+            aria-controls="slidey-subsets-menu"
+            title="Browse subset views"
+            data-tooltip="Browse subset views"
+            aria-label="Browse subset views"
+            @click.stop="toggleCollectionMenu('subsets')"
+          >
+            <svg aria-hidden="true" viewBox="0 0 16 16"><rect x="2.5" y="3" width="7" height="7" rx="1" /><rect x="6.5" y="6" width="7" height="7" rx="1" /></svg>
+            <span class="slidey-collection-tab-label">Subsets</span>
+          </button>
+        </div>
+
+        <section
+          v-if="openCollectionMenu === 'hierarchy'"
+          id="slidey-hierarchy-menu"
+          class="slidey-collection-popover slidey-collection-popover-hierarchy"
+          aria-label="Hierarchy menu"
+        >
+          <header class="slidey-collection-popover-head">
+            <div>
+              <div class="slidey-collection-kicker">Hierarchy</div>
+              <div class="slidey-collection-title" :title="collectionTitle">{{ collectionTitle }}</div>
+            </div>
+            <div class="slidey-collection-status">{{ activeDeckStatus }}</div>
+          </header>
+
+          <div class="slidey-hierarchy-trail" aria-label="Current hierarchy path">
+            <button
+              v-for="(crumb, i) in activeHierarchyTrail"
+              :key="crumb.id"
+              type="button"
+              class="slidey-hierarchy-crumb"
+              :class="{ active: crumb.id === activeDeckId }"
+              :title="crumb.description || crumb.title"
+              @click.stop="switchLibraryDeckFromMenu(crumb.id)"
+            >
+              <span v-if="i" class="slidey-hierarchy-separator" aria-hidden="true">&rsaquo;</span>
+              <span>{{ crumb.title }}</span>
+            </button>
+          </div>
+
+          <div v-if="hierarchyLinkRows.length" class="slidey-hierarchy-next" aria-label="Hierarchy destinations from current slide">
+            <div class="slidey-collection-section-label">{{ currentSectionTitle || 'Current slide' }}</div>
+            <button
+              v-for="(link, i) in hierarchyLinkRows"
+              :key="`${link.deck}:${link.section || ''}:${link.scene || ''}:${i}`"
+              type="button"
+              class="slidey-hierarchy-next-row"
+              @click.stop="openLibraryLink(link)"
+            >
+              <span class="slidey-hierarchy-next-relation">{{ link.relation }}</span>
+              <span class="slidey-hierarchy-next-title">{{ link.label }}</span>
+              <span v-if="link.metaText" class="slidey-hierarchy-next-meta">{{ link.metaText }}</span>
+            </button>
+          </div>
+
+          <div class="slidey-hierarchy-map" aria-label="Collection hierarchy">
+            <button
+              v-for="option in hierarchyDeckRows"
+              :key="option.id"
+              type="button"
+              class="slidey-hierarchy-map-row"
+              :class="{ active: option.id === activeDeckId }"
+              :style="{ paddingLeft: (10 + option.level * 18) + 'px' }"
+              :title="option.description || option.title"
+              @click.stop="switchLibraryDeckFromMenu(option.id)"
+            >
+              <span class="slidey-hierarchy-node" :class="`kind-${option.kind.toLowerCase()}`"></span>
+              <span class="slidey-hierarchy-map-copy">
+                <span class="slidey-hierarchy-map-title">{{ option.title }}</span>
+                <span v-if="option.metaText" class="slidey-hierarchy-map-meta">{{ option.metaText }}</span>
+              </span>
+              <span class="slidey-hierarchy-map-kind">{{ option.kind }}</span>
+            </button>
+          </div>
+        </section>
+
+        <section
+          v-if="openCollectionMenu === 'subsets'"
+          id="slidey-subsets-menu"
+          class="slidey-collection-popover slidey-collection-popover-subsets"
+          aria-label="Subsets menu"
+        >
+          <header class="slidey-collection-popover-head">
+            <div>
+              <div class="slidey-collection-kicker">Subsets</div>
+              <div class="slidey-collection-title" :title="collectionTitle">{{ collectionTitle }}</div>
+            </div>
+            <div class="slidey-collection-status">{{ sourceSceneCount }} source slides</div>
+          </header>
+
+          <div v-if="subsetLinkRows.length" class="slidey-subset-linked" aria-label="Subset destinations from current slide">
+            <div class="slidey-collection-section-label">{{ currentSectionTitle || 'Current slide' }}</div>
+            <button
+              v-for="(link, i) in subsetLinkRows"
+              :key="`${link.deck}:${link.section || ''}:${link.scene || ''}:${i}`"
+              type="button"
+              class="slidey-subset-row linked"
+              @click.stop="openLibraryLink(link)"
+            >
+              <span class="slidey-subset-title">{{ link.label }}</span>
+              <span v-if="link.metaText" class="slidey-subset-meta">{{ link.metaText }}</span>
+            </button>
+          </div>
+
+          <div class="slidey-subset-list" aria-label="Subset decks">
+            <button
+              v-for="option in subsetDeckRows"
+              :key="option.id"
+              type="button"
+              class="slidey-subset-row"
+              :class="{ active: option.id === activeDeckId }"
+              :title="option.description || option.title"
+              @click.stop="switchLibraryDeckFromMenu(option.id)"
+            >
+              <span class="slidey-subset-main">
+                <span class="slidey-subset-title">{{ option.title }}</span>
+                <span class="slidey-subset-count">{{ option.sceneCount }} slides</span>
+              </span>
+              <span v-if="option.metaText" class="slidey-subset-meta">{{ option.metaText }}</span>
+            </button>
+            <div v-if="!subsetDeckRows.length" class="slidey-subset-empty">No subsets</div>
+          </div>
+        </section>
+    </nav>
+    <div v-if="isEditMode && !embedded" class="slidey-deck-actions slidey-deck-edit-actions" role="group" aria-label="Edit actions">
+      <span class="slidey-deck-action-divider" aria-hidden="true"></span>
+      <button
+        v-if="isEditMode && !embedded"
+        type="button"
+        class="slidey-deck-save"
+        :class="{ dirty }"
+        :disabled="!dirty || saving || !activeViewEditable"
+        :title="saveError || 'Save edits'"
+        @click.stop="saveActive"
+      >{{ saving ? '…' : 'Save' }}</button>
+      <button
+        v-if="isEditMode && !embedded && dirty"
+        type="button"
+        class="slidey-deck-revert"
+        title="Discard unsaved edits"
+        @click.stop="revertActive"
+      >↶</button>
+    </div>
+  </header>
 
   <button
     v-if="deck && libraryForwardAffordance && !isEditMode"
@@ -2090,153 +2368,6 @@ onUnmounted(() => {
     <span class="slidey-library-affordance-title">{{ libraryForwardAffordance.title }}</span>
     <span v-if="libraryForwardAffordance.context" class="slidey-library-affordance-context">{{ libraryForwardAffordance.context }}</span>
   </button>
-
-  <nav
-    v-if="deck && libraryDeckRows.length"
-    class="slidey-collection-nav"
-    aria-label="Collection navigation"
-    @click.stop
-  >
-    <div class="slidey-collection-tabs" role="group" aria-label="Collection menus">
-      <button
-        type="button"
-        class="slidey-collection-tab"
-        :class="{ active: openCollectionMenu === 'hierarchy', current: activeIsHierarchy }"
-        :aria-expanded="openCollectionMenu === 'hierarchy'"
-        aria-controls="slidey-hierarchy-menu"
-        title="Hierarchy navigation"
-        @click.stop="toggleCollectionMenu('hierarchy')"
-      >
-        <span class="slidey-collection-tab-label">Hierarchy</span>
-        <span class="slidey-collection-tab-value" :title="activeHierarchySummary">{{ activeHierarchySummary }}</span>
-      </button>
-      <button
-        type="button"
-        class="slidey-collection-tab"
-        :class="{ active: openCollectionMenu === 'subsets', current: activeIsSubset }"
-        :aria-expanded="openCollectionMenu === 'subsets'"
-        aria-controls="slidey-subsets-menu"
-        title="Subset views"
-        @click.stop="toggleCollectionMenu('subsets')"
-      >
-        <span class="slidey-collection-tab-label">Subsets</span>
-        <span class="slidey-collection-tab-value" :title="activeSubsetSummary">{{ activeSubsetSummary }}</span>
-      </button>
-    </div>
-
-    <section
-      v-if="openCollectionMenu === 'hierarchy'"
-      id="slidey-hierarchy-menu"
-      class="slidey-collection-popover slidey-collection-popover-hierarchy"
-      aria-label="Hierarchy menu"
-    >
-      <header class="slidey-collection-popover-head">
-        <div>
-          <div class="slidey-collection-kicker">Hierarchy</div>
-          <div class="slidey-collection-title" :title="collectionTitle">{{ collectionTitle }}</div>
-        </div>
-        <div class="slidey-collection-status">{{ activeDeckStatus }}</div>
-      </header>
-
-      <div class="slidey-hierarchy-trail" aria-label="Current hierarchy path">
-        <button
-          v-for="(crumb, i) in activeHierarchyTrail"
-          :key="crumb.id"
-          type="button"
-          class="slidey-hierarchy-crumb"
-          :class="{ active: crumb.id === activeDeckId }"
-          :title="crumb.description || crumb.title"
-          @click.stop="switchLibraryDeckFromMenu(crumb.id)"
-        >
-          <span v-if="i" class="slidey-hierarchy-separator" aria-hidden="true">&rsaquo;</span>
-          <span>{{ crumb.title }}</span>
-        </button>
-      </div>
-
-      <div v-if="hierarchyLinkRows.length" class="slidey-hierarchy-next" aria-label="Hierarchy destinations from current slide">
-        <div class="slidey-collection-section-label">{{ currentSectionTitle || 'Current slide' }}</div>
-        <button
-          v-for="(link, i) in hierarchyLinkRows"
-          :key="`${link.deck}:${link.section || ''}:${link.scene || ''}:${i}`"
-          type="button"
-          class="slidey-hierarchy-next-row"
-          @click.stop="openLibraryLink(link)"
-        >
-          <span class="slidey-hierarchy-next-relation">{{ link.relation }}</span>
-          <span class="slidey-hierarchy-next-title">{{ link.label }}</span>
-          <span v-if="link.metaText" class="slidey-hierarchy-next-meta">{{ link.metaText }}</span>
-        </button>
-      </div>
-
-      <div class="slidey-hierarchy-map" aria-label="Collection hierarchy">
-        <button
-          v-for="option in hierarchyDeckRows"
-          :key="option.id"
-          type="button"
-          class="slidey-hierarchy-map-row"
-          :class="{ active: option.id === activeDeckId }"
-          :style="{ paddingLeft: (10 + option.level * 18) + 'px' }"
-          :title="option.description || option.title"
-          @click.stop="switchLibraryDeckFromMenu(option.id)"
-        >
-          <span class="slidey-hierarchy-node" :class="`kind-${option.kind.toLowerCase()}`"></span>
-          <span class="slidey-hierarchy-map-copy">
-            <span class="slidey-hierarchy-map-title">{{ option.title }}</span>
-            <span v-if="option.metaText" class="slidey-hierarchy-map-meta">{{ option.metaText }}</span>
-          </span>
-          <span class="slidey-hierarchy-map-kind">{{ option.kind }}</span>
-        </button>
-      </div>
-    </section>
-
-    <section
-      v-if="openCollectionMenu === 'subsets'"
-      id="slidey-subsets-menu"
-      class="slidey-collection-popover slidey-collection-popover-subsets"
-      aria-label="Subsets menu"
-    >
-      <header class="slidey-collection-popover-head">
-        <div>
-          <div class="slidey-collection-kicker">Subsets</div>
-          <div class="slidey-collection-title" :title="collectionTitle">{{ collectionTitle }}</div>
-        </div>
-        <div class="slidey-collection-status">{{ sourceSceneCount }} source slides</div>
-      </header>
-
-      <div v-if="subsetLinkRows.length" class="slidey-subset-linked" aria-label="Subset destinations from current slide">
-        <div class="slidey-collection-section-label">{{ currentSectionTitle || 'Current slide' }}</div>
-        <button
-          v-for="(link, i) in subsetLinkRows"
-          :key="`${link.deck}:${link.section || ''}:${link.scene || ''}:${i}`"
-          type="button"
-          class="slidey-subset-row linked"
-          @click.stop="openLibraryLink(link)"
-        >
-          <span class="slidey-subset-title">{{ link.label }}</span>
-          <span v-if="link.metaText" class="slidey-subset-meta">{{ link.metaText }}</span>
-        </button>
-      </div>
-
-      <div class="slidey-subset-list" aria-label="Subset decks">
-        <button
-          v-for="option in subsetDeckRows"
-          :key="option.id"
-          type="button"
-          class="slidey-subset-row"
-          :class="{ active: option.id === activeDeckId }"
-          :title="option.description || option.title"
-          @click.stop="switchLibraryDeckFromMenu(option.id)"
-        >
-          <span class="slidey-subset-main">
-            <span class="slidey-subset-title">{{ option.title }}</span>
-            <span class="slidey-subset-count">{{ option.sceneCount }} slides</span>
-          </span>
-          <span v-if="option.metaText" class="slidey-subset-meta">{{ option.metaText }}</span>
-        </button>
-        <div v-if="!subsetDeckRows.length" class="slidey-subset-empty">No subsets</div>
-      </div>
-    </section>
-  </nav>
 
   <div v-if="deck && sceneReferences.length" class="slidey-reference-rail" aria-label="Scene references">
     <button
@@ -2296,6 +2427,13 @@ onUnmounted(() => {
   </div>
 
   <DeckHost v-if="!directReplay.active" />
+  <div
+    v-if="deck && !directReplay.active"
+    class="slidey-sr-only"
+    role="status"
+    aria-live="polite"
+    aria-atomic="true"
+  >{{ currentSceneAnnouncement }}</div>
   <NavController
     v-if="deck && !directReplay.active"
     :key="activePath"
@@ -2306,12 +2444,38 @@ onUnmounted(() => {
     :narration-state="narrationState"
     :play-slide="() => startLiveNarration('slide')"
     :play-deck="() => startLiveNarration('deck')"
+    :play-stack="() => startLiveNarration('stack')"
+    :stack-available="Boolean(collection && collection.isCollection && activeHierarchyTrail.length)"
     :set-narration-enabled="setNarrationEnabled"
     :set-captions-enabled="setCaptionsEnabled"
     :stop-narration="stopNarration"
   />
   <div v-if="deck && liveNarration && captionsEnabled && liveCaption" class="slidey-closed-captions" role="status" aria-live="polite">
     {{ liveCaption }}
+  </div>
+  <div
+    v-if="feedbackOpen"
+    class="slidey-feedback-overlay"
+    data-testid="feedback-modal-overlay"
+    role="presentation"
+    @click.stop="onFeedbackOverlayClick"
+  >
+    <div v-if="feedbackSinks().length > 1" class="slidey-feedback-destination">
+      <label for="slidey-feedback-destination">Send to</label>
+      <select id="slidey-feedback-destination" :value="feedbackSink || feedbackSinks()[0].id" @change="selectFeedbackSink">
+        <option v-for="sink in feedbackSinks()" :key="sink.id" :value="sink.id">{{ sink.label || sink.id }}</option>
+      </select>
+    </div>
+    <FeedbackModal
+      :key="feedbackSink || feedbackSinks()[0].id"
+      :kinds="feedbackKindGroups()"
+      :anchor-for="feedbackAnchorFor"
+      :manifest="feedbackManifest"
+      :router="feedbackRouterInstance"
+      :context="feedbackContext"
+      @close="feedbackOpen = false"
+      @submitted="onFeedbackSubmitted"
+    />
   </div>
   <div
     v-if="rrwebModal.open"
@@ -2350,23 +2514,6 @@ onUnmounted(() => {
         />
       </div>
     </section>
-  </div>
-  <div v-if="workspace && !embedded && viewerMode === 'present' && deck" class="slidey-present-toolbar" role="group" aria-label="Viewer mode">
-    <button
-      type="button"
-      :class="{ active: viewerMode === 'browse' }"
-      :aria-pressed="viewerMode === 'browse'"
-      title="Browse mode"
-      @click.stop="setViewerMode('browse')"
-    >Browse</button>
-      <button
-        type="button"
-        :class="{ active: viewerMode === 'edit' }"
-        :aria-pressed="viewerMode === 'edit'"
-        :disabled="!activeViewEditable"
-        title="Edit mode"
-        @click.stop="setViewerMode('edit')"
-      >Edit</button>
   </div>
   <SceneEditor
     v-if="workspace && isEditMode && deck && currentSpec && activeViewEditable"
@@ -2507,6 +2654,42 @@ body.slidey-workspace.slidey-present-mode .slidey-replay-viewer {
 }
 body.slidey-video-full .slidey-closed-captions { top: 62px; bottom: auto; }
 
+.slidey-feedback-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3300;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  box-sizing: border-box;
+  background: rgba(2, 6, 12, 0.78);
+  --fb-bg: #0d1117;
+  --fb-fg: #f0f6fc;
+  --fb-border: #30363d;
+  --fb-accent: #58a6ff;
+  --fb-danger: #f85149;
+  --fb-success: #3fb950;
+}
+.slidey-feedback-destination {
+  position: absolute;
+  z-index: 1;
+  width: min(30rem, calc(100vw - 56px));
+  margin-top: calc(-1 * min(30rem, calc(100vw - 56px)) - 48px);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  color: #c9d1d9;
+  font: 600 12px/1 ui-sans-serif, system-ui, sans-serif;
+}
+.slidey-feedback-destination select {
+  border: 1px solid var(--fb-border);
+  border-radius: 6px;
+  padding: 5px 7px;
+  background: var(--fb-head-bg, #161b22);
+  color: var(--fb-fg);
+  font: inherit;
+}
 .slidey-rrweb-modal {
   position: fixed;
   inset: 0;
@@ -2603,121 +2786,10 @@ body.slidey-video-full .slidey-closed-captions { top: 62px; bottom: auto; }
 }
 .slidey-rrweb-message.error { color: #ff7b72; }
 
-/* Workspace present mode — quick return to browse/edit while full-screen. */
-.slidey-present-toolbar {
-  position: fixed;
-  top: 14px;
-  left: 14px;
-  z-index: 2100;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px;
-  border: 1px solid #30363d;
-  border-radius: 7px;
-  overflow: hidden;
-  background: #161b22cc;
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-}
-.slidey-present-toolbar button {
-  border: none;
-  background: transparent;
-  color: #8b949e;
-  cursor: pointer;
-  padding: 5px 12px;
-  font-size: 12px;
-  font-family: 'Courier New', monospace;
-  font-weight: bold;
-}
-.slidey-present-toolbar button.active {
-  background: #1f6feb;
-  color: #fff;
-}
-
-/* Embedded preview edit controls — float over the deck, upper-left. */
-.slidey-embedded-edit {
-  position: fixed;
-  top: 14px; left: 14px;
-  z-index: 2100;
-  display: flex; align-items: center; gap: 8px;
-  font-family: 'Courier New', monospace;
-}
-.slidey-embedded-toggle {
-  display: inline-flex;
-  border: 1px solid #30363d;
-  border-radius: 7px;
-  overflow: hidden;
-  background: #161b22cc;
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-}
-.slidey-embedded-toggle button {
-  border: none; background: transparent;
-  color: #8b949e; cursor: pointer;
-  padding: 5px 12px; font-size: 12px; font-weight: bold;
-  font-family: inherit;
-}
-.slidey-embedded-toggle button.active { background: #1f6feb; color: #fff; }
-.slidey-embedded-save {
-  border: 1px solid #30363d;
-  border-radius: 7px;
-  background: #161b22cc;
-  color: #6e7681;
-  padding: 5px 14px; font-size: 12px; font-weight: bold;
-  font-family: inherit; cursor: default;
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-}
-.slidey-embedded-save.dirty { background: #238636; border-color: #238636; color: #fff; cursor: pointer; }
-.slidey-embedded-save:disabled { cursor: default; }
-.slidey-embedded-revert {
-  border: 1px solid #30363d;
-  border-radius: 7px;
-  background: #161b22cc;
-  color: #c9d1d9;
-  padding: 5px 14px; font-size: 12px; font-weight: bold;
-  font-family: inherit; cursor: pointer;
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-}
-.slidey-embedded-revert:hover:not(:disabled) { border-color: #f85149; color: #f85149; }
-.slidey-embedded-revert:disabled { color: #6e7681; cursor: default; }
-.slidey-embedded-saveerr { color: #f85149; font-size: 12px; }
-
-/* Embedded preview reload button — floats over the deck, upper-right. */
-.slidey-embedded-reload {
-  position: fixed;
-  top: 14px; right: 14px;
-  z-index: 2100;
-  width: 34px; height: 34px;
-  display: flex; align-items: center; justify-content: center;
-  border: 1px solid #30363d;
-  border-radius: 50%;
-  background: #161b22cc;
-  color: #79c0ff;
-  font-size: 17px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0.55;
-  transition: opacity 0.15s ease, background 0.15s ease;
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-}
-.slidey-embedded-reload:hover { opacity: 1; background: #1f6feb33; }
-.slidey-embedded-reload:disabled { cursor: default; }
-.slidey-embedded-reload.spinning {
-  opacity: 1;
-  animation: slidey-embedded-spin 0.8s linear infinite;
-}
-@keyframes slidey-embedded-spin {
-  to { transform: rotate(360deg); }
-}
-
 /* Reload-failure toast — non-blocking; the previous deck stays interactive. */
 .slidey-reload-toast {
   position: fixed;
-  top: 16px; left: 50%;
+  top: calc(var(--slidey-topbar-h, 0px) + 12px); left: 50%;
   transform: translateX(-50%);
   z-index: 2100;
   max-width: min(680px, 80vw);
@@ -2736,56 +2808,47 @@ body.slidey-video-full .slidey-closed-captions { top: 62px; bottom: auto; }
 .slidey-reload-toast-icon { color: #e3b341; flex: none; }
 .slidey-reload-toast-msg { overflow-wrap: anywhere; }
 
-/* Always-visible orientation for hierarchy decks. The deck name gets its own
-   line so it remains legible even when a breadcrumb path is deeply nested. */
-.slidey-hierarchy-location {
+/* Persistent viewer bar: the deck is scaled into the space below it, so this
+   control surface never covers a scene title or other presentation content. */
+.slidey-deck-chrome {
   position: fixed;
-  top: 14px;
-  left: calc(var(--slidey-sidebar-w, 0px) + 14px);
-  z-index: 2089;
-  width: min(440px, calc(100vw - var(--slidey-sidebar-w, 0px) - 28px));
-  padding: 9px 12px 10px;
-  border: 1px solid #58a6ff99;
-  border-radius: 8px;
-  background: #0d1117e8;
-  color: #c9d1d9;
-  font-family: 'Courier New', monospace;
-  box-sizing: border-box;
-  box-shadow: inset 3px 0 0 #58a6ff, 0 10px 28px rgba(0,0,0,0.3);
-  -webkit-backdrop-filter: blur(5px);
-  backdrop-filter: blur(5px);
-}
-body.slidey-embedded .slidey-hierarchy-location,
-body.slidey-workspace.slidey-present-mode .slidey-hierarchy-location {
-  top: 58px;
-}
-.slidey-hierarchy-location-kicker {
-  color: #79c0ff;
-  font-size: 10px;
-  font-weight: bold;
-  text-transform: uppercase;
-}
-.slidey-hierarchy-location-title {
-  margin-top: 3px;
-  overflow: hidden;
-  color: #f0f6fc;
-  font-size: 15px;
-  font-weight: bold;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.slidey-hierarchy-location-trail {
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 2100;
   display: flex;
   align-items: center;
+  gap: 10px;
+  min-height: var(--slidey-topbar-h, 54px);
+  width: 100%;
   min-width: 0;
-  margin-top: 6px;
+  padding: 5px 18px;
+  border-bottom: 1px solid #30363d;
+  background: linear-gradient(180deg, rgba(13, 17, 23, 0.96), rgba(13, 17, 23, 0.82));
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.18);
+  color: #c9d1d9;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-sizing: border-box;
+  -webkit-backdrop-filter: blur(10px) saturate(1.15);
+  backdrop-filter: blur(10px) saturate(1.15);
+}
+body.slidey-embedded .slidey-deck-chrome,
+body.slidey-workspace.slidey-present-mode .slidey-deck-chrome {
+  left: 0;
+  width: 100%;
+}
+.slidey-deck-crumbs {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 46%;
   overflow: hidden;
   color: #8b949e;
   font-size: 11px;
   white-space: nowrap;
 }
-.slidey-hierarchy-location-crumb {
+.slidey-deck-crumb {
   min-width: 0;
   overflow: hidden;
   padding: 0;
@@ -2797,22 +2860,98 @@ body.slidey-workspace.slidey-present-mode .slidey-hierarchy-location {
   white-space: nowrap;
   cursor: pointer;
 }
-.slidey-hierarchy-location-crumb:hover,
-.slidey-hierarchy-location-crumb:focus-visible {
-  outline: none;
-  color: #c9d1d9;
-  text-decoration: underline;
-}
-.slidey-hierarchy-location-crumb.active {
+.slidey-deck-crumb:hover,
+.slidey-deck-crumb:focus-visible { color: #c9d1d9; outline: none; }
+.slidey-deck-crumb.active { color: #79c0ff; }
+.slidey-deck-crumb-separator { flex: none; margin: 0 5px; color: #484f58; }
+.slidey-deck-title {
   flex: 1 1 auto;
-  color: #79c0ff;
-  font-weight: bold;
+  min-width: 0;
+  overflow: hidden;
+  color: #f0f6fc;
+  font-size: 13px;
+  font-weight: 720;
+  letter-spacing: -0.012em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.slidey-hierarchy-location-separator {
+.slidey-deck-actions {
   flex: none;
-  margin: 0 6px;
-  color: #484f58;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  background: #0d1117a8;
 }
+.slidey-deck-edit-actions {
+  margin-left: -2px;
+}
+.slidey-deck-mode,
+.slidey-deck-save,
+.slidey-deck-revert {
+  height: 26px;
+  min-width: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #8b949e;
+  font: 700 13px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+}
+.slidey-deck-mode:hover:not(:disabled),
+.slidey-deck-mode:focus-visible,
+.slidey-deck-revert:hover,
+.slidey-deck-revert:focus-visible { color: #f0f6fc; background: #30363d; outline: none; }
+.slidey-deck-mode.active { background: #1f6feb; color: #fff; box-shadow: 0 0 0 1px #58a6ff77; }
+.slidey-deck-mode:disabled { opacity: 0.35; cursor: default; }
+.slidey-deck-mode svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  margin: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.45;
+}
+.slidey-deck-reload { color: #79c0ff; }
+.slidey-deck-reload.spinning > span { display: block; animation: slidey-deck-reload-spin 0.8s linear infinite; }
+@keyframes slidey-deck-reload-spin { to { transform: rotate(360deg); } }
+.slidey-deck-mode[data-tooltip] { position: relative; }
+.slidey-deck-mode[data-tooltip]::after {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 8px);
+  left: 50%;
+  display: block;
+  width: max-content;
+  max-width: min(220px, calc(100vw - 28px));
+  padding: 6px 8px;
+  border: 1px solid #484f58;
+  border-radius: 6px;
+  background: #0d1117;
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.4);
+  color: #f0f6fc;
+  content: attr(data-tooltip);
+  font: 600 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0;
+  pointer-events: none;
+  transform: translate(-50%, -2px);
+  visibility: hidden;
+  white-space: nowrap;
+}
+.slidey-deck-mode[data-tooltip]:hover::after,
+.slidey-deck-mode[data-tooltip]:focus-visible::after {
+  transform: translate(-50%, 0);
+  visibility: visible;
+}
+.slidey-deck-action-divider { width: 1px; height: 15px; margin: 0 2px; background: #30363d; }
+.slidey-deck-save { min-width: 42px; padding: 0 9px; color: #6e7681; font-size: 11px; }
+.slidey-deck-save.dirty { background: #238636; color: #fff; }
+.slidey-deck-save:disabled { cursor: default; }
 
 .slidey-library-affordance {
   position: fixed;
@@ -2835,7 +2974,7 @@ body.slidey-workspace.slidey-present-mode .slidey-hierarchy-location {
   backdrop-filter: blur(5px);
 }
 .slidey-library-affordance-up {
-  top: 14px;
+  top: calc(var(--slidey-topbar-h, 0px) + 14px);
   left: calc(var(--slidey-sidebar-w, 0px) + 14px);
   border-color: #58a6ff99;
   box-shadow: inset 3px 0 0 #58a6ff, 0 10px 28px rgba(0,0,0,0.3);
@@ -2845,7 +2984,7 @@ body.slidey-workspace.slidey-present-mode .slidey-hierarchy-location {
 }
 body.slidey-embedded .slidey-library-affordance-up,
 body.slidey-workspace.slidey-present-mode .slidey-library-affordance-up {
-  top: 58px;
+  top: calc(var(--slidey-topbar-h, 0px) + 14px);
 }
 body.slidey-embedded .slidey-library-affordance-up.with-hierarchy-overlay,
 body.slidey-workspace.slidey-present-mode .slidey-library-affordance-up.with-hierarchy-overlay {
@@ -2900,99 +3039,61 @@ body.slidey-video-full .slidey-library-affordance-down {
   font-size: 11px;
 }
 
-/* Collection navigation: hierarchy and subsets stay distinct. */
+/* Collection navigation occupies the leading segment of the same toolbar.
+   Only the menu itself floats; its triggers are deliberately part of the rail. */
 .slidey-collection-nav {
-  position: fixed;
-  top: 14px;
-  right: 14px;
-  z-index: 2090;
-  width: min(560px, calc(100vw - 28px));
+  position: relative;
+  order: -2;
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  margin: -5px 0 -5px -18px;
+  padding: 5px 14px 5px 18px;
+  border-right: 1px solid #30363d;
   color: #c9d1d9;
-  font-family: 'Courier New', monospace;
-  pointer-events: none;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   box-sizing: border-box;
-}
-body.slidey-embedded .slidey-collection-nav {
-  top: 56px;
-}
-body.slidey-workspace.slidey-edit-mode .slidey-collection-nav {
-  right: calc(var(--slidey-editor-w, 380px) + 14px);
-  width: min(520px, calc(100vw - var(--slidey-editor-w, 380px) - 28px));
 }
 .slidey-collection-tabs {
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  pointer-events: auto;
+  gap: 3px;
 }
 .slidey-collection-tab {
-  min-width: 168px;
-  max-width: 270px;
-  min-height: 46px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 2px;
-  padding: 7px 10px;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  background: #0d1117e8;
-  color: #8b949e;
-  font-family: inherit;
-  text-align: left;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.22);
-  cursor: pointer;
-  box-sizing: border-box;
-  -webkit-backdrop-filter: blur(5px);
-  backdrop-filter: blur(5px);
-}
-.slidey-collection-tab:hover {
-  border-color: #58a6ff;
-  color: #c9d1d9;
-}
-.slidey-collection-tab.active {
-  border-color: #58a6ff;
-  background: #102844f2;
-}
-.slidey-collection-tab.current {
-  box-shadow: inset 3px 0 0 #58a6ff, 0 8px 24px rgba(0,0,0,0.22);
-}
-.slidey-collection-tab:nth-child(2).active {
-  border-color: #d29922;
-  background: #2b2109f2;
-}
-.slidey-collection-tab:nth-child(2).current {
-  box-shadow: inset 3px 0 0 #d29922, 0 8px 24px rgba(0,0,0,0.22);
-}
-.slidey-collection-tab-label,
-.slidey-collection-tab-value {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.slidey-collection-tab-label {
-  color: #f0f6fc;
-  font-size: 12px;
-  font-weight: bold;
-}
-.slidey-collection-tab-value {
+  height: 28px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
   color: #8b949e;
   font-size: 11px;
+  letter-spacing: 0.01em;
 }
+.slidey-collection-tab svg { width: 16px; height: 16px; margin: 0; stroke-width: 1.7; }
+.slidey-collection-tab-label { font-weight: 750; }
+.slidey-collection-tab.current { color: #79c0ff; }
+.slidey-collection-tab.subsets.current { color: #e3b341; }
+.slidey-collection-tab.active { background: #1f6feb; color: #fff; box-shadow: 0 0 0 1px #58a6ff77; }
+.slidey-collection-tab.subsets.active { background: #9e6a03; box-shadow: 0 0 0 1px #d2992277; }
 .slidey-collection-popover {
-  width: min(520px, 100%);
-  margin-top: 8px;
-  margin-left: auto;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: -6px;
+  width: min(520px, calc(100vw - var(--slidey-sidebar-w, 0px) - 28px));
+  /* The menu opens below the fixed viewer bar. Keep every destination
+     reachable when the available vertical space is smaller than its content. */
+  max-height: calc(100vh - var(--slidey-topbar-h, 0px) - 16px);
+  max-height: calc(100dvh - var(--slidey-topbar-h, 0px) - 16px);
   padding: 10px;
   border: 1px solid #30363d;
   border-radius: 8px;
   background: #0d1117f4;
   box-shadow: 0 16px 40px rgba(0,0,0,0.36);
   box-sizing: border-box;
-  pointer-events: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
@@ -3248,32 +3349,28 @@ body.slidey-workspace.slidey-edit-mode .slidey-collection-nav {
   font-size: 12px;
 }
 
-@media (max-width: 900px) {
-  body.slidey-workspace.slidey-edit-mode .slidey-collection-nav {
-    left: 12px;
-    right: 12px;
-    width: auto;
-  }
-}
-
 @media (max-width: 760px) {
-  .slidey-hierarchy-location {
-    top: 12px;
-    left: 12px;
-    width: calc(100vw - 24px);
+  .slidey-deck-chrome,
+  body.slidey-embedded .slidey-deck-chrome,
+  body.slidey-workspace.slidey-present-mode .slidey-deck-chrome {
+    top: 0;
+    left: 0;
+    width: 100%;
+    gap: 7px;
+    padding: 5px 12px;
   }
-  body.slidey-embedded .slidey-hierarchy-location,
-  body.slidey-workspace.slidey-present-mode .slidey-hierarchy-location {
-    top: 56px;
-  }
+  .slidey-deck-crumbs { display: none; }
+  .slidey-collection-nav { margin-left: -12px; padding-right: 8px; padding-left: 12px; }
+  .slidey-collection-tab { width: 47px; justify-content: center; padding: 0; }
+  .slidey-collection-tab-label { display: none; }
   .slidey-library-affordance-up {
-    top: 72px;
+    top: calc(var(--slidey-topbar-h, 0px) + 12px);
     left: 12px;
     max-width: calc(100vw - 24px);
   }
   body.slidey-embedded .slidey-library-affordance-up,
   body.slidey-workspace.slidey-present-mode .slidey-library-affordance-up {
-    top: 116px;
+    top: calc(var(--slidey-topbar-h, 0px) + 12px);
   }
   .slidey-library-affordance-up.with-hierarchy-overlay {
     top: 103px;
@@ -3287,28 +3384,9 @@ body.slidey-workspace.slidey-edit-mode .slidey-collection-nav {
     bottom: 72px;
     max-width: calc(100vw - 24px);
   }
-  .slidey-collection-nav {
-    left: 12px;
-    right: 12px;
-    top: 12px;
-    width: auto;
-  }
-  body.slidey-embedded .slidey-collection-nav {
-    top: 56px;
-  }
-  .slidey-collection-tabs {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 7px;
-  }
-  .slidey-collection-tab {
-    min-width: 0;
-    max-width: none;
-  }
   .slidey-collection-popover {
-    width: 100%;
-    max-height: min(560px, calc(100vh - 92px));
-    overflow: auto;
+    width: min(520px, calc(100vw - 24px));
+    max-height: min(560px, calc(100dvh - var(--slidey-topbar-h, 0px) - 16px));
   }
   .slidey-collection-popover-head {
     flex-direction: column;
@@ -3389,7 +3467,7 @@ body.slidey-edit-mode svg text[data-edit-path]:hover {
 
 /* Empty-stage hint shown in workspace mode before a deck is opened. */
 .slidey-stage-empty {
-  position: fixed; top: 0; bottom: 0; right: 0;
+  position: fixed; top: var(--slidey-topbar-h, 0px); bottom: 0; right: 0;
   left: var(--slidey-sidebar-w, 300px);
   display: flex; flex-direction: column; gap: 8px;
   align-items: center; justify-content: center;
