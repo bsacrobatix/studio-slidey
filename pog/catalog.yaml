@@ -38,6 +38,29 @@ type_registry:
     schema: graph-type/v0
     extends: core-node
     summary: The product root node.
+  # Single-product programs live here, in the product's own catalog (POG
+  # taxonomy 2026-07-12): a program is a scoped initiative with phases;
+  # cross-product programs live in the POG portfolio catalog instead.
+  - id: program
+    schema: graph-type/v0
+    extends: core-node
+    summary: A scoped single-product initiative with its own phases.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+  - id: phase
+    schema: graph-type/v0
+    extends: core-node
+    summary: A plan phase of a program; ordered by after.
+    edge_fields:
+      - id: part_of
+        target_type: program
+        cardinality: one
+      - id: after
+        target_type: phase
+        cardinality: one
+        acyclic: true
   - id: feature
     schema: graph-type/v0
     extends: core-node
@@ -271,6 +294,15 @@ nodes:
     summary: Deterministic, spec-driven declarative scene engine. A JSON spec describes an ordered list of scenes; from that one spec slidey produces video (MP4 with synthesized narration), vector PDF, and an interactive web app — all sharing a single set of Vue 3 scene components so the outputs never drift.
     sources: [source-readme]
     edges: {}
+  # --- programs --------------------------------------------------------------
+  - schema: slidey/program/v0
+    id: program-slidey-productization
+    title: slidey productization
+    status: active
+    visibility: internal
+    summary: Single-product program — productize slidey based on pog/gravytanker; product site, feature catalog, demos, decks, packaged onboarding. The 2026-07 product-materialization work (stories/checks, demo packets, product-loop gate) is this program's active thread.
+    edges:
+      part_of: [product-slidey]
   # --- features ------------------------------------------------------------
   - schema: slidey/feature/v0
     id: feature-video-render
@@ -342,6 +374,17 @@ nodes:
     sources: [source-tour-proposal]
     edges:
       part_of: [product-slidey]
+  - schema: slidey/feature/v0
+    id: feature-viewer-feedback
+    title: Viewer feedback (deck toolbar → kitsoki-test intake)
+    status: shipped
+    visibility: public
+    summary: A Feedback button in the upper-left deck toolbar lets a viewer pick whether a note is about the content or about slidey itself, review the exact app-state-only diagnostic bundle that will be sent (deck/scene/step/viewer version — no HAR, no rrweb, no screenshots, no PII), and submit. Reusable machine/HTTP-sink/Vue-modal/intake-server pieces live in studio-sassfully (packages/feedback-core, feedback-vue, feedback-intake); this repo owns the producer adapter (web/feedback/slideyFeedback.js), the toolbar button (web/components/App.vue), and publish/share/pull tooling (tools/deploy/).
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      requirements: [req-feedback-app-diagnostic-only, req-feedback-reviewed-submit, req-feedback-anonymous-ok, req-feedback-deck-version]
+      use_cases: [uc-viewer-content-feedback, uc-viewer-app-feedback, uc-personalized-share-link]
   # --- requirements ----------------------------------------------------------
   - schema: slidey/requirement/v0
     id: req-single-spec-three-outputs
@@ -384,6 +427,46 @@ nodes:
     edges:
       part_of: [product-slidey]
       required_by: [feature-vector-pdf]
+  - schema: slidey/requirement/v0
+    id: req-feedback-app-diagnostic-only
+    title: Feedback diagnostics are app-state only — never PII
+    status: satisfied
+    visibility: public
+    summary: The submitted bundle may only carry deck id/title, scene index/id/type/title, step index, steps-in-scene, scene count, viewer version/mode/viewport — no HAR, no rrweb, no screenshots, no user agent, no cookies. Enforced by feedback-core's fail-closed privacy manifest (an unclassified field blocks submit); test/feedback-viewer.test.js's manifest/payload-lockstep case is the regression proof — adding any extra field to context fails the verdict.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      required_by: [feature-viewer-feedback]
+  - schema: slidey/requirement/v0
+    id: req-feedback-reviewed-submit
+    title: Only a reviewed bundle may ever reach a sink
+    status: satisfied
+    visibility: public
+    summary: Draft → review → submit; feedback-core's machine.submit() throws unless the draft is in the reviewed state, so raw evidence and unreviewed text can never leave the browser even for low-friction kinds.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      required_by: [feature-viewer-feedback]
+  - schema: slidey/requirement/v0
+    id: req-feedback-anonymous-ok
+    title: Feedback works anonymously; personalization is opt-in
+    status: satisfied
+    visibility: public
+    summary: A share link's ?u=<hash> rides into context.viewerHash (privacy class high, host policy allow); absent it, the field is omitted entirely and the note is anonymous. The hash->recipient mapping lives only in a gitignored local file (tools/deploy/audience.local.json), never on the VM.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      required_by: [feature-viewer-feedback]
+  - schema: slidey/requirement/v0
+    id: req-feedback-deck-version
+    title: Every bundle records the published deck version that was live
+    status: satisfied
+    visibility: public
+    summary: publish-deck.sh tags HEAD (deck/<slug>/v<n>, annotated, sequential per slug) before building, refusing to run on a dirty tree, then stamps that already-fixed string into the bundle as window.__SLIDEY_DECK_VERSION__ -> context.deck.version — never a SHA computed from the build's own output. pull-feedback.sh's `git show <tag>:<spec>` reproduces exactly what was live when a note was submitted, even after republishing.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      required_by: [feature-viewer-feedback]
   # --- use cases ---------------------------------------------------------------
   - schema: slidey/use-case/v0
     id: uc-demo-video-from-manifest
@@ -428,6 +511,39 @@ nodes:
     edges:
       part_of: [product-slidey]
       exercises: [feature-embed-protocol]
+  - schema: slidey/use-case/v0
+    id: uc-viewer-content-feedback
+    title: Viewer comments on a slide's content
+    status: supported
+    visibility: public
+    summary: A viewer picks "the content" (comment/copy suggestion/question), types a note anchored to the current scene/step, reviews the app-state-only bundle, and submits — it lands as a JSONL line on kitsoki-test.slothattax.me.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      exercises: [feature-viewer-feedback]
+      acceptance: [req-feedback-app-diagnostic-only, req-feedback-reviewed-submit]
+  - schema: slidey/use-case/v0
+    id: uc-viewer-app-feedback
+    title: Viewer reports a slidey bug or requests an improvement
+    status: supported
+    visibility: public
+    summary: A viewer picks "the slidey app" (bug/suggest an improvement) instead of a content note — same machine, same anchor model, same privacy review; the grouping is presentation only.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      exercises: [feature-viewer-feedback]
+      acceptance: [req-feedback-app-diagnostic-only, req-feedback-reviewed-submit]
+  - schema: slidey/use-case/v0
+    id: uc-personalized-share-link
+    title: Personalized share link attributes feedback to a recipient
+    status: supported
+    visibility: public
+    summary: tools/deploy/share-link.sh mints a ?u=<hash> link per recipient (HMAC over a local-only secret); the hash rides into context.viewerHash and pull-feedback.sh resolves it back to a name from the gitignored audience file. No ?u= means anonymous, which is equally valid.
+    sources: [source-readme]
+    edges:
+      part_of: [product-slidey]
+      exercises: [feature-viewer-feedback]
+      acceptance: [req-feedback-anonymous-ok, req-feedback-deck-version]
   # --- deliverables (evidence/functionality nodes) --------------------------
   - schema: slidey/deck/v0
     id: deck-meme-gallery
