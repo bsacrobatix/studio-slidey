@@ -23,6 +23,7 @@ import {
   audioUrlFromBase64,
   speechTextForScene,
   stepNarrationCues,
+  narrationItemsForScene,
   timedNarrationCues,
 } from '../narration.mjs';
 import { stepsForScene } from '../sceneSteps.mjs';
@@ -164,7 +165,12 @@ const rrwebModal = ref({
   events: [],
   chapters: [],
 });
-const narrationPreviewSupported = computed(() => workspace.value || embedded.value);
+// Published single-file builds have no live edge-tts endpoint to call, but
+// publish-deck.sh pre-renders narration audio for every scene/step and embeds
+// it as window.__SLIDEY_NARRATION_AUDIO__ (see build-single.mjs) — when that
+// table is present, narration preview works entirely from the embedded cache.
+const hasEmbeddedNarrationAudio = typeof window !== 'undefined' && !!window.__SLIDEY_NARRATION_AUDIO__;
+const narrationPreviewSupported = computed(() => workspace.value || embedded.value || hasEmbeddedNarrationAudio);
 const narrationSpeaking = ref(false);
 const narrationLoading = ref(false);
 const liveNarration = ref(false);
@@ -729,7 +735,30 @@ function setCaptionsEnabled(enabled) {
   if (!captionsEnabled.value) liveCaption.value = '';
 }
 
+// Mirrors src/narration-preview.js's normalizeMeta() defaults — kept tiny and
+// duplicated deliberately, since that file is CJS/Node-only (requires
+// 'child_process' via ./narration.js) and can't be imported into this bundle.
+function narrationVoiceRateFor(meta) {
+  const voice = String((meta && meta.voice) || 'en-AU-NatashaNeural').trim() || 'en-AU-NatashaNeural';
+  const rate = String((meta && meta.rate) || '').trim() || '+0%';
+  return { voice, rate };
+}
+
+function embeddedNarrationAudio(text) {
+  const table = hasEmbeddedNarrationAudio ? window.__SLIDEY_NARRATION_AUDIO__ : null;
+  if (!table) return null;
+  const { voice, rate } = narrationVoiceRateFor(currentNarrationMeta());
+  const key = JSON.stringify({ text: String(text || ''), voice, rate });
+  return table[key] || null;
+}
+
 async function requestNarrationAudio(text, signal) {
+  const cached = embeddedNarrationAudio(text);
+  if (cached && cached.audioBase64) {
+    const url = audioUrlFromBase64(cached.audioBase64, cached.mime || 'audio/mpeg');
+    narrationObjectUrls.add(url);
+    return url;
+  }
   const res = await fetch('/api/narration-audio', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -1021,38 +1050,19 @@ async function goForSceneNarration(pos, token) {
   return token === sceneNarrationSeq;
 }
 
-function firstNarrationStepIndex(scene, steps) {
-  if (scene && scene.type === 'graph') {
-    const frameIndex = steps.indexOf('graph_frame');
-    if (frameIndex > 0) return frameIndex;
-  }
-  return 0;
-}
-
 async function playCurrentSceneByReveal(scene, token, startStepIndex = 0) {
   if (!deck.value || !scene) return false;
   const state = deck.value.state;
   const sceneIndex = state ? state.sceneIndex : 0;
-  const steps = stepsForScene(scene);
+  const { steps, items: rawItems, wholeSceneText } = narrationItemsForScene(scene, { startStepIndex });
   if (!steps.length) {
-    const text = speechTextForScene(scene);
-    if (text) return speakText(text, { cancel: false });
+    if (wholeSceneText) return speakText(wholeSceneText, { cancel: false });
     const stillCurrent = await delaySceneNarration(1200, token);
     return stillCurrent;
   }
 
   const startPos = deck.value.posForScene(sceneIndex, 0);
-  const cues = stepNarrationCues(scene, steps);
-  const firstStepIndex = firstNarrationStepIndex(scene, steps);
-  if (firstStepIndex > 0) {
-    const leadingCue = cues.slice(0, firstStepIndex).map(cue => String(cue || '').trim()).filter(Boolean).join('\n');
-    if (leadingCue) cues[firstStepIndex] = [leadingCue, cues[firstStepIndex]].filter(Boolean).join('\n');
-  }
-  const delayMs = scene.type === 'graph' ? 760 : 650;
-  const items = [];
-  for (let i = Math.max(firstStepIndex, startStepIndex); i < steps.length; i += 1) {
-    items.push({ index: i, pos: startPos + i, cue: String(cues[i] || '').trim(), delayMs });
-  }
+  const items = rawItems.map(item => ({ ...item, pos: startPos + item.index }));
   if (!items.length) return true;
   return playBufferedNarrationSteps(items, token);
 }

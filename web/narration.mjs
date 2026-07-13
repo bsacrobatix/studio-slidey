@@ -1,6 +1,9 @@
-// Browser-side narration helpers for the interactive viewer. Speech synthesis
-// happens through the local /api/narration-audio endpoint so live preview uses
-// the same edge-tts voice/rate/pronunciation settings as MP4 export.
+// Narration helpers shared by the interactive viewer (speech synthesis via the
+// local /api/narration-audio endpoint) and build-single.mjs (pre-rendering the
+// same cue text as embedded audio for offline/published builds). Everything
+// here is plain data logic — no DOM/browser APIs — so it also runs under Node.
+
+import { stepsForScene } from './sceneSteps.mjs';
 
 function chapterStartSeconds(chapters, id) {
   const found = (chapters || []).find(ch => String(ch && ch.id) === String(id));
@@ -186,6 +189,44 @@ export function stepNarrationCues(scene, steps = []) {
     cues[idx] = cues[idx] ? `${cues[idx]}\n${part}` : part;
   });
   return cues;
+}
+
+// First reveal step a scene's narration should start on. Graph scenes skip
+// straight to `graph_frame` — any narration for the (absent-on-screen) title
+// step is folded into that first spoken step instead (see below).
+export function firstNarrationStepIndex(scene, steps) {
+  if (scene && scene.type === 'graph') {
+    const frameIndex = steps.indexOf('graph_frame');
+    if (frameIndex > 0) return frameIndex;
+  }
+  return 0;
+}
+
+// Per-reveal-step narration items for a scene that has progressive reveal
+// steps: cue text plus the per-step delay used when no audio is available.
+// Any cues attached to skipped leading steps (see firstNarrationStepIndex)
+// are folded into the first spoken step so they're never silently dropped.
+// Shared by the interactive viewer (App.vue's playCurrentSceneByReveal) and
+// build-single.mjs's narration-audio pre-render — both need the exact same
+// cue text per step so a pre-rendered audio clip lines up with what the live
+// preview would have requested.
+export function narrationItemsForScene(scene, { startStepIndex = 0 } = {}) {
+  const steps = stepsForScene(scene);
+  if (!steps.length) {
+    return { steps, items: [], wholeSceneText: speechTextForScene(scene) };
+  }
+  const cues = stepNarrationCues(scene, steps);
+  const firstStepIndex = firstNarrationStepIndex(scene, steps);
+  if (firstStepIndex > 0) {
+    const leadingCue = cues.slice(0, firstStepIndex).map(cue => String(cue || '').trim()).filter(Boolean).join('\n');
+    if (leadingCue) cues[firstStepIndex] = [leadingCue, cues[firstStepIndex]].filter(Boolean).join('\n');
+  }
+  const delayMs = scene.type === 'graph' ? 760 : 650;
+  const items = [];
+  for (let i = Math.max(firstStepIndex, startStepIndex); i < steps.length; i += 1) {
+    items.push({ index: i, cue: String(cues[i] || '').trim(), delayMs });
+  }
+  return { steps, items, wholeSceneText: '' };
 }
 
 export function timedNarrationCues(scene, chapters = []) {

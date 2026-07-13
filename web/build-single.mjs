@@ -25,6 +25,7 @@ const buildDir = join(root, 'dist-web-single');
 const require = createRequire(import.meta.url);
 const { readSpecOrRrweb } = require('../src/rrweb-viewer.js');
 const { resolveDeckSpec } = require('../src/collections.js');
+const { buildNarrationAudioTable } = await import('./build-narration-audio.mjs');
 
 const rawArgs = process.argv.slice(2);
 const positionals = [];
@@ -169,10 +170,17 @@ if (/<script\b[^>]*\bsrc=|<link\b[^>]*\brel="stylesheet"/.test(html)) {
   );
 }
 
+// 2b. Pre-render narration audio for every deck/scene so the published build
+//     has working narration + reveal timing offline (no edge-tts endpoint to
+//     call at view time — see build-narration-audio.mjs and, if this ever
+//     regresses again, docs/decks/README.md's "Publishing" section).
+const narrationAudioTable = await buildNarrationAudioTable(bundledSpec, { log: console.log });
+
 // 3. Embed the spec ahead of the app script so App.vue loads it without a fetch.
 //    JSON.stringify is HTML-safe except for a literal </script>; split the tag
 //    so the embedded JSON can never close the surrounding <script> early.
 const specJson = JSON.stringify(bundledSpec).replace(/<\/script>/gi, '<\\/script>');
+const narrationAudioJson = JSON.stringify(narrationAudioTable).replace(/<\/script>/gi, '<\\/script>');
 const initialDeckJson = resolvedDeck.isCollection && !resolvedDeck.isSource
   ? JSON.stringify(resolvedDeck.deckId)
   : 'null';
@@ -182,7 +190,7 @@ const initialDeckJson = resolvedDeck.isCollection && !resolvedDeck.isSource
 // .context/feedback-e2e-plan.md, architecture decision 7.
 const { version: viewerVersion } = require('../package.json');
 const viewerVersionJson = JSON.stringify(viewerVersion || 'dev');
-const inject = `<script>window.__SLIDEY_SPEC__ = ${specJson}; window.__SLIDEY_INITIAL_DECK__ = ${initialDeckJson}; window.__SLIDEY_VIEWER_VERSION__ = ${viewerVersionJson};</script>\n`;
+const inject = `<script>window.__SLIDEY_SPEC__ = ${specJson}; window.__SLIDEY_INITIAL_DECK__ = ${initialDeckJson}; window.__SLIDEY_VIEWER_VERSION__ = ${viewerVersionJson}; window.__SLIDEY_NARRATION_AUDIO__ = ${narrationAudioJson};</script>\n`;
 html = html.replace(/(<script type="module">)/, `${inject}$1`);
 
 // 4. Write the self-contained file.
@@ -194,6 +202,7 @@ writeFileSync(outPath, html);
 const sizeMB = (statSync(outPath).size / 1e6).toFixed(2);
 console.log(
   `[build-single] wrote ${outPath} (${sizeMB} MB, self-contained — ` +
-  `${bundledSpec.scenes.length} source scene(s), ${embeddedAssets} asset(s) embedded)`,
+  `${bundledSpec.scenes.length} source scene(s), ${embeddedAssets} asset(s), ` +
+  `${Object.keys(narrationAudioTable).length} narration clip(s) embedded)`,
 );
 console.log('[build-single] open it directly in a browser; no server needed.');

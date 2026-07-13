@@ -6,9 +6,22 @@
 #
 # Usage: tools/deploy/publish-deck.sh <spec.slidey.json> [--slug <slug>]
 #
-# Refuses to run on a dirty working tree: a deck version that doesn't map to
-# a real, pushed commit defeats the point of pull-feedback.sh's
+# The spec may live in ANY git repo, not just this one (e.g. a deck authored
+# in a sibling POG checkout) — the tag is created in the repo that actually
+# contains the spec file, so `git show <tag>:<path-within-that-repo>`
+# reproduces it later, regardless of which repo's tooling built it.
+#
+# Refuses to run when that repo's working tree is dirty: a deck version that
+# doesn't map to a real commit defeats the point of pull-feedback.sh's
 # `git show <tag>:<spec>` reproducibility guarantee.
+#
+# Requires the `edge-tts` CLI on PATH (same dependency `slidey doctor` checks
+# for MP4 narration) to pre-render narration audio into the published build
+# (web/build-single.mjs → build-narration-audio.mjs). Without it, publishing
+# still succeeds but SILENTLY produces a deck with no narration that rushes
+# through reveals at a fixed ~650ms/step — there is no error, only a build-time
+# log line, so `slidey doctor` before publishing if narration seems to be
+# missing after a publish. See docs/decks/README.md's "Publishing" section.
 set -euo pipefail
 
 REMOTE="${SLIDEY_FEEDBACK_VM_REMOTE:-root@kitsoki-test.slothattax.me}"
@@ -18,7 +31,6 @@ FEEDBACK_ENDPOINT="${SLIDEY_FEEDBACK_ENDPOINT:-/api/feedback}"
 FEEDBACK_ENVIRONMENT="${SLIDEY_FEEDBACK_ENVIRONMENT:-public}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT"
 
 spec=""
 slug=""
@@ -37,6 +49,7 @@ if [ ! -f "$spec" ]; then
   echo "publish-deck: spec not found: $spec" >&2
   exit 1
 fi
+spec="$(cd "$(dirname "$spec")" && pwd)/$(basename "$spec")"
 if [ -z "$slug" ]; then
   slug="$(basename "$spec" | sed -E 's/\.slidey\.json$//; s/\.json$//')"
 fi
@@ -45,10 +58,20 @@ if ! [[ "$slug" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
   exit 1
 fi
 
-if [ -n "$(git status --porcelain)" ]; then
-  echo "publish-deck: working tree is dirty — commit or stash before publishing" >&2
+# The spec's own repo owns the version tag — not necessarily this repo.
+spec_repo="$(cd "$(dirname "$spec")" && git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$spec_repo" ]; then
+  echo "publish-deck: $spec is not inside a git repo — a deck version must map to a real commit" >&2
+  exit 1
+fi
+spec_relpath="${spec#"$spec_repo"/}"
+
+spec_dir="$(dirname "$spec_relpath")"
+if [ -n "$(git -C "$spec_repo" status --porcelain -- "$spec_dir")" ]; then
+  echo "publish-deck: $spec_repo has uncommitted changes under $spec_dir — commit or stash before publishing" >&2
   echo "  (a deck version must point at a real commit; see architecture decision 7 in feedback-e2e-plan.md)" >&2
-  git status --short >&2
+  echo "  Only checking $spec_dir, not the whole repo — unrelated dirty files elsewhere don't block this." >&2
+  git -C "$spec_repo" status --short -- "$spec_dir" >&2
   exit 1
 fi
 
@@ -58,17 +81,23 @@ while IFS= read -r existing_tag; do
   [ -z "$existing_tag" ] && continue
   n="${existing_tag##*/v}"
   if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -gt "$last_n" ]; then last_n="$n"; fi
-done < <(git tag -l "deck/$slug/v*")
+done < <(git -C "$spec_repo" tag -l "deck/$slug/v*")
 next_n=$((last_n + 1))
 tag="deck/$slug/v$next_n"
 
-echo "publish-deck: tagging HEAD as $tag"
-git tag -a "$tag" -m "Publish deck '$slug' ($spec)"
-git push origin "$tag"
+echo "publish-deck: tagging $spec_repo @ HEAD as $tag"
+git -C "$spec_repo" tag -a "$tag" -m "Publish deck '$slug' ($spec_relpath)"
+if git -C "$spec_repo" remote get-url origin >/dev/null 2>&1; then
+  git -C "$spec_repo" push origin "$tag"
+else
+  echo "publish-deck: $spec_repo has no 'origin' remote — tag created locally only." >&2
+  echo "  The reproducibility guarantee (git show $tag:$spec_relpath) only holds on this machine" >&2
+  echo "  until this repo has a remote and the tag is pushed there." >&2
+fi
 
 outfile="$(mktemp -t slidey-publish-XXXXXX).html"
 echo "publish-deck: building single-file bundle…"
-node web/build-single.mjs "$spec" "$outfile"
+node "$ROOT/web/build-single.mjs" "$spec" "$outfile"
 
 echo "publish-deck: stamping deck version + feedback sinks"
 DECK_VERSION_TAG="$tag" FEEDBACK_ENDPOINT_URL="$FEEDBACK_ENDPOINT" FEEDBACK_ENVIRONMENT_NAME="$FEEDBACK_ENVIRONMENT" PROJECT_ROOT="$ROOT" node --input-type=module -e "
@@ -100,3 +129,4 @@ rm -f "$outfile"
 echo
 echo "Published: $SITE/constructor-studio/decks/$slug/"
 echo "Deck version: $tag"
+echo "Reproduce:   git -C $spec_repo show $tag:$spec_relpath"
