@@ -38,6 +38,7 @@ const { handleNarrationPreviewRequest } = require('./narration-preview');
 const { versionOf } = require('./spec-version');
 const { attachRuntimeThemePacks, stripRuntimeThemePacks } = require('./theme-packs');
 const { applyLocale } = require('./localization');
+const { runtimeFeedbackConfig, appendLocalFeedback } = require('./feedback-config');
 
 const ROOT_DIR = path.resolve(__dirname, '..');      // repo root (has dist/, package.json)
 const DIST_DIR = path.join(ROOT_DIR, 'dist');         // `npm run build:web` output
@@ -437,7 +438,17 @@ function startViewer({ root, openFile = null, deckId = null, port = 4321, open =
 
     // ── API ──
     if (pathname === '/api/config') {
-      return sendJSON(res, 200, { root: workspaceRoot, openFile, deckId });
+      return sendJSON(res, 200, { root: workspaceRoot, openFile, deckId, feedback: runtimeFeedbackConfig(workspaceRoot) });
+    }
+
+    if (pathname === '/api/feedback/local' && req.method === 'POST') {
+      try {
+        const bundle = JSON.parse(await readBody(req, 256 * 1024) || '{}');
+        const file = appendLocalFeedback(workspaceRoot, bundle);
+        return sendJSON(res, 201, { ref: `${file}#${bundle.idempotencyKey}` });
+      } catch (err) {
+        return sendJSON(res, 400, { error: String(err.message || err) });
+      }
     }
 
     if (pathname === '/api/tree') {

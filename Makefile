@@ -69,7 +69,7 @@ vscode-stage: build-web
 	cp -R dist/. $(VSCODE_DIST)/
 	# Keep the complete transitive runtime for rrweb-viewer.  It imports
 	# collections.js for collection/stack deck expansion during activation.
-	cp src/schema.js src/trace.js src/rrweb-viewer.js src/collections.js src/narration.js src/narration-preview.js $(VSCODE_RUNTIME)/
+	cp src/schema.js src/trace.js src/rrweb-viewer.js src/collections.js src/narration.js src/narration-preview.js src/feedback-config.js $(VSCODE_RUNTIME)/
 
 # Output: tools/vscode-slidey/slidey-vscode-<version>.vsix.
 vscode-package: vscode-stage

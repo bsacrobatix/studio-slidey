@@ -9,9 +9,9 @@ const PACKAGED_DIST_DIR = path.join(EXTENSION_ROOT, '.slidey-dist');
 const PACKAGED_RUNTIME_DIR = path.join(EXTENSION_ROOT, '.slidey-runtime', 'src');
 const CHECKOUT_DIST_DIR = path.join(CHECKOUT_ROOT, 'dist');
 const CHECKOUT_RUNTIME_DIR = path.join(CHECKOUT_ROOT, 'src');
-const PACKAGED_RUNTIME_READY = ['schema.js', 'trace.js', 'rrweb-viewer.js', 'narration.js', 'narration-preview.js']
+const PACKAGED_RUNTIME_READY = ['schema.js', 'trace.js', 'rrweb-viewer.js', 'narration.js', 'narration-preview.js', 'feedback-config.js']
   .every((name) => fs.existsSync(path.join(PACKAGED_RUNTIME_DIR, name)));
-const CHECKOUT_RUNTIME_READY = ['schema.js', 'trace.js', 'rrweb-viewer.js', 'narration.js', 'narration-preview.js']
+const CHECKOUT_RUNTIME_READY = ['schema.js', 'trace.js', 'rrweb-viewer.js', 'narration.js', 'narration-preview.js', 'feedback-config.js']
   .every((name) => fs.existsSync(path.join(CHECKOUT_RUNTIME_DIR, name)));
 const DIST_DIR = fs.existsSync(path.join(CHECKOUT_DIST_DIR, 'index.html'))
   ? CHECKOUT_DIST_DIR
@@ -29,6 +29,7 @@ const {
   readSpecOrRrweb,
 } = require(path.join(RUNTIME_SRC_DIR, 'rrweb-viewer'));
 const { handleNarrationPreviewRequest } = require(path.join(RUNTIME_SRC_DIR, 'narration-preview'));
+const { runtimeFeedbackConfig, appendLocalFeedback } = require(path.join(RUNTIME_SRC_DIR, 'feedback-config'));
 const SPEC_EXT = new Set(['.json', '.jsonl']);
 const READONLY_SUFFIX = '.readonly.slidey.json';
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-render', 'dist-web-single', '.slidey-dist', '.slidey-runtime', '.git']);
@@ -154,7 +155,17 @@ function handleApiRequest({ root, openFile, webview, vscode }, request) {
   if (pathname === '/api/config') {
     // `embedded` tells the web app it's the single-file VS Code preview: no
     // file-tree sidebar, auto-reload on disk changes (see App.vue).
-    return response(200, { root: workspaceRoot, openFile, embedded: true });
+    return response(200, { root: workspaceRoot, openFile, embedded: true, feedback: runtimeFeedbackConfig(workspaceRoot) });
+  }
+
+  if (pathname === '/api/feedback/local' && request.method === 'POST') {
+    try {
+      const bundle = JSON.parse(request.body || '{}');
+      const file = appendLocalFeedback(workspaceRoot, bundle);
+      return response(201, { ref: `${file}#${bundle.idempotencyKey}` });
+    } catch (err) {
+      return response(400, { error: String(err.message || err) });
+    }
   }
 
   if (pathname === '/api/tree') {

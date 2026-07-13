@@ -176,7 +176,13 @@ const specJson = JSON.stringify(bundledSpec).replace(/<\/script>/gi, '<\\/script
 const initialDeckJson = resolvedDeck.isCollection && !resolvedDeck.isSource
   ? JSON.stringify(resolvedDeck.deckId)
   : 'null';
-const inject = `<script>window.__SLIDEY_SPEC__ = ${specJson}; window.__SLIDEY_INITIAL_DECK__ = ${initialDeckJson};</script>\n`;
+// Viewer engine version (which slidey code rendered this bundle) — a separate
+// axis from a published deck's content version, which publish-deck.sh stamps
+// on top as window.__SLIDEY_DECK_VERSION__ post-build. See
+// .context/feedback-e2e-plan.md, architecture decision 7.
+const { version: viewerVersion } = require('../package.json');
+const viewerVersionJson = JSON.stringify(viewerVersion || 'dev');
+const inject = `<script>window.__SLIDEY_SPEC__ = ${specJson}; window.__SLIDEY_INITIAL_DECK__ = ${initialDeckJson}; window.__SLIDEY_VIEWER_VERSION__ = ${viewerVersionJson};</script>\n`;
 html = html.replace(/(<script type="module">)/, `${inject}$1`);
 
 // 4. Write the self-contained file.

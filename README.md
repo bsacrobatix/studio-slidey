@@ -31,6 +31,17 @@ The Vue components are built into a self-contained `dist-render/render.html`
 `web/store.js` + `web/slideyAdapter.js` re-expose the exact `window.slidey.*` API
 the scene modules drive, so `src/renderer.js` runs against the bundle unchanged.
 
+## Native localization and accessibility
+
+Slidey localizes from one canonical deck rather than forking translations. A
+locale overlay is source-hash checked, so a translated web, PDF, or MP4 export
+cannot silently drift from its source. The interactive viewer applies the
+deck's `meta.locale` to the document language, announces slide and reveal
+position to assistive technology, preserves native keyboard controls for media
+and buttons, honors reduced-motion preferences, and can show narration as
+closed captions during automatic playback. These behaviors are part of the
+same deck runtime—not a separate accessibility export.
+
 For the iteration workflow (when to use `--estimate`, `--scenes`,
 `--skip-render`, narration budgeting, common gotchas), see
 [`.claude/skills/slidey-authoring/SKILL.md`](.claude/skills/slidey-authoring/SKILL.md).
@@ -287,6 +298,31 @@ slidey ./examples --port 5000 --no-open   # choose the port; don't auto-launch t
 server and open the interactive viewer in your browser: pick any `.json` /
 `.jsonl` spec from the sidebar, arrow keys / click to step through it.
 `slidey in.json out.mp4` (two paths) still renders, unchanged.
+
+### Feedback destinations
+
+The first local preview creates no remote data by default: its feedback picker
+offers **Save in this repo**, which appends reviewed bugs, ideas, and evidence
+to `.slidey/feedback/feedback.jsonl` beside the deck workspace. That output is
+ignored by Git so it is safe for private working notes.
+
+Commit `.slidey/feedback.json` to name the HTTP intake sink(s) used by each
+publishing environment. `tools/deploy/publish-deck.sh` injects the selected
+`SLIDEY_FEEDBACK_ENVIRONMENT` (default `public`) into the generated deck.
+Developers can add an ignored `.slidey/feedback.local.json` overlay to expose a
+personal/fork GitHub intake alongside the upstream one:
+
+```json
+{
+  "publishing": { "environments": { "local": { "sinks": ["my-origin", "upstream-feedback"] } } },
+  "sinks": {
+    "my-origin": { "label": "My fork GitHub", "type": "http", "endpoint": "https://feedback.example/my-origin" }
+  }
+}
+```
+
+An HTTP sink is an authenticated server-side GitHub/issue intake, not a token
+embedded in the deck. The viewer sends only the reviewed Sassfully bundle.
 
 ### Preview in VS Code
 
@@ -566,8 +602,11 @@ slidey-mcp --root /path/to/presentation-workspace
 The server keeps all file access inside `--root` and exposes tools for the full
 authoring loop:
 
-- `slidey_workspace_tree`, `slidey_read_spec` — discover/read `.slidey.json`,
-  `.readonly.slidey.json`, and generated `.jsonl` trace decks.
+- `slidey_workspace_tree`, `slidey_deck_overview`, `slidey_read_slide`,
+  `slidey_search_slides` — discover decks, get a compact outline, retrieve one
+  slide, or search slide text without fetching an entire large spec.
+- `slidey_read_spec` — read the complete `.slidey.json`,
+  `.readonly.slidey.json`, or generated `.jsonl` trace deck when it is needed.
 - `slidey_write_spec`, `slidey_patch_spec` — edit `.json` specs directly;
   `.jsonl` and `.readonly.slidey.json` are read-only because their specs are
   generated or authoritative.
