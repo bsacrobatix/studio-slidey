@@ -17,7 +17,8 @@ const { estimateBoundaries } = require('./timing');
 const { tempRoot } = require('./temp-path');
 const { versionOf } = require('./spec-version');
 const { addressableScenes, resolveSceneAddress, sceneIdOf } = require('./scene-address');
-const { normalizeDeckDefinitions, resolveDeckSpec } = require('./collections');
+const { normalizeDeckDefinitions, resolveDeckSpec, inlineChildDeckFiles } = require('./collections');
+const { applyPronunciationsWithDetails } = require('./narration');
 const { attachRuntimeThemePacks, loadThemePacks, stripRuntimeThemePacks } = require('./theme-packs');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -282,7 +283,8 @@ function readSpecFile(inputPath) {
   const buf = fs.readFileSync(abs);
   const raw = buf.toString('utf8');
   const parsedSpec = /\.jsonl$/i.test(abs) ? require('./trace').buildSpecFromFile(abs) : JSON.parse(raw);
-  const spec = attachRuntimeThemePacks(parsedSpec, abs, { workspaceRoot: CONFIG.root });
+  const inlined = inlineChildDeckFiles(parsedSpec, { specPath: abs });
+  const spec = attachRuntimeThemePacks(inlined.spec, abs, { workspaceRoot: CONFIG.root });
   const generated = /\.jsonl$/i.test(abs);
   // Content version: hand this back to writeSpecFile as baseVersion so a write
   // built from a stale read can't silently clobber a concurrent edit.
@@ -924,59 +926,86 @@ function graphAuditSpec(spec, { specPath } = {}) {
   };
 }
 
+function resolvedPronunciationMap(spec) {
+  const pronunciations = spec && spec.meta && spec.meta.narration && spec.meta.narration.pronunciations;
+  if (!pronunciations || typeof pronunciations !== 'object' || Array.isArray(pronunciations)) return {};
+  return Object.fromEntries(Object.entries(pronunciations)
+    .filter(([term, spokenAs]) => term && typeof spokenAs === 'string' && spokenAs));
+}
+
 async function narrationPlanForSpec(spec, specPath) {
   const { stepsForScene } = await import(pathToFileURL(path.join(ROOT_DIR, 'web', 'sceneSteps.mjs')).href);
   const scenes = [];
   const issues = [];
-  for (const [sceneIndex, scene] of (spec.scenes || []).entries()) {
-    const steps = stepsForScene(scene);
-    const sceneNarration = Array.isArray(scene.narration)
-      ? scene.narration.map((cue) => cue && cue.text).filter(Boolean)
-      : (scene.narration ? [String(scene.narration)] : []);
-    const entries = [];
-    const pushEntry = (stepIndex, state, text, source, ref = null) => {
-      const normalized = String(text || '').trim();
-      entries.push({ stepIndex, state, source, ref, text: normalized, wordCount: normalized ? normalized.split(/\s+/).length : 0 });
-    };
-
-    if (scene.type === 'graph') {
-      const pathEntries = graphPathEntries(scene);
-      let stepIndex = 0;
-      if (scene.title) pushEntry(stepIndex++, 'graph_title', sceneNarration[0] || scene.title, sceneNarration[0] ? 'scene.narration' : 'title');
-      pushEntry(stepIndex++, 'graph_frame', sceneNarration[stepIndex - 1] || '', sceneNarration[stepIndex - 1] ? 'scene.narration' : 'none');
-      pathEntries.forEach((entry, focusIndex) => {
-        const fallback = entry.note || '';
-        pushEntry(stepIndex++, `graph_focus_${focusIndex}`, sceneNarration[stepIndex - 1] || fallback, sceneNarration[stepIndex - 1] ? 'scene.narration' : (fallback ? 'focus.note' : 'none'), `path/${focusIndex}`);
-        if (!entry.note) addIssue(issues, 'warning', 'missing-graph-focus-note', `scene ${sceneIndex} focus step ${focusIndex} has no focus note`, { scene: sceneIndex, step: focusIndex });
-      });
-      if (scene.caption) pushEntry(stepIndex++, 'graph_caption', scene.narrateCaption === false || scene.captionNarration === false ? '' : scene.caption, 'caption');
-    } else {
-      const pageSteps = steps.length ? steps : [null];
-      pageSteps.forEach((state, stepIndex) => {
-        const text = sceneNarration[stepIndex] || (stepIndex === 0 ? (scene.narration || '') : '');
-        pushEntry(stepIndex, state, text, text ? 'scene.narration' : 'none');
-      });
+  const decks = [];
+  const resolvedDecks = [{ id: '__source', title: (spec.meta && spec.meta.title) || 'Full deck', spec }];
+  for (const deck of normalizeDeckDefinitions(spec)) {
+    if (deck.source) continue;
+    const resolved = resolveDeckSpec(spec, { deckId: deck.id });
+    if (resolved.deck && resolved.deck.id === deck.id) {
+      resolvedDecks.push({ id: deck.id, title: deck.title || deck.id, spec: resolved.spec });
     }
+  }
 
-    const repeated = new Set();
-    for (const entry of entries) {
-      if (entry.wordCount > 70) addIssue(issues, 'warning', 'long-reveal-narration', `scene ${sceneIndex} step ${entry.stepIndex} has ${entry.wordCount} narration words`, { scene: sceneIndex, step: entry.stepIndex });
-      if (entry.text) {
-        const key = entry.text.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
-        if (repeated.has(key)) addIssue(issues, 'warning', 'repeated-narration', `scene ${sceneIndex} repeats narration text across reveal steps`, { scene: sceneIndex, step: entry.stepIndex });
-        repeated.add(key);
+  for (const deck of resolvedDecks) {
+    const pronunciationMap = resolvedPronunciationMap(deck.spec);
+    const deckScenes = [];
+    for (const [sceneIndex, scene] of (deck.spec.scenes || []).entries()) {
+      const steps = stepsForScene(scene);
+      const sceneNarration = Array.isArray(scene.narration)
+        ? scene.narration.map((cue) => cue && cue.text).filter(Boolean)
+        : (scene.narration ? [String(scene.narration)] : []);
+      const entries = [];
+      const pushEntry = (stepIndex, state, text, source, ref = null) => {
+        const normalized = String(text || '').trim();
+        const pronunciation = applyPronunciationsWithDetails(normalized, pronunciationMap);
+        entries.push({ stepIndex, state, source, ref, text: normalized, spokenText: pronunciation.text, appliedTerms: pronunciation.appliedTerms, wordCount: normalized ? normalized.split(/\s+/).length : 0 });
+      };
+
+      if (scene.type === 'graph') {
+        const pathEntries = graphPathEntries(scene);
+        let stepIndex = 0;
+        if (scene.title) pushEntry(stepIndex++, 'graph_title', sceneNarration[0] || scene.title, sceneNarration[0] ? 'scene.narration' : 'title');
+        pushEntry(stepIndex++, 'graph_frame', sceneNarration[stepIndex - 1] || '', sceneNarration[stepIndex - 1] ? 'scene.narration' : 'none');
+        pathEntries.forEach((entry, focusIndex) => {
+          const fallback = entry.note || '';
+          pushEntry(stepIndex++, `graph_focus_${focusIndex}`, sceneNarration[stepIndex - 1] || fallback, sceneNarration[stepIndex - 1] ? 'scene.narration' : (fallback ? 'focus.note' : 'none'), `path/${focusIndex}`);
+          if (!entry.note) addIssue(issues, 'warning', 'missing-graph-focus-note', `deck ${deck.id} scene ${sceneIndex} focus step ${focusIndex} has no focus note`, { deck: deck.id, scene: sceneIndex, step: focusIndex });
+        });
+        if (scene.caption) pushEntry(stepIndex++, 'graph_caption', scene.narrateCaption === false || scene.captionNarration === false ? '' : scene.caption, 'caption');
+      } else {
+        const pageSteps = steps.length ? steps : [null];
+        pageSteps.forEach((state, stepIndex) => {
+          const text = sceneNarration[stepIndex] || (stepIndex === 0 ? (scene.narration || '') : '');
+          pushEntry(stepIndex, state, text, text ? 'scene.narration' : 'none');
+        });
       }
+
+      const repeated = new Set();
+      for (const entry of entries) {
+        if (entry.wordCount > 70) addIssue(issues, 'warning', 'long-reveal-narration', `deck ${deck.id} scene ${sceneIndex} step ${entry.stepIndex} has ${entry.wordCount} narration words`, { deck: deck.id, scene: sceneIndex, step: entry.stepIndex });
+        if (entry.text) {
+          const key = entry.text.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+          if (repeated.has(key)) addIssue(issues, 'warning', 'repeated-narration', `deck ${deck.id} scene ${sceneIndex} repeats narration text across reveal steps`, { deck: deck.id, scene: sceneIndex, step: entry.stepIndex });
+          repeated.add(key);
+        }
+      }
+      if (scene.caption && scene.narration && scene.caption === scene.narration) {
+        addIssue(issues, 'warning', 'caption-as-narration', `deck ${deck.id} scene ${sceneIndex} caption exactly matches slide narration`, { deck: deck.id, scene: sceneIndex });
+      }
+      const scenePlan = { deck: deck.id, scene: sceneIndex, title: sceneTitle(scene), type: scene.type, steps: entries };
+      scenes.push(scenePlan);
+      deckScenes.push(scenePlan);
     }
-    if (scene.caption && scene.narration && scene.caption === scene.narration) {
-      addIssue(issues, 'warning', 'caption-as-narration', `scene ${sceneIndex} caption exactly matches slide narration`, { scene: sceneIndex });
-    }
-    scenes.push({ scene: sceneIndex, title: sceneTitle(scene), type: scene.type, steps: entries });
+    decks.push({ id: deck.id, title: deck.title, pronunciationMap, scenes: deckScenes });
   }
   return {
     path: specPath ? relPath(specPath) : undefined,
     status: issues.some((issue) => issue.severity === 'error') ? 'failed' : issues.length ? 'needs_work' : 'passed',
-    summary: { scenes: scenes.length, issues: issues.length },
+    summary: { decks: decks.length, scenes: scenes.length, issues: issues.length },
     issues,
+    pronunciationMap: decks[0].pronunciationMap,
+    decks,
     scenes,
   };
 }
@@ -1419,7 +1448,7 @@ const TOOLS = [
   },
   {
     name: 'slidey_narration_plan',
-    description: 'Report narration text and timing-sized reveal chunks per scene/reveal, including graph focus notes and narration risks.',
+    description: 'Report resolved pronunciation maps plus raw and spoken narration, applied terms, timing-sized reveal chunks, graph focus notes, and narration risks for top-level and nested library decks.',
     inputSchema: toolInputSchema({
       path: { type: 'string' },
     }, ['path']),

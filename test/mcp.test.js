@@ -338,7 +338,11 @@ test('MCP layout gallery includes project-local pack layouts', async (t) => {
 test('MCP review workbench tools report graph and narration issues', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-review-'));
   fs.writeFileSync(path.join(root, 'deck.slidey.json'), JSON.stringify({
-    meta: { title: 'Review workbench', mode: 'pitch' },
+    meta: {
+      title: 'Review workbench',
+      mode: 'pitch',
+      narration: { pronunciations: { Slidey: 'slide ee' } },
+    },
     scenes: [
       {
         type: 'graph',
@@ -362,6 +366,20 @@ test('MCP review workbench tools report graph and narration issues', async (t) =
       },
       { type: 'narrative', title: 'Close', body: 'Done', narration: 'Done' },
     ],
+    library: {
+      decks: [{
+        id: 'detail',
+        deckType: 'hierarchy',
+        meta: { narration: { pronunciations: { Acme: 'ack mee' } } },
+        scenes: [{ type: 'narrative', title: 'Detail', body: 'Acme', narration: 'Acme ships Slidey.' }],
+        children: [{
+          id: 'deep-detail',
+          deckType: 'hierarchy',
+          meta: { narration: { pronunciations: { rrweb: 'R R web' } } },
+          scenes: [{ type: 'narrative', title: 'Deep detail', body: 'rrweb', narration: 'rrweb is replayed.' }],
+        }],
+      }],
+    },
   }, null, 2) + '\n');
 
   const server = startServer(root);
@@ -393,6 +411,15 @@ test('MCP review workbench tools report graph and narration issues', async (t) =
   const narrationPayload = JSON.parse(narration.result.content[0].text);
   assert.equal(narrationPayload.status, 'needs_work');
   assert.ok(narrationPayload.issues.some((issue) => issue.kind === 'missing-graph-focus-note'));
+  assert.deepEqual(narrationPayload.pronunciationMap, { Slidey: 'slide ee' });
+  assert.equal(narrationPayload.summary.decks, 3);
+  const detail = narrationPayload.decks.find((deck) => deck.id === 'detail');
+  assert.deepEqual(detail.pronunciationMap, { Acme: 'ack mee' });
+  assert.equal(detail.scenes[0].steps[0].spokenText, 'ack mee ships Slidey.');
+  assert.deepEqual(detail.scenes[0].steps[0].appliedTerms, [{ term: 'Acme', spokenAs: 'ack mee' }]);
+  const nested = narrationPayload.decks.find((deck) => deck.id === 'deep-detail');
+  assert.deepEqual(nested.pronunciationMap, { rrweb: 'R R web' });
+  assert.equal(nested.scenes[0].steps[0].spokenText, 'R R web is replayed.');
 
   const review = await server.send('tools/call', {
     name: 'slidey_review_deck',

@@ -75,19 +75,32 @@ function hasNarrationText(sceneBoundaries) {
  *
  * @param {string} text
  * @param {Object<string,string>} pronunciations
- * @returns {string}
+ * @returns {{ text: string, appliedTerms: Array<{ term: string, spokenAs: string }> }}
  */
-function applyPronunciations(text, pronunciations) {
-  if (!text || !pronunciations) return text;
+function applyPronunciationsWithDetails(text, pronunciations) {
+  if (!text || !pronunciations) return { text, appliedTerms: [] };
   const terms = Object.keys(pronunciations)
     .filter(t => t && pronunciations[t])
     .sort((a, b) => b.length - a.length); // longest first → wins in alternation
-  if (!terms.length) return text;
+  if (!terms.length) return { text, appliedTerms: [] };
 
   const escaped = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const re = new RegExp(`(?<!\\w)(?:${escaped.join('|')})(?!\\w)`, 'gi');
-  const lookup = new Map(terms.map(t => [t.toLowerCase(), pronunciations[t]]));
-  return text.replace(re, m => lookup.get(m.toLowerCase()) ?? m);
+  const lookup = new Map(terms.map(t => [t.toLowerCase(), { term: t, spokenAs: pronunciations[t] }]));
+  const applied = new Set();
+  const spokenText = text.replace(re, m => {
+    const replacement = lookup.get(m.toLowerCase());
+    if (replacement) applied.add(replacement.term);
+    return replacement ? replacement.spokenAs : m;
+  });
+  return {
+    text: spokenText,
+    appliedTerms: terms.filter(term => applied.has(term)).map(term => ({ term, spokenAs: pronunciations[term] })),
+  };
+}
+
+function applyPronunciations(text, pronunciations) {
+  return applyPronunciationsWithDetails(text, pronunciations).text;
 }
 
 function commandFailureDetail(err, command) {
@@ -229,6 +242,7 @@ module.exports = {
   synthesizeOne,
   getAudioDuration,
   applyPronunciations,
+  applyPronunciationsWithDetails,
   edgeTtsAvailable,
   hasNarrationText,
   DEFAULT_VOICE,
