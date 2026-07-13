@@ -99,6 +99,25 @@ test('hierarchy deck resolves local scenes instead of source scenes', () => {
   assert.equal(resolved.spec.scenes[0]._library.sourceId, undefined);
 });
 
+test('browser hierarchy path orders stack playback from root to the active leaf', async () => {
+  const { hierarchyPathForDeck, normalizeDeckDefinitions } = await import('../web/collections.mjs');
+  const spec = collectionSpec();
+  spec.library.decks[0].children[0].children = [{
+    id: 'architecture-api',
+    title: 'Architecture API',
+    deckType: 'hierarchy',
+    scenes: [{ id: 'api-title', type: 'title', title: 'API' }],
+  }];
+  assert.deepEqual(
+    hierarchyPathForDeck(normalizeDeckDefinitions(spec), 'architecture-api'),
+    ['__source', 'exec', 'architecture', 'architecture-api'],
+  );
+  assert.deepEqual(
+    hierarchyPathForDeck(normalizeDeckDefinitions(spec), 'brief'),
+    ['__source'],
+  );
+});
+
 test('subset decks can sync scenes from their parent hierarchy and descendants', () => {
   const spec = collectionSpec();
   spec.library.decks[0].children.push({

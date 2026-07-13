@@ -141,6 +141,9 @@ test('MCP server exposes spec editing and validation over stdio', async (t) => {
   assert.ifError(tools.error);
   const names = tools.result.tools.map((tool) => tool.name);
   assert.ok(names.includes('slidey_patch_spec'));
+  assert.ok(names.includes('slidey_deck_overview'));
+  assert.ok(names.includes('slidey_read_slide'));
+  assert.ok(names.includes('slidey_search_slides'));
   assert.ok(names.includes('slidey_render_png'));
   assert.ok(names.includes('slidey_layout_gallery'));
   assert.ok(names.includes('slidey_add_slide'));

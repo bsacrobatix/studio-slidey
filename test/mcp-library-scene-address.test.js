@@ -132,6 +132,44 @@ test('slidey_render_png resolves a library-deck scene by id (with and without de
   assert.ok(missing.error || missing.result.isError, 'unknown scene id should error');
 });
 
+test('compact read tools outline, retrieve, and search library-deck slides', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-compact-read-'));
+  fs.writeFileSync(path.join(root, 'deck.slidey.json'), JSON.stringify(librarySpec(), null, 2) + '\n');
+  const server = await initServer(root);
+  t.after(() => server.child.kill());
+
+  const overview = await server.send('tools/call', {
+    name: 'slidey_deck_overview', arguments: { path: 'deck.slidey.json' },
+  });
+  assert.ifError(overview.error);
+  const overviewPayload = JSON.parse(overview.result.content[0].text);
+  assert.equal(overviewPayload.sceneCount, 1);
+  assert.deepEqual(overviewPayload.scenes[0], {
+    sceneIndex: 0, sceneId: 'root-title', deck: null, deckTitle: null,
+    type: 'title', title: 'Root deck', subtitle: 'top level',
+  });
+  assert.deepEqual(overviewPayload.library.decks.map((deck) => deck.id), ['pillar-a']);
+
+  const slide = await server.send('tools/call', {
+    name: 'slidey_read_slide', arguments: { path: 'deck.slidey.json', scene: 'a-title' },
+  });
+  assert.ifError(slide.error);
+  const slidePayload = JSON.parse(slide.result.content[0].text);
+  assert.equal(slidePayload.deck, 'pillar-a');
+  assert.deepEqual(slidePayload.slide, librarySpec().library.decks[0].scenes[0]);
+  assert.equal(Object.hasOwn(slidePayload, 'spec'), false, 'single-slide read must not include the full spec');
+
+  const search = await server.send('tools/call', {
+    name: 'slidey_search_slides', arguments: { path: 'deck.slidey.json', query: 'library deck' },
+  });
+  assert.ifError(search.error);
+  const searchPayload = JSON.parse(search.result.content[0].text);
+  assert.equal(searchPayload.count, 1);
+  assert.equal(searchPayload.matches[0].sceneId, 'a-title');
+  assert.equal(searchPayload.matches[0].deck, 'pillar-a');
+  assert.deepEqual(searchPayload.matches[0].matches, [{ field: 'subtitle', excerpt: 'library deck' }]);
+});
+
 test('slidey_check walks diagram-svg scenes inside library decks and labels the deck', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slidey-mcp-libcheck-'));
   fs.writeFileSync(path.join(root, 'deck.slidey.json'), JSON.stringify(librarySpec(), null, 2) + '\n');

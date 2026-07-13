@@ -143,6 +143,29 @@ export function normalizeDeckDefinitions(spec) {
   return decks;
 }
 
+// Return the source root followed by the active hierarchy deck's ancestors.
+// Subset views do not own a place in the hierarchy playback path; use their
+// parent so Play Stack still follows the visible hierarchy when a subset is
+// currently selected.
+export function hierarchyPathForDeck(decks, deckId) {
+  const list = Array.isArray(decks) ? decks : [];
+  const byId = new Map(list.map(deck => [deck.id, deck]));
+  const source = list.find(deck => deck && deck.source) || byId.get(SOURCE_DECK_ID);
+  const requested = byId.get(normalizeDeckId(deckId));
+  let cursor = requested && requested.deckType === 'hierarchy' ? requested : null;
+  if (!cursor && requested && requested.parent) cursor = byId.get(requested.parent);
+
+  const out = [];
+  const seen = new Set();
+  while (cursor && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    out.unshift(cursor.id);
+    cursor = cursor.parent && cursor.parent !== SOURCE_DECK_ID ? byId.get(cursor.parent) : null;
+  }
+  if (source && !out.includes(source.id)) out.unshift(source.id);
+  return out;
+}
+
 export function normalizeSections(spec) {
   const library = spec && spec.library && typeof spec.library === 'object' ? spec.library : null;
   const raw = library && library.sections ? library.sections : [];

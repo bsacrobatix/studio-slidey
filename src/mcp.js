@@ -16,8 +16,8 @@ const { runCheck } = require('./check');
 const { estimateBoundaries } = require('./timing');
 const { tempRoot } = require('./temp-path');
 const { versionOf } = require('./spec-version');
-const { addressableScenes, resolveSceneAddress } = require('./scene-address');
-const { resolveDeckSpec } = require('./collections');
+const { addressableScenes, resolveSceneAddress, sceneIdOf } = require('./scene-address');
+const { normalizeDeckDefinitions, resolveDeckSpec } = require('./collections');
 const { attachRuntimeThemePacks, loadThemePacks, stripRuntimeThemePacks } = require('./theme-packs');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -85,6 +85,66 @@ const BROWSER_TOOLS = new Set([
   'slidey_doctor',
 ]);
 const LAYOUT_GALLERY_PATH = path.join(ROOT_DIR, 'examples', 'layout-gallery.slidey.json');
+
+// Keep the editor-facing read tools deliberately small.  A deck may contain
+// large rrweb traces, embedded images, or hundreds of scenes, so an agent
+// should be able to orient itself and retrieve one target scene before it ever
+// needs slidey_read_spec's full document.
+function compactSceneOutline(scene, sceneIndex, deckId = null, deckTitle = null) {
+  return {
+    sceneIndex,
+    sceneId: sceneIdOf(scene, sceneIndex),
+    deck: deckId,
+    deckTitle,
+    type: scene.type,
+    title: scene.title || scene.headline || scene.eyebrow || scene.question || null,
+    subtitle: scene.subtitle || scene.lede || null,
+  };
+}
+
+function deckOverview(spec) {
+  const sourceScenes = Array.isArray(spec.scenes) ? spec.scenes : [];
+  const decks = normalizeDeckDefinitions(spec);
+  return {
+    meta: spec.meta || {},
+    sceneCount: sourceScenes.length,
+    scenes: sourceScenes.map((scene, sceneIndex) => compactSceneOutline(scene, sceneIndex)),
+    library: spec.library ? {
+      title: spec.library.title || null,
+      decks: decks.filter((deck) => !deck.source).map((deck) => ({
+        id: deck.id,
+        title: deck.title,
+        parent: deck.parent,
+        deckType: deck.deckType,
+        sceneCount: deck.sceneCount,
+        purpose: deck.purpose || null,
+        description: deck.description || null,
+      })),
+    } : null,
+  };
+}
+
+function searchableText(scene) {
+  const fields = ['id', 'key', 'title', 'headline', 'eyebrow', 'subtitle', 'lede', 'body', 'question', 'caption', 'narration'];
+  const values = [];
+  for (const field of fields) {
+    const value = scene && scene[field];
+    if (typeof value === 'string') values.push({ field, text: value });
+    if (Array.isArray(value) && field === 'narration') {
+      value.forEach((cue) => {
+        if (cue && typeof cue.text === 'string') values.push({ field, text: cue.text });
+      });
+    }
+  }
+  return values;
+}
+
+function excerpt(text, query) {
+  const matchAt = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+  const start = Math.max(0, matchAt - 80);
+  const end = Math.min(text.length, matchAt + query.length + 160);
+  return `${start ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+}
 
 function loadLayoutGuideDeck() {
   try {
@@ -1138,6 +1198,32 @@ const TOOLS = [
     }, ['path']),
   },
   {
+    name: 'slidey_deck_overview',
+    description: 'Return a compact deck overview: metadata, top-level slide outline, and library-deck hierarchy. Use this before reading a full spec.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string', description: 'Workspace-relative .slidey.json, .readonly.slidey.json, or .jsonl path.' },
+    }, ['path']),
+  },
+  {
+    name: 'slidey_read_slide',
+    description: 'Read one complete slide without returning the whole deck. Address it with top-level sceneIndex (legacy), or scene id; pass deck to scope an id or index to a library hierarchy deck.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      sceneIndex: { type: 'integer', minimum: 0, description: 'Top-level slide index, or the local index when deck is set. Ignored if scene is given.' },
+      scene: { type: 'string', description: 'Slide id or key, resolved across top-level and library hierarchy decks unless deck is set.' },
+      deck: { type: 'string', description: 'Library hierarchy deck id to scope scene or sceneIndex.' },
+    }, ['path']),
+  },
+  {
+    name: 'slidey_search_slides',
+    description: 'Search compact slide text (titles, body, captions, and narration) across top-level and library hierarchy decks without reading full slide JSON.',
+    inputSchema: toolInputSchema({
+      path: { type: 'string' },
+      query: { type: 'string', minLength: 1, description: 'Case-insensitive text to find.' },
+      limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Maximum matching slides to return (default 20).' },
+    }, ['path', 'query']),
+  },
+  {
     name: 'slidey_write_spec',
     description: 'Replace an editable Slidey spec with a full JSON object. New decks should use the .slidey.json extension (e.g. my-deck.slidey.json). Pass the `version` from slidey_read_spec as baseVersion so a concurrent edit (e.g. the human editing in the viewer) is reported as a conflict instead of being clobbered; resolve with force:true to overwrite (OURS) or re-read and re-apply (THEIRS).',
     inputSchema: toolInputSchema({
@@ -1387,6 +1473,51 @@ async function callTool(name, args = {}) {
     case 'slidey_read_spec': {
       const { abs, raw, spec, generated, editable, version } = readSpecFile(args.path);
       return okResult({ path: relPath(abs), generated, editable: editable, raw: generated ? undefined : raw, spec, version });
+    }
+
+    case 'slidey_deck_overview': {
+      const { abs, spec, generated, editable, version } = readSpecFile(args.path);
+      return okResult({
+        path: relPath(abs),
+        generated,
+        editable,
+        version,
+        ...deckOverview(spec),
+      });
+    }
+
+    case 'slidey_read_slide': {
+      const { abs, spec, generated, editable, version } = readSpecFile(args.path);
+      const resolved = resolveSceneAddress(spec, args);
+      const slide = resolved.spec.scenes[resolved.sceneIndex];
+      return okResult({
+        path: relPath(abs),
+        generated,
+        editable,
+        version,
+        ...compactSceneOutline(slide, resolved.sceneIndex, resolved.deckId, resolved.deckTitle),
+        slide,
+      });
+    }
+
+    case 'slidey_search_slides': {
+      const { abs, spec } = readSpecFile(args.path);
+      const query = String(args.query || '').trim();
+      if (!query) throw new Error('query must not be empty');
+      const limit = Number.isInteger(args.limit) ? args.limit : 20;
+      const matches = [];
+      for (const entry of addressableScenes(spec).entries) {
+        const fields = searchableText(entry.scene)
+          .filter(({ text }) => text.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
+          .map(({ field, text }) => ({ field, excerpt: excerpt(text, query) }));
+        if (!fields.length) continue;
+        matches.push({
+          ...compactSceneOutline(entry.scene, entry.index, entry.deckId, entry.deckTitle),
+          matches: fields,
+        });
+        if (matches.length >= limit) break;
+      }
+      return okResult({ path: relPath(abs), query, count: matches.length, matches });
     }
 
     case 'slidey_write_spec': {
