@@ -119,8 +119,8 @@ onUnmounted(() => {
         class="slidey-play-btn"
         :class="{ active: playing && playScope === 'stack' }"
         :disabled="!stackAvailable"
-        :title="!stackAvailable ? 'Play Stack is available for hierarchy collections' : (playing && playScope === 'stack' ? 'Stop automatic stack playback' : 'Play the hierarchy from root to this deck')"
-        :aria-label="!stackAvailable ? 'Play Stack unavailable' : (playing && playScope === 'stack' ? 'Stop automatic stack playback' : 'Play hierarchy stack from root to this deck')"
+        :title="!stackAvailable ? 'Play Stack is available for hierarchy collections' : (playing && playScope === 'stack' ? 'Stop automatic stack playback' : 'Play the complete hierarchy from the root')"
+        :aria-label="!stackAvailable ? 'Play Stack unavailable' : (playing && playScope === 'stack' ? 'Stop automatic stack playback' : 'Play complete hierarchy stack from the root')"
         @click="playing && playScope === 'stack' ? stopNarration() : playStack()"
       ><span class="slidey-play-icon">▶</span><span class="slidey-scope-icon deck" aria-hidden="true">▥</span><span>{{ playing && playScope === 'stack' ? 'Stop' : 'Stack' }}</span></button>
     </div>

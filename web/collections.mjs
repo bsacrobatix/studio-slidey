@@ -143,26 +143,32 @@ export function normalizeDeckDefinitions(spec) {
   return decks;
 }
 
-// Return the source root followed by the active hierarchy deck's ancestors.
-// Subset views do not own a place in the hierarchy playback path; use their
-// parent so Play Stack still follows the visible hierarchy when a subset is
-// currently selected.
+// Return the full hierarchy stack in presentation order: the source root,
+// followed by every hierarchy deck in depth-first order. Subset views do not
+// own a place in the hierarchy, so they are intentionally excluded. The
+// selected deck only establishes that this is a hierarchy collection; Stack
+// playback itself always starts at the root and traverses the whole tree.
 export function hierarchyPathForDeck(decks, deckId) {
   const list = Array.isArray(decks) ? decks : [];
   const byId = new Map(list.map(deck => [deck.id, deck]));
   const source = list.find(deck => deck && deck.source) || byId.get(SOURCE_DECK_ID);
   const requested = byId.get(normalizeDeckId(deckId));
-  let cursor = requested && requested.deckType === 'hierarchy' ? requested : null;
-  if (!cursor && requested && requested.parent) cursor = byId.get(requested.parent);
+  const hierarchyRoot = requested && requested.deckType === 'hierarchy'
+    ? requested
+    : requested && requested.parent ? byId.get(requested.parent) : null;
+  if (!source || (!source.source && !hierarchyRoot)) return [];
 
-  const out = [];
+  const out = [source.id];
   const seen = new Set();
-  while (cursor && !seen.has(cursor.id)) {
-    seen.add(cursor.id);
-    out.unshift(cursor.id);
-    cursor = cursor.parent && cursor.parent !== SOURCE_DECK_ID ? byId.get(cursor.parent) : null;
+  function visit(parentId) {
+    for (const deck of list) {
+      if (!deck || deck.deckType !== 'hierarchy' || deck.parent !== parentId || seen.has(deck.id)) continue;
+      seen.add(deck.id);
+      out.push(deck.id);
+      visit(deck.id);
+    }
   }
-  if (source && !out.includes(source.id)) out.unshift(source.id);
+  visit(source.id);
   return out;
 }
 
